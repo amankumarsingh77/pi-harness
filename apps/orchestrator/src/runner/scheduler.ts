@@ -2,6 +2,7 @@ import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { WorktreeManager } from "../adapters/worktree.js";
 import type { PhaseDeps } from "./phase-prompts.js";
+import { consoleLogger, type Logger } from "../domain/logger.js";
 import { mkEvent } from "../domain/events.js";
 import { runLoop } from "./run-loop.js";
 
@@ -11,6 +12,7 @@ export type SchedulerDeps = {
   phaseDeps: PhaseDeps;
   worktrees: WorktreeManager;
   retryCap: number;
+  logger?: Logger;
 };
 
 /**
@@ -32,8 +34,11 @@ export type SchedulerDeps = {
 export class TaskScheduler {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly queued = new Set<string>();
+  private readonly log: Logger;
 
-  constructor(private readonly deps: SchedulerDeps) {}
+  constructor(private readonly deps: SchedulerDeps) {
+    this.log = deps.logger ?? consoleLogger;
+  }
 
   /**
    * Request a tick for the given task. Returns immediately. If a tick is
@@ -74,8 +79,7 @@ export class TaskScheduler {
     } catch (e) {
       // Task vanished between enqueue and tick — nothing to do, no event to
       // append (we have no runId to anchor it).
-      // eslint-disable-next-line no-console
-      console.warn(`[scheduler] tick skipped for ${taskId}: ${(e as Error).message}`);
+      this.log.warn(`[scheduler] tick skipped for ${taskId}: ${(e as Error).message}`);
       return;
     }
 
@@ -90,8 +94,7 @@ export class TaskScheduler {
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      // eslint-disable-next-line no-console
-      console.error(`[scheduler] tick failed for ${taskId}:`, e);
+      this.log.error(`[scheduler] tick failed for ${taskId}`, e);
       // Best-effort: surface the failure as a log event on the task. We can't
       // tie it to a run (the failure may have happened before runLoop created
       // one), so we synthesize a runId-less anchor by reusing the taskId.

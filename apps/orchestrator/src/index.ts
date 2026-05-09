@@ -7,6 +7,7 @@ import { RunStore } from "./adapters/run-store.js";
 import { EventStore } from "./adapters/event-store.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
+import { consoleLogger } from "./domain/logger.js";
 import { reconcileWorktrees } from "./runner/janitor.js";
 import { TaskScheduler } from "./runner/scheduler.js";
 import type { PhaseDeps } from "./runner/phase-prompts.js";
@@ -16,6 +17,7 @@ const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const log = consoleLogger;
   const { db } = createDb(config.databaseUrl);
 
   const runs = new RunStore(db);
@@ -24,14 +26,13 @@ async function main(): Promise<void> {
     repoRoot: config.repoRoot,
     worktreesDir: config.worktreesDir,
   });
-  const artifacts = new ArtifactsStore({ runsDir: config.runsDir });
+  const artifacts = new ArtifactsStore();
 
   const allTasks = await runs.listTasks();
   const activeTasks = allTasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
   const activeIds = new Set(activeTasks.map((t) => t.id));
   const report = await reconcileWorktrees({ worktreeManager: worktrees, activeTaskIds: activeIds });
-  // eslint-disable-next-line no-console
-  console.log(`[janitor] kept=${report.kept.length} removed=${report.removed.length}`);
+  log.info(`[janitor] kept=${report.kept.length} removed=${report.removed.length}`);
 
   // Brainstorm-sufficient phaseDeps. plan/code/verify/pr return a structured
   // `not_implemented` from runPhase until each migrates to createAgentSession.
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
     phaseDeps,
     worktrees,
     retryCap: config.retryCap,
+    logger: log,
   });
 
   // Recovery sweep: re-enqueue every non-terminal task so the agent picks up
@@ -67,17 +69,14 @@ async function main(): Promise<void> {
     if (t.status === "brainstorming" && t.awaitingApproval) continue; // gated on user
     scheduler.enqueue(t.id);
   }
-  // eslint-disable-next-line no-console
-  console.log(`[scheduler] recovered ${activeTasks.length} non-terminal tasks`);
+  log.info(`[scheduler] recovered ${activeTasks.length} non-terminal tasks`);
 
   const app = buildServer({ runs, events, runsDir: config.runsDir, scheduler });
   await app.listen({ port: config.port, host: "0.0.0.0" });
-  // eslint-disable-next-line no-console
-  console.log(`[orchestrator] listening on :${config.port}`);
+  log.info(`[orchestrator] listening on :${config.port}`);
 }
 
 main().catch((e) => {
-  // eslint-disable-next-line no-console
-  console.error(e);
+  consoleLogger.error("fatal", e);
   process.exit(1);
 });

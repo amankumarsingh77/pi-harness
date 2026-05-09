@@ -42,7 +42,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send({ error: "internal", message });
   });
 
-  const artifacts = deps.artifacts ?? new ArtifactsStoreCtor({ runsDir: deps.runsDir });
+  const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
   registerHealth(app);
   registerTaskRoutes(app, { runs: deps.runs, ...(deps.scheduler ? { scheduler: deps.scheduler } : {}) });
   registerRunRoutes(app, { runs: deps.runs, events: deps.events });

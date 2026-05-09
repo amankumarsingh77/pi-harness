@@ -4,7 +4,7 @@ import type {
   UiVisualScenario,
   ScenarioResult,
 } from "@pi-harness/shared";
-import type { ArtifactsStore } from "./artifacts-store.js";
+import type { LegacyRunArtifactsStore } from "./artifacts-store.js";
 
 type RunApi = (o: { scenario: ApiScenario; proofDir: string }) => Promise<ScenarioResult>;
 type RunUi = (o: { scenario: UiScenario; proofDir: string }) => Promise<ScenarioResult>;
@@ -13,7 +13,7 @@ type RunUiVisual = (o: { scenario: UiVisualScenario; proofDir: string }) => Prom
 export type VerifyOpts = {
   taskId: string;
   runId: string;
-  store: ArtifactsStore;
+  store: LegacyRunArtifactsStore;
   runApiScenario: RunApi;
   runUiScenario: RunUi;
   runUiVisualScenario: RunUiVisual;

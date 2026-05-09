@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { PiSession, PiBridgeEvent, PiSubagentResult, PiSubagentSpec } from "@pi-harness/pi-bridge";
 import { PlanArtifactSchema, type PlanArtifact } from "@pi-harness/shared";
-import type { ArtifactsStore } from "./artifacts-store.js";
+import type { LegacyRunArtifactsStore } from "./artifacts-store.js";
 import type { FanoutResult } from "./plan-fanout.js";
 
 const SYSTEM_PATH = resolve(import.meta.dirname ?? __dirname, "prompts", "plan.md");
@@ -25,7 +25,7 @@ export type PlanOpts = {
   }) => Promise<PiSession>;
   runSubagent: RunSubagent;
   fanoutResearch: Fanout;
-  store: ArtifactsStore;
+  store: LegacyRunArtifactsStore;
 };
 
 export type PlanResult = {

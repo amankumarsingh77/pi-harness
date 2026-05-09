@@ -1,7 +1,7 @@
 import { writeFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ArtifactsStore } from "./artifacts-store.js";
+import type { LegacyRunArtifactsStore } from "./artifacts-store.js";
 
 type ExecResult = { ok: boolean; stdout: string; stderr?: string };
 type Exec = (cmd: string, args: string[], opts?: { cwd?: string }) => Promise<ExecResult>;
@@ -10,7 +10,7 @@ export type PrOpts = {
   taskId: string;
   branch: string;
   cwd: string;
-  store: ArtifactsStore;
+  store: LegacyRunArtifactsStore;
   exec: Exec;
 };
 

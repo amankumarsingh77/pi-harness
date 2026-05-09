@@ -1,11 +1,11 @@
 import { join } from "node:path";
-import { mergePhaseModels, STATUS_TO_PHASE, type Run, type Task } from "@pi-harness/shared";
+import { mergePhaseModels, STATUS_TO_PHASE, type Phase, type Run, type Task } from "@pi-harness/shared";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
-import type { WorktreeManager } from "../adapters/worktree.js";
+import type { WorktreeManager, WorktreeInfo } from "../adapters/worktree.js";
 import { transition } from "../domain/state-machine.js";
 import { phasesFor } from "../domain/phase-chain.js";
-import { runPhase, type PhaseDeps, type PhaseInput } from "./phase-prompts.js";
+import { runPhase, type PhaseDeps, type PhaseInput, type PhaseOutput } from "./phase-prompts.js";
 import { scaffoldBrainstorm } from "./scaffold-brainstorm.js";
 
 export type RunLoopOpts = {
@@ -56,97 +56,125 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     });
   }
 
-  // Brainstorm-specific: lay down design.md / spec.md scaffolding + initial
-  // commit on the task branch. Idempotent — no-op on subsequent dispatches.
   if (phase === "brainstorm") {
-    await scaffoldBrainstorm({ cwd: worktree.path, taskId: task.id, branch });
+    return dispatchBrainstorm({ task, branch, worktree, runs, events, phaseDeps, retryCap });
+  }
+  return dispatchGenericPhase({ task, phase, worktree, runs, events, phaseDeps, retryCap });
+}
+
+type DispatchOpts = {
+  task: Task;
+  worktree: WorktreeInfo;
+  runs: RunStore;
+  events: EventStore;
+  phaseDeps: PhaseDeps;
+  retryCap: number;
+};
+
+// Brainstorm has shape no other phase has: it scaffolds artifacts on first
+// entry, reuses one Run row across many ticks (one per user answer), feeds
+// the agent a session path + merged model config, and sits in `running`
+// until both artifacts reach `status: ready`. Keeping all of that in one
+// function localizes the asymmetry — the rest of run-loop stays generic.
+async function dispatchBrainstorm(
+  opts: DispatchOpts & { branch: string },
+): Promise<Task> {
+  const { runs, events, phaseDeps, worktree, retryCap, branch } = opts;
+  let task = opts.task;
+
+  // Lay down design.md / spec.md scaffolding + initial commit. Idempotent.
+  await scaffoldBrainstorm({ cwd: worktree.path, taskId: task.id, branch });
+
+  // Reuse a single Run across ticks so the dashboard's SSE subscription,
+  // opened on the first render, keeps receiving events as the agent advances.
+  let run: Run = (await runs.findActiveRun(task.id, "brainstorm"))
+    ?? (await runs.createRun({ taskId: task.id, phase: "brainstorm" }));
+
+  const phaseModel = mergePhaseModels(task.phaseModels, "brainstorm");
+  const sessionPath = join(worktree.path, ".harness", task.id, "pi-session.jsonl");
+  if (run.piSessionPath !== sessionPath) {
+    run = await runs.updateRun(run.id, { piSessionPath: sessionPath });
   }
 
-  // Brainstorm runs span many ticks (one per user answer). Reuse a single Run
-  // row across them so the dashboard's SSE subscription, opened on the first
-  // render, keeps receiving events as the agent advances. Other phases keep
-  // one-Run-per-dispatch semantics.
-  let run: Run;
-  if (phase === "brainstorm") {
-    const existing = await runs.findActiveRun(task.id, phase);
-    if (existing) {
-      run = existing;
-    } else {
-      run = await runs.createRun({ taskId: task.id, phase });
-    }
-  } else {
-    run = await runs.createRun({ taskId: task.id, phase });
+  const phaseInput: PhaseInput = {
+    taskId: task.id,
+    runId: run.id,
+    ticketTitle: task.title,
+    ticketDescription: task.description,
+    ...(task.branchName ? { branch: task.branchName } : {}),
+    phaseModel,
+    sessionPath,
+  };
+
+  const result = await runPhase("brainstorm", phaseInput, { ...phaseDeps, cwd: worktree.path });
+
+  // Brainstorm gate: success only counts when both artifacts hit `status: ready`.
+  let bothReady = false;
+  if (result.ok) {
+    const [design, spec] = await Promise.all([
+      phaseDeps.store.readArtifact(worktree.path, task.id, "design"),
+      phaseDeps.store.readArtifact(worktree.path, task.id, "spec"),
+    ]);
+    bothReady = design?.fm.status === "ready" && spec?.fm.status === "ready";
   }
 
-  // Brainstorm-only: compute the merged model config and per-task session
-  // path once per dispatch, persist the path on the Run row on first sight,
-  // and pass both into the phase. Other phases ignore these fields today.
-  let phaseInput: PhaseInput = {
+  // Accumulate cost/tokens across ticks instead of overwriting.
+  const tickStatus = result.ok ? (bothReady ? "succeeded" : "running") : "failed";
+  await runs.updateRun(run.id, {
+    ...(tickStatus !== "running" ? { endedAt: new Date() } : {}),
+    status: tickStatus,
+    error: result.error ?? null,
+    inputTokens: run.inputTokens + result.inputTokens,
+    outputTokens: run.outputTokens + result.outputTokens,
+    costUsd: run.costUsd + result.costUsd,
+  });
+
+  if (result.ok && !bothReady) {
+    // Mid-Q&A. No state-machine transition; the next user answer re-enters.
+    return task;
+  }
+
+  return applyTransition({ task, runs, events, runId: run.id, phase: "brainstorm", result, retryCap });
+}
+
+async function dispatchGenericPhase(
+  opts: DispatchOpts & { phase: Phase },
+): Promise<Task> {
+  const { task, phase, worktree, runs, events, phaseDeps, retryCap } = opts;
+
+  const run = await runs.createRun({ taskId: task.id, phase });
+  const phaseInput: PhaseInput = {
     taskId: task.id,
     runId: run.id,
     ticketTitle: task.title,
     ticketDescription: task.description,
     ...(task.branchName ? { branch: task.branchName } : {}),
   };
-  if (phase === "brainstorm") {
-    const phaseModel = mergePhaseModels(task.phaseModels, "brainstorm");
-    const sessionPath = join(worktree.path, ".harness", task.id, "pi-session.jsonl");
-    if (run.piSessionPath !== sessionPath) {
-      run = await runs.updateRun(run.id, { piSessionPath: sessionPath });
-    }
-    phaseInput = { ...phaseInput, phaseModel, sessionPath };
-  }
 
-  const result = await runPhase(
-    phase,
-    phaseInput,
-    { ...phaseDeps, cwd: worktree.path },
-  );
+  const result = await runPhase(phase, phaseInput, { ...phaseDeps, cwd: worktree.path });
 
-  // Brainstorm-specific gate: a successful tick doesn't mean "phase complete".
-  // The agent halts on every unanswered question; only when both artifacts
-  // reach `status: ready` is the brainstorm done. Mid-Q&A ticks keep the run
-  // in `running`; cost/tokens accumulate across ticks.
-  let brainstormBothReady = false;
-  if (phase === "brainstorm" && result.ok) {
-    const [design, spec] = await Promise.all([
-      phaseDeps.store.readArtifact(worktree.path, task.id, "design"),
-      phaseDeps.store.readArtifact(worktree.path, task.id, "spec"),
-    ]);
-    brainstormBothReady = design?.fm.status === "ready" && spec?.fm.status === "ready";
-  }
+  await runs.updateRun(run.id, {
+    endedAt: new Date(),
+    status: result.ok ? "succeeded" : "failed",
+    error: result.error ?? null,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    costUsd: result.costUsd,
+  });
 
-  if (phase === "brainstorm") {
-    // Accumulate cost/tokens across ticks instead of overwriting.
-    const tickStatus = result.ok
-      ? brainstormBothReady
-        ? "succeeded"
-        : "running"
-      : "failed";
-    await runs.updateRun(run.id, {
-      ...(tickStatus !== "running" ? { endedAt: new Date() } : {}),
-      status: tickStatus,
-      error: result.error ?? null,
-      inputTokens: run.inputTokens + result.inputTokens,
-      outputTokens: run.outputTokens + result.outputTokens,
-      costUsd: run.costUsd + result.costUsd,
-    });
-    if (result.ok && !brainstormBothReady) {
-      // Still mid-Q&A. No state-machine transition. The next user answer
-      // re-enters the loop with this same run.
-      return task;
-    }
-  } else {
-    await runs.updateRun(run.id, {
-      endedAt: new Date(),
-      status: result.ok ? "succeeded" : "failed",
-      error: result.error ?? null,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      costUsd: result.costUsd,
-    });
-  }
+  return applyTransition({ task, runs, events, runId: run.id, phase, result, retryCap });
+}
 
+async function applyTransition(opts: {
+  task: Task;
+  runs: RunStore;
+  events: EventStore;
+  runId: string;
+  phase: Phase;
+  result: PhaseOutput;
+  retryCap: number;
+}): Promise<Task> {
+  const { task, runs, events, runId, phase, result, retryCap } = opts;
   const nextResult = transition(
     task,
     result.ok
@@ -158,7 +186,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     // Should never happen if state-machine and run-loop agree on shape.
     await events.append({
       id: crypto.randomUUID(),
-      runId: run.id,
+      runId,
       taskId: task.id,
       ts: new Date(),
       kind: "log",
@@ -168,15 +196,15 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     return task;
   }
 
-  task = await runs.updateTask(task.id, {
+  let next = await runs.updateTask(task.id, {
     status: nextResult.task.status,
     retryCount: nextResult.task.retryCount,
     awaitingApproval: nextResult.task.awaitingApproval,
   });
 
   if (result.branch) {
-    task = await runs.updateTask(task.id, { branchName: result.branch });
+    next = await runs.updateTask(task.id, { branchName: result.branch });
   }
 
-  return task;
+  return next;
 }
