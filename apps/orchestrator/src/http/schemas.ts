@@ -1,10 +1,36 @@
 import { z } from "zod";
-import { WORKFLOWS } from "@pi-harness/shared";
+import { WORKFLOWS, PHASES, THINKING_LEVELS } from "@pi-harness/shared";
 
 export const CreateTaskSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(10_000).optional(),
 });
+
+// Partial<PhaseModelConfig>: every field optional so a patch can flip a single
+// knob (e.g. just thinkingLevel) without restating provider/model/maxTurns.
+const PhaseModelOverrideSchema = z
+  .object({
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    thinkingLevel: z.enum(THINKING_LEVELS),
+    maxTurns: z.number().int().positive(),
+  })
+  .partial()
+  .strict();
+
+// Keys constrained to the phase enum so unknown keys (e.g. "deploy") fail
+// validation before the freeze gate runs.
+export const PhaseModelsPatchSchema = z
+  .record(z.enum(PHASES), PhaseModelOverrideSchema)
+  .refine((v) => v !== null && typeof v === "object" && !Array.isArray(v));
+
+export const UpdateTaskSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(10_000).optional(),
+    phaseModels: PhaseModelsPatchSchema.optional(),
+  })
+  .strict();
 
 export const TransitionSchema = z.discriminatedUnion("type", [
   z.object({

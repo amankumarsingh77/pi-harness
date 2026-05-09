@@ -52,6 +52,13 @@ describe("RunStore", () => {
     expect(runs.map((r) => r.phase)).toEqual(["brainstorm", "plan"]);
   });
 
+  it("hasAnyRun is false until the first run is created", async () => {
+    const t = await store.createTask({ title: "freeze-probe" });
+    expect(await store.hasAnyRun(t.id)).toBe(false);
+    await store.createRun({ taskId: t.id, phase: "brainstorm" });
+    expect(await store.hasAnyRun(t.id)).toBe(true);
+  });
+
   it("countByStatus returns the kanban summary", async () => {
     await store.createTask({ title: "a" });
     await store.createTask({ title: "b" });

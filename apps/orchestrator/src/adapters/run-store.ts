@@ -70,6 +70,17 @@ export class RunStore {
     return row as Run;
   }
 
+  // Cheap existence check used by the phaseModels freeze gate. LIMIT 1 so we
+  // don't pull or count rows we don't need.
+  async hasAnyRun(taskId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.taskId, taskId))
+      .limit(1);
+    return rows.length > 0;
+  }
+
   async listRuns(taskId: string): Promise<Run[]> {
     const rows = await this.db
       .select()

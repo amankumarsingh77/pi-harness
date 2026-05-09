@@ -131,6 +131,71 @@ describe("http", () => {
     expect(body.task.awaitingApproval).toBe(false);
   });
 
+  it("PATCH /api/tasks/:id phaseModels with zero runs persists", async () => {
+    const t = await runs.createTask({ title: "pm-zero" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload: { phaseModels: { brainstorm: { thinkingLevel: "high" } } },
+    });
+    expect(res.statusCode).toBe(200);
+    const fetched = await runs.getTask(t.id);
+    expect(fetched.phaseModels).toEqual({ brainstorm: { thinkingLevel: "high" } });
+  });
+
+  it("PATCH /api/tasks/:id phaseModels after first run returns 409 phase_models_frozen", async () => {
+    const t = await runs.createTask({ title: "pm-frozen" });
+    await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload: { phaseModels: { brainstorm: { thinkingLevel: "high" } } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({
+      error: "phase_models_frozen",
+      message: expect.stringContaining("phaseModels"),
+    });
+    const fetched = await runs.getTask(t.id);
+    expect(fetched.phaseModels).toEqual({});
+  });
+
+  it("PATCH /api/tasks/:id title is unfrozen even after first run", async () => {
+    const t = await runs.createTask({ title: "pm-title" });
+    await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload: { title: "renamed after run" },
+    });
+    expect(res.statusCode).toBe(200);
+    const fetched = await runs.getTask(t.id);
+    expect(fetched.title).toBe("renamed after run");
+  });
+
+  it("PATCH /api/tasks/:id rejects unknown phase keys with 400", async () => {
+    const t = await runs.createTask({ title: "pm-unknown" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload: { phaseModels: { deploy: { thinkingLevel: "high" } } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("PATCH /api/tasks/:id partial override persists exactly as sent", async () => {
+    const t = await runs.createTask({ title: "pm-partial" });
+    const payload = { phaseModels: { brainstorm: { thinkingLevel: "high" as const } } };
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.phaseModels).toEqual(payload.phaseModels);
+  });
+
   it("GET /api/tasks/:id/brainstorm returns empty bundle pre-worktree", async () => {
     const t = await runs.createTask({ title: "bs" });
     const res = await app.inject({
