@@ -20,7 +20,7 @@ export type PhaseModelConfig = {
 // Code-level defaults. Edits require a deploy. Per-task overrides go through
 // the tasks.phase_models JSONB column and merge into these via mergePhaseModels.
 export const DEFAULT_PHASE_MODELS: Record<Phase, PhaseModelConfig> = {
-  brainstorm: { provider: "anthropic", model: "claude-sonnet-4-6", thinkingLevel: "medium", maxTurns: 30 },
+  brainstorm: { provider: "opencode-go", model: "deepseek-v4-pro", thinkingLevel: "medium", maxTurns: 30 },
   plan:       { provider: "anthropic", model: "claude-opus-4-7",   thinkingLevel: "high",   maxTurns: 20 },
   code:       { provider: "anthropic", model: "claude-sonnet-4-6", thinkingLevel: "medium", maxTurns: 80 },
   verify:     { provider: "anthropic", model: "claude-opus-4-7",   thinkingLevel: "high",   maxTurns: 30 },

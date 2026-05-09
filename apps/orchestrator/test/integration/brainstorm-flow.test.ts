@@ -76,7 +76,10 @@ describe("brainstorm integration flow", () => {
     envDir = await mkdtemp(join(tmpdir(), "bs-int-env-"));
     prevCwd = process.cwd();
     process.chdir(envDir);
-    writeFileSync(join(envDir, ".env.harness"), "ANTHROPIC_API_KEY=test-key\n");
+    writeFileSync(
+      join(envDir, ".env.harness"),
+      "OPENCODE_API_KEY=test-key\nANTHROPIC_API_KEY=test-key\n",
+    );
     __resetAuthCache();
     queue = [];
   });
