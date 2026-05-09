@@ -7,6 +7,13 @@ export * from "./types/artifacts.js";
 export * from "./types/artifact.js";
 export { parseArtifact, stringifyArtifact } from "./frontmatter.js";
 export {
+  DEFAULT_PHASE_MODELS,
+  THINKING_LEVELS,
+  mergePhaseModels,
+  type PhaseModelConfig,
+  type ThinkingLevel,
+} from "./config/phase-models.js";
+export {
   BrainstormArtifactSchema,
   PlanArtifactSchema,
   PlanStepSchema,

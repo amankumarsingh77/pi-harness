@@ -13,6 +13,7 @@ function mkTask(status: Task["status"], overrides: Partial<Task> = {}): Task {
     branchName: null,
     retryCount: 0,
     awaitingApproval: false,
+    phaseModels: {},
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

@@ -25,6 +25,7 @@ export const MOCK_TASK: Task = {
   branchName: "pi/T-093",
   retryCount: 2,
   awaitingApproval: false,
+  phaseModels: {},
   createdAt: fromMinutesAgo(21, 2),
   updatedAt: fromMinutesAgo(0, 18),
 };

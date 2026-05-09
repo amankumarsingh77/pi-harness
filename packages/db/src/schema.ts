@@ -15,6 +15,9 @@ export const tasks = pgTable(
     // design+spec bundle. Cleared on approve, request-changes, or any other
     // exit from the gate.
     awaitingApproval: boolean("awaiting_approval").notNull().default(false),
+    // Per-phase model overrides. Empty {} means "use DEFAULT_PHASE_MODELS".
+    // Frozen after the first run row exists for this task (enforced at API).
+    phaseModels: jsonb("phase_models").notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -26,6 +26,23 @@ describe("schema round-trip", () => {
     await db.delete(tasks).where(eq(tasks.id, t!.id));
   });
 
+  it("round-trips phase_models with empty default", async () => {
+    const [t] = await db.insert(tasks).values({ title: "pm-empty" }).returning();
+    expect(t!.phaseModels).toEqual({});
+    await db.delete(tasks).where(eq(tasks.id, t!.id));
+  });
+
+  it("round-trips phase_models with a partial brainstorm override", async () => {
+    const overrides = { brainstorm: { thinkingLevel: "high", maxTurns: 50 } };
+    const [t] = await db
+      .insert(tasks)
+      .values({ title: "pm-override", phaseModels: overrides })
+      .returning();
+    const [fetched] = await db.select().from(tasks).where(eq(tasks.id, t!.id));
+    expect(fetched!.phaseModels).toEqual(overrides);
+    await db.delete(tasks).where(eq(tasks.id, t!.id));
+  });
+
   it("cascades runs and events when task is deleted", async () => {
     const [t] = await db.insert(tasks).values({ title: "cascade" }).returning();
     const [r] = await db.insert(runs).values({ taskId: t!.id, phase: "brainstorm" }).returning();
