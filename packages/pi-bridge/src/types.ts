@@ -12,7 +12,9 @@ export type PiBridgeEvent =
   | { kind: "message_delta"; text: string }
   | { kind: "tool_call"; tool: string; input: unknown }
   | { kind: "tool_result"; tool: string; ok: boolean; output?: unknown }
-  | { kind: "log"; level: "info" | "warn" | "error"; text: string };
+  | { kind: "log"; level: "info" | "warn" | "error"; text: string }
+  | { kind: "turn_end"; usage: { inputTokens: number; outputTokens: number; costUsd: number } }
+  | { kind: "error"; text: string };
 
 export type PiSession = {
   prompt(text: string): Promise<PiPromptResult>;

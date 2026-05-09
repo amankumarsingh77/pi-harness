@@ -105,6 +105,16 @@ export class PiDispatcher {
         return mkEvent({ runId, taskId, kind: "tool_result", tool: e.tool, ok: e.ok });
       case "log":
         return mkEvent({ runId, taskId, kind: "log", level: e.level, text: e.text });
+      case "turn_end":
+        return mkEvent({
+          runId,
+          taskId,
+          kind: "log",
+          level: "info",
+          text: `turn_end usage in=${e.usage.inputTokens} out=${e.usage.outputTokens} cost=${e.usage.costUsd}`,
+        });
+      case "error":
+        return mkEvent({ runId, taskId, kind: "log", level: "error", text: e.text });
     }
   }
 }
