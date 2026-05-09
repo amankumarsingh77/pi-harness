@@ -2,6 +2,25 @@ import { describe, it, expect, vi } from "vitest";
 import { runCode } from "../../src/agents/code.js";
 
 describe("runCode", () => {
+  it("returns ok:false when readPlan throws ENOENT (no plan to execute)", async () => {
+    const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    const result = await runCode({
+      taskId: "t-1",
+      cwd: "/tmp/wt",
+      onEvent: () => {},
+      createSession: async () => {
+        throw new Error("createSession should not be called when plan is missing");
+      },
+      readPlan: async () => {
+        throw enoent;
+      },
+      retryHint: undefined,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/plan/i);
+    expect(result.error).toMatch(/missing|not.*run/i);
+  });
+
   it("parses coder JSON and returns branch/commits", async () => {
     const finalText = `<coder-complete>\n\`\`\`json\n${JSON.stringify({
       branch: "feat/x",

@@ -40,7 +40,24 @@ export type CodeResult = {
 };
 
 export async function runCode(opts: CodeOpts): Promise<CodeResult> {
-  const plan = await opts.readPlan(opts.taskId);
+  let plan;
+  try {
+    plan = await opts.readPlan(opts.taskId);
+  } catch (e) {
+    // ENOENT means the plan phase was never run (or its artifact was deleted).
+    // Surface as a structured failure so the scheduler can mark the task
+    // failed cleanly instead of crashing the tick.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        ok: false,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        error: "plan artifact missing — run the plan phase before code",
+      };
+    }
+    throw e;
+  }
   const systemPrompt = await readFile(SYSTEM_PATH, "utf8");
   const session = await opts.createSession({
     cwd: opts.cwd,
