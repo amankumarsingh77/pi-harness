@@ -29,7 +29,17 @@ export type BrainstormJsonlEvent =
       optionIds?: string[];
       freeText?: string;
     }
-  | { kind: "brainstorm_system"; ts: string; systemKind: "probe_complete" | "self_critique_passed" | "status_changed"; data?: Record<string, unknown> }
+  | {
+      kind: "brainstorm_system";
+      ts: string;
+      systemKind:
+        | "probe_complete"
+        | "self_critique_passed"
+        | "status_changed"
+        | "blocked"
+        | "session_reset";
+      data?: Record<string, unknown>;
+    }
   | { kind: "brainstorm_revision_requested"; ts: string; comment: string };
 
 export class ApiError extends Error {

@@ -168,8 +168,8 @@ async function runTurn(
     if (err instanceof AuthError) {
       await opts.bus.publish({
         kind: "brainstorm_system",
-        systemKind: "status_changed",
-        data: { status: "blocked", reason: err.message },
+        systemKind: "blocked",
+        data: { reason: err.message },
       });
       return zeroUsage({
         ok: false,
@@ -186,8 +186,8 @@ async function runTurn(
         await unlink(opts.sessionPath);
         await opts.bus.publish({
           kind: "brainstorm_system",
-          systemKind: "status_changed",
-          data: { status: "session_reset", reason: (err as Error).message },
+          systemKind: "session_reset",
+          data: { reason: (err as Error).message },
         });
         return runTurnNoSession(opts, promptText);
       } catch {
@@ -208,12 +208,22 @@ async function runTurn(
     await session.close().catch(() => {});
     const message = (err as Error).message;
     if (message === "maxTurns exceeded") {
+      await opts.bus.publish({
+        kind: "brainstorm_system",
+        systemKind: "blocked",
+        data: { reason: `maxTurns (${opts.phaseModel.maxTurns}) exceeded` },
+      });
       return zeroUsage({
         ok: false,
         ready: false,
         error: "brainstorm: maxTurns exceeded",
       });
     }
+    await opts.bus.publish({
+      kind: "brainstorm_system",
+      systemKind: "blocked",
+      data: { reason: message },
+    });
     return zeroUsage({ ok: false, ready: false, error: message });
   }
 

@@ -57,6 +57,17 @@ export function ChatPanel({
   const critique = events.find((e) => e.kind === "brainstorm_system" && e.systemKind === "self_critique_passed");
   const ready = events.find((e) => e.kind === "brainstorm_system" && e.systemKind === "status_changed");
   const revisions = events.filter((e) => e.kind === "brainstorm_revision_requested");
+  // Latest blocked event wins (the agent may have retried after a transient
+  // failure). Reasons land in `data.reason`. Show this prominently — it's
+  // the only signal the user gets that the brainstorm tick failed.
+  const blocked = [...events]
+    .reverse()
+    .find(
+      (e): e is Extract<BrainstormJsonlEvent, { kind: "brainstorm_system" }> =>
+        e.kind === "brainstorm_system" && e.systemKind === "blocked",
+    );
+  const blockedReason =
+    (blocked?.data as { reason?: string } | undefined)?.reason ?? "unknown error";
 
   // Pair each question with its answer (if any).
   const questions = events
@@ -80,6 +91,18 @@ export function ChatPanel({
 
       <div className="scroll-hide flex flex-1 flex-col gap-3 overflow-y-auto px-6 py-4.5">
         {probe && <SystemLine label="probed repo" />}
+
+        {blocked && (
+          <div className="rounded border border-st-blocked/40 bg-white/[0.02] px-3 py-2.5 text-[13px]">
+            <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-st-blocked">
+              brainstorm blocked
+            </div>
+            <div className="mt-1 text-fg-body">{blockedReason}</div>
+            <div className="mt-1.5 font-mono text-[10.5px] text-fg-subtle">
+              fix the underlying issue, then retry from the task page.
+            </div>
+          </div>
+        )}
 
         {revisions.length > 0 && (
           <div className="rounded border border-st-review/35 bg-white/[0.02] px-3 py-2 text-[13px] text-st-review">

@@ -501,11 +501,10 @@ describe("runBrainstorm (real-bridge)", () => {
         .filter(Boolean)
         .map((l) => JSON.parse(l) as Record<string, unknown>);
       const blocked = events.find(
-        (e) =>
-          e.kind === "brainstorm_system" &&
-          (e["data"] as { status?: string } | undefined)?.status === "blocked",
+        (e) => e.kind === "brainstorm_system" && e["systemKind"] === "blocked",
       );
       expect(blocked).toBeDefined();
+      expect((blocked!["data"] as { reason?: string }).reason).toMatch(/missing API key/i);
     } finally {
       if (prevKey !== undefined) process.env["ANTHROPIC_API_KEY"] = prevKey;
     }

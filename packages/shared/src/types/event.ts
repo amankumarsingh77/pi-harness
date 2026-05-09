@@ -42,7 +42,12 @@ export type AgentEvent =
     })
   | (AgentEventBase & {
       kind: "brainstorm_system";
-      systemKind: "probe_complete" | "self_critique_passed" | "status_changed";
+      systemKind:
+        | "probe_complete"
+        | "self_critique_passed"
+        | "status_changed"
+        | "blocked"
+        | "session_reset";
       data?: Record<string, unknown>;
     })
   | (AgentEventBase & {
