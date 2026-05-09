@@ -27,6 +27,7 @@ export const EXPECTED_VENDORED_AGENTS = [
 export type VendoredAgent = (typeof EXPECTED_VENDORED_AGENTS)[number];
 
 export const EXPECTED_OUR_AGENTS = [
+  "brainstorm",
   "verification-author",
   "proof-capture",
   "screenshot-taker",

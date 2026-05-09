@@ -129,6 +129,9 @@ importers:
       simple-git:
         specifier: ^3.27.0
         version: 3.36.0
+      typebox:
+        specifier: ^1.1.38
+        version: 1.1.38
       zod:
         specifier: ^3.23.0
         version: 3.25.76
