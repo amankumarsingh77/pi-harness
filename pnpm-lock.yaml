@@ -176,6 +176,9 @@ importers:
 
   packages/pi-bridge:
     dependencies:
+      '@earendil-works/pi-ai':
+        specifier: ^0.74.0
+        version: 0.74.0(ws@8.20.0)(zod@3.25.76)
       '@earendil-works/pi-coding-agent':
         specifier: ^0.74.0
         version: 0.74.0(ws@8.20.0)(zod@3.25.76)

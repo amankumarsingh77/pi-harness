@@ -84,11 +84,9 @@ async function getDefaultAdapter(): Promise<AgentSdkAdapter> {
         createCodingTools: (cwd: string) => unknown[];
         getAgentDir: () => string;
       };
-      // Reach into pi-ai via the SDK's transitive dep — avoids adding a direct
-      // dependency just for getModel(). We string-launder the module name so TS
-      // doesn't try to resolve it at compile time (we don't ship its types).
-      const piAiName = ["@earendil-works", "pi-ai"].join("/");
-      const ai = (await import(piAiName)) as { getModel: (p: string, m: string) => unknown };
+      const ai = (await import("@earendil-works/pi-ai")) as {
+        getModel: (p: string, m: string) => unknown;
+      };
       return {
         async create(opts) {
           const model = ai.getModel(opts.model.provider, opts.model.model);
