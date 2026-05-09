@@ -20,6 +20,11 @@ const PROVIDER_KEY_VAR: Record<string, string> = {
   xai: "XAI_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
+  // OpenCode Zen (`opencode`) and OpenCode Go (`opencode-go`) share a single
+  // env var per pi's provider table — the dash-to-underscore fallback would
+  // otherwise produce OPENCODE_GO_API_KEY which pi doesn't recognise.
+  opencode: "OPENCODE_API_KEY",
+  "opencode-go": "OPENCODE_API_KEY",
 };
 
 function envVarFor(provider: string): string {
