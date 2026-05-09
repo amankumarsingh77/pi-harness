@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { config as dotenvConfig } from "dotenv";
 
 export class AuthError extends Error {
   constructor(message: string) {
@@ -8,7 +9,7 @@ export class AuthError extends Error {
   }
 }
 
-let cache: Record<string, string> | null = null;
+let loaded = false;
 
 // Map provider -> env var name. Mirrors pi's expected env layout.
 const PROVIDER_KEY_VAR: Record<string, string> = {
@@ -20,35 +21,15 @@ const PROVIDER_KEY_VAR: Record<string, string> = {
   xai: "XAI_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
-  // OpenCode Zen (`opencode`) and OpenCode Go (`opencode-go`) share a single
-  // env var per pi's provider table — the dash-to-underscore fallback would
-  // otherwise produce OPENCODE_GO_API_KEY which pi doesn't recognise.
+  // OpenCode Zen and OpenCode Go share OPENCODE_API_KEY per pi's provider
+  // table; the dash-to-underscore fallback would otherwise mint
+  // OPENCODE_GO_API_KEY which pi doesn't recognise.
   opencode: "OPENCODE_API_KEY",
   "opencode-go": "OPENCODE_API_KEY",
 };
 
 function envVarFor(provider: string): string {
   return PROVIDER_KEY_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, "_")}_API_KEY`;
-}
-
-function parseEnvFile(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
-  }
-  return out;
 }
 
 // Walk up from `start` looking for the monorepo root (marked by
@@ -64,29 +45,28 @@ function findMonorepoRoot(start: string): string {
   }
 }
 
-function load(): Record<string, string> {
-  if (cache) return cache;
+function load(): void {
+  if (loaded) return;
   const root = findMonorepoRoot(process.cwd());
-  const path = join(root, ".env.harness");
-  let text = "";
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    text = "";
-  }
-  cache = parseEnvFile(text);
-  return cache;
+  // override:false (the default) so any key already set in the shell wins
+  // over the file value. Missing file is silently ignored — getApiKey will
+  // raise AuthError if the resolved env var is empty.
+  dotenvConfig({ path: join(root, ".env.harness") });
+  loaded = true;
 }
 
 export function getApiKey(provider: string): string {
-  const vars = load();
+  load();
   const name = envVarFor(provider);
-  const v = vars[name] ?? process.env[name];
+  const v = process.env[name];
   if (!v) throw new AuthError(`missing API key for ${provider} (expected ${name} in .env.harness)`);
   return v;
 }
 
 // Test-only: drop the cache so tests can reload .env.harness between cases.
+// Note: dotenv writes to process.env, so __resetAuthCache only re-arms the
+// load() guard. Tests that change .env.harness contents must also clear the
+// affected process.env entries themselves.
 export function __resetAuthCache(): void {
-  cache = null;
+  loaded = false;
 }

@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthError, __resetAuthCache, getApiKey } from "./auth.js";
 
+// Keys whose presence/absence we manipulate in this suite. Each test starts
+// with all of them cleared from process.env so dotenv doesn't fall through
+// to a leaked value from a prior test.
+const TOUCHED_KEYS = ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY"];
+
 let dir: string;
 let prevCwd: string;
 
@@ -11,12 +16,14 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "auth-"));
   prevCwd = process.cwd();
   process.chdir(dir);
+  for (const k of TOUCHED_KEYS) delete process.env[k];
   __resetAuthCache();
 });
 
 afterEach(() => {
   process.chdir(prevCwd);
   rmSync(dir, { recursive: true, force: true });
+  for (const k of TOUCHED_KEYS) delete process.env[k];
   __resetAuthCache();
 });
 

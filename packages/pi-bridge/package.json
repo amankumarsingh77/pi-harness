@@ -6,7 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./_test/fake-sdk": {
       "types": "./dist/_test/fake-sdk.d.ts",
       "default": "./dist/_test/fake-sdk.js"
@@ -19,9 +22,10 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
     "@pi-harness/shared": "workspace:*",
     "@pi-harness/subagents": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^0.74.0"
+    "dotenv": "^16.4.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

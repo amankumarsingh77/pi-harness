@@ -185,6 +185,9 @@ importers:
       '@pi-harness/subagents':
         specifier: workspace:*
         version: link:../../subagents
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
     devDependencies:
       typescript:
         specifier: ^5.6.0
