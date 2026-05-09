@@ -97,13 +97,6 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
   return runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
 }
 
-async function runTurnNoSession(
-  opts: BrainstormOpts,
-  promptText: string,
-): Promise<BrainstormResult> {
-  return runTurn(opts, promptText, undefined, /* allowRetry */ false);
-}
-
 async function runTurn(
   opts: BrainstormOpts,
   promptText: string,
@@ -189,7 +182,7 @@ async function runTurn(
           systemKind: "session_reset",
           data: { reason: (err as Error).message },
         });
-        return runTurnNoSession(opts, promptText);
+        return runTurn(opts, promptText, undefined, /* allowRetry */ false);
       } catch {
         // fall through to error return
       }

@@ -33,19 +33,12 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(`[janitor] kept=${report.kept.length} removed=${report.removed.length}`);
 
-  // Brainstorm-sufficient phaseDeps. Plan/code/verify/pr will fail loudly
-  // until pi-bridge wiring lands — better than silently no-op'ing past the
-  // point where an LLM-driven phase should run.
+  // Brainstorm-sufficient phaseDeps. plan/code/verify/pr return a structured
+  // `not_implemented` from runPhase until each migrates to createAgentSession.
   const phaseDeps: PhaseDeps = {
     cwd: config.repoRoot, // overridden per-task by run-loop
     onEvent: () => {},
-    createSession: async () => {
-      throw new Error("createSession not wired: pi-bridge integration is mocked");
-    },
     createAgentSession,
-    runSubagent: async () => {
-      throw new Error("runSubagent not wired: pi-bridge integration is mocked");
-    },
     store: artifacts,
     eventStore: events,
     exec: async (cmd, args, opts) => {

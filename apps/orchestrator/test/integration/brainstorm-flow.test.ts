@@ -109,11 +109,7 @@ describe("brainstorm integration flow", () => {
     return {
       cwd: "/will-be-overridden",
       onEvent: () => {},
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createSession: (async () => { throw new Error("not used"); }) as any,
       createAgentSession: makeCreateAgentSession(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      runSubagent: (async () => { throw new Error("not used"); }) as any,
       store,
       eventStore: events,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

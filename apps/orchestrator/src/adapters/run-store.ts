@@ -1,16 +1,13 @@
 import { eq, asc, desc, and, inArray } from "drizzle-orm";
-import { tasks, runs } from "@pi-harness/db";
+import { tasks, runs, type DbClient } from "@pi-harness/db";
 import type { Task, TaskStatus, Run, Phase } from "@pi-harness/shared";
 import { TASK_STATUSES } from "@pi-harness/shared";
 import { NotFoundError } from "../domain/errors.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// db is the Drizzle instance returned by createDb(). We accept it as a generic
-// to avoid binding the orchestrator to drizzle-orm's PgDatabase type literal.
 export class RunStore {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: DbClient) {}
 
   async createTask(input: { title: string; description?: string }): Promise<Task> {
     const [row] = await this.db
