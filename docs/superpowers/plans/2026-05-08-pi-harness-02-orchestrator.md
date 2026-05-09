@@ -70,7 +70,7 @@ The split between `domain/` (pure) and `adapters/` (I/O) is deliberate: tests fo
 **Files:**
 - Create: `apps/orchestrator/package.json`, `apps/orchestrator/tsconfig.json`, `apps/orchestrator/vitest.config.ts`, `apps/orchestrator/src/index.ts`
 
-- [ ] **Step 1: Create `apps/orchestrator/package.json`**
+- [x] **Step 1: Create `apps/orchestrator/package.json`**
 
 `apps/orchestrator/package.json`:
 ```json
@@ -108,7 +108,7 @@ The split between `domain/` (pure) and `adapters/` (I/O) is deliberate: tests fo
 }
 ```
 
-- [ ] **Step 2: Create `tsconfig.json`**
+- [x] **Step 2: Create `tsconfig.json`**
 
 `apps/orchestrator/tsconfig.json`:
 ```json
@@ -122,7 +122,7 @@ The split between `domain/` (pure) and `adapters/` (I/O) is deliberate: tests fo
 }
 ```
 
-- [ ] **Step 3: Create `vitest.config.ts`**
+- [x] **Step 3: Create `vitest.config.ts`**
 
 `apps/orchestrator/vitest.config.ts`:
 ```typescript
@@ -137,7 +137,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Create skeleton `src/index.ts`**
+- [x] **Step 4: Create skeleton `src/index.ts`**
 
 `apps/orchestrator/src/index.ts`:
 ```typescript
@@ -145,7 +145,7 @@ export default defineConfig({
 console.log("orchestrator boot — not yet wired");
 ```
 
-- [ ] **Step 5: Install + typecheck**
+- [x] **Step 5: Install + typecheck**
 
 Run: `pnpm install && pnpm --filter @pi-harness/orchestrator typecheck`
 Expected: clean.
@@ -166,7 +166,7 @@ A single file that reads env vars with sensible defaults. Every other module imp
 **Files:**
 - Create: `apps/orchestrator/src/config.ts`
 
-- [ ] **Step 1: Create `src/config.ts`**
+- [x] **Step 1: Create `src/config.ts`**
 
 `apps/orchestrator/src/config.ts`:
 ```typescript
@@ -203,7 +203,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `pnpm --filter @pi-harness/orchestrator typecheck`
 Expected: clean.
@@ -224,7 +224,7 @@ The state machine, dispatcher, and HTTP layer all need to distinguish "user erro
 **Files:**
 - Create: `apps/orchestrator/src/domain/errors.ts`, `apps/orchestrator/test/errors.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/errors.test.ts`:
 ```typescript
@@ -265,12 +265,12 @@ describe("HarnessError", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `src/domain/errors.ts`**
+- [x] **Step 3: Implement `src/domain/errors.ts`**
 
 `apps/orchestrator/src/domain/errors.ts`:
 ```typescript
@@ -340,7 +340,7 @@ export function isHarnessError(e: unknown): e is HarnessError {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test`
 Expected: PASS — 4 tests.
@@ -361,7 +361,7 @@ A workflow is a typed phase list. v1 has exactly one workflow (`backend-feature`
 **Files:**
 - Create: `apps/orchestrator/src/domain/phase-chain.ts`, `apps/orchestrator/test/phase-chain.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/phase-chain.test.ts`:
 ```typescript
@@ -400,12 +400,12 @@ describe("phase-chain", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `src/domain/phase-chain.ts`**
+- [x] **Step 3: Implement `src/domain/phase-chain.ts`**
 
 `apps/orchestrator/src/domain/phase-chain.ts`:
 ```typescript
@@ -433,7 +433,7 @@ export function isLastPhase(workflow: Workflow, phase: Phase): boolean {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test`
 Expected: PASS — 5 tests.
@@ -454,7 +454,7 @@ The most-tested module in this plan. Every action that changes a task's status f
 **Files:**
 - Create: `apps/orchestrator/src/domain/state-machine.ts`, `apps/orchestrator/test/state-machine.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/state-machine.test.ts`:
 ```typescript
@@ -559,12 +559,12 @@ describe("canStart", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test state-machine`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `src/domain/state-machine.ts`**
+- [x] **Step 3: Implement `src/domain/state-machine.ts`**
 
 `apps/orchestrator/src/domain/state-machine.ts`:
 ```typescript
@@ -660,7 +660,7 @@ export function canStart(opts: { runningCount: number; cap: number }): boolean {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test state-machine`
 Expected: PASS — 9 tests.
@@ -681,7 +681,7 @@ Centralized constructors for `AgentEvent`. Every site that creates an event uses
 **Files:**
 - Create: `apps/orchestrator/src/domain/events.ts`, `apps/orchestrator/test/events.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/events.test.ts`:
 ```typescript
@@ -715,12 +715,12 @@ describe("mkEvent", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test events`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/domain/events.ts`**
+- [x] **Step 3: Implement `src/domain/events.ts`**
 
 `apps/orchestrator/src/domain/events.ts`:
 ```typescript
@@ -740,7 +740,7 @@ export function mkEvent(input: MkEventInput): AgentEvent {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test events`
 Expected: PASS — 3 tests.
@@ -761,7 +761,7 @@ Owns git worktree lifecycle for tasks. v1 uses `simple-git`. The manager is stat
 **Files:**
 - Create: `apps/orchestrator/src/adapters/worktree.ts`, `apps/orchestrator/test/worktree.test.ts`
 
-- [ ] **Step 1: Write failing test (real git, real fs, in tmp dir)**
+- [x] **Step 1: Write failing test (real git, real fs, in tmp dir)**
 
 `apps/orchestrator/test/worktree.test.ts`:
 ```typescript
@@ -836,12 +836,12 @@ describe("WorktreeManager", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test worktree`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `src/adapters/worktree.ts`**
+- [x] **Step 3: Implement `src/adapters/worktree.ts`**
 
 `apps/orchestrator/src/adapters/worktree.ts`:
 ```typescript
@@ -959,7 +959,7 @@ The DB-facing interface for tasks and runs. Thin wrappers around Drizzle that re
 **Files:**
 - Create: `apps/orchestrator/src/adapters/run-store.ts`, `apps/orchestrator/test/run-store.test.ts`
 
-- [ ] **Step 1: Write failing test (uses real Postgres from Plan 1 docker-compose)**
+- [x] **Step 1: Write failing test (uses real Postgres from Plan 1 docker-compose)**
 
 `apps/orchestrator/test/run-store.test.ts`:
 ```typescript
@@ -1030,12 +1030,12 @@ describe("RunStore", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test run-store`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `src/adapters/run-store.ts`**
+- [x] **Step 3: Implement `src/adapters/run-store.ts`**
 
 `apps/orchestrator/src/adapters/run-store.ts`:
 ```typescript
@@ -1121,7 +1121,7 @@ export class RunStore {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test run-store`
 Expected: PASS — 4 tests.
@@ -1142,7 +1142,7 @@ Persists events and broadcasts them in-process to subscribers (the SSE handler i
 **Files:**
 - Create: `apps/orchestrator/src/adapters/event-store.ts`, `apps/orchestrator/test/event-store.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/event-store.test.ts`:
 ```typescript
@@ -1220,7 +1220,7 @@ describe("EventStore", () => {
 Run: `pnpm --filter @pi-harness/orchestrator test event-store`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/adapters/event-store.ts`**
+- [x] **Step 3: Implement `src/adapters/event-store.ts`**
 
 `apps/orchestrator/src/adapters/event-store.ts`:
 ```typescript
@@ -1292,7 +1292,7 @@ export class EventStore {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test event-store`
 Expected: PASS — 3 tests.
@@ -1313,7 +1313,7 @@ Wraps `pi-bridge` to run a single phase. Translates `PiBridgeEvent` → `AgentEv
 **Files:**
 - Create: `apps/orchestrator/src/adapters/dispatcher.ts`, `apps/orchestrator/test/dispatcher.test.ts`
 
-- [ ] **Step 1: Write failing test (uses mocked pi-bridge)**
+- [x] **Step 1: Write failing test (uses mocked pi-bridge)**
 
 `apps/orchestrator/test/dispatcher.test.ts`:
 ```typescript
@@ -1398,12 +1398,12 @@ describe("PiDispatcher", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test dispatcher`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/adapters/dispatcher.ts`**
+- [x] **Step 3: Implement `src/adapters/dispatcher.ts`**
 
 `apps/orchestrator/src/adapters/dispatcher.ts`:
 ```typescript
@@ -1515,7 +1515,7 @@ export class PiDispatcher {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test dispatcher`
 Expected: PASS — 2 tests.
@@ -1538,7 +1538,7 @@ For Plan 2 the actual phase prompts are stubs ("[plan-3 will provide brainstorm 
 **Files:**
 - Create: `apps/orchestrator/src/runner/run-loop.ts`, `apps/orchestrator/src/runner/phase-prompts.ts`, `apps/orchestrator/test/run-loop.test.ts`
 
-- [ ] **Step 1: Write failing test (uses mocked dispatcher)**
+- [x] **Step 1: Write failing test (uses mocked dispatcher)**
 
 `apps/orchestrator/test/run-loop.test.ts`:
 ```typescript
@@ -1621,12 +1621,12 @@ describe("runLoop", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test run-loop`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/runner/phase-prompts.ts`**
+- [x] **Step 3: Implement `src/runner/phase-prompts.ts`**
 
 `apps/orchestrator/src/runner/phase-prompts.ts`:
 ```typescript
@@ -1665,7 +1665,7 @@ export function getPromptFor(phase: Phase): { system: string; user: string } {
 }
 ```
 
-- [ ] **Step 4: Implement `src/runner/run-loop.ts`**
+- [x] **Step 4: Implement `src/runner/run-loop.ts`**
 
 `apps/orchestrator/src/runner/run-loop.ts`:
 ```typescript
@@ -1787,7 +1787,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
 }
 ```
 
-- [ ] **Step 5: Run test, verify pass**
+- [x] **Step 5: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test run-loop`
 Expected: PASS — 2 tests.
@@ -1808,7 +1808,7 @@ Read-only routes first; transitions next. The dashboard mocks (`docs/mocks/`) de
 **Files:**
 - Create: `apps/orchestrator/src/http/schemas.ts`, `apps/orchestrator/src/http/server.ts`, `apps/orchestrator/src/http/routes/health.ts`, `apps/orchestrator/src/http/routes/tasks.ts`, `apps/orchestrator/src/http/routes/runs.ts`, `apps/orchestrator/test/http.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/http.test.ts`:
 ```typescript
@@ -1903,12 +1903,12 @@ describe("http", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test http`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/http/schemas.ts`**
+- [x] **Step 3: Implement `src/http/schemas.ts`**
 
 `apps/orchestrator/src/http/schemas.ts`:
 ```typescript
@@ -1932,7 +1932,7 @@ export const TransitionSchema = z.discriminatedUnion("type", [
 ]);
 ```
 
-- [ ] **Step 4: Implement `src/http/routes/health.ts`**
+- [x] **Step 4: Implement `src/http/routes/health.ts`**
 
 `apps/orchestrator/src/http/routes/health.ts`:
 ```typescript
@@ -1943,7 +1943,7 @@ export function registerHealth(app: FastifyInstance): void {
 }
 ```
 
-- [ ] **Step 5: Implement `src/http/routes/tasks.ts`**
+- [x] **Step 5: Implement `src/http/routes/tasks.ts`**
 
 `apps/orchestrator/src/http/routes/tasks.ts`:
 ```typescript
@@ -2023,7 +2023,7 @@ export function registerTaskRoutes(app: FastifyInstance, deps: { runs: RunStore 
 }
 ```
 
-- [ ] **Step 6: Implement `src/http/routes/runs.ts`**
+- [x] **Step 6: Implement `src/http/routes/runs.ts`**
 
 `apps/orchestrator/src/http/routes/runs.ts`:
 ```typescript
@@ -2043,7 +2043,7 @@ export function registerRunRoutes(
 }
 ```
 
-- [ ] **Step 7: Implement `src/http/server.ts`**
+- [x] **Step 7: Implement `src/http/server.ts`**
 
 `apps/orchestrator/src/http/server.ts`:
 ```typescript
@@ -2071,7 +2071,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 }
 ```
 
-- [ ] **Step 8: Run test, verify pass**
+- [x] **Step 8: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test http`
 Expected: PASS — 6 tests.
@@ -2093,7 +2093,7 @@ Subscribes to `EventStore` for a given runId and streams as SSE. The Task Detail
 - Create: `apps/orchestrator/src/http/routes/events.ts`, `apps/orchestrator/test/sse.test.ts`
 - Modify: `apps/orchestrator/src/http/server.ts`
 
-- [ ] **Step 1: Write failing test (real HTTP server, real client)**
+- [x] **Step 1: Write failing test (real HTTP server, real client)**
 
 `apps/orchestrator/test/sse.test.ts`:
 ```typescript
@@ -2164,7 +2164,7 @@ describe("SSE /api/runs/:id/events/stream", () => {
 Run: `pnpm --filter @pi-harness/orchestrator test sse`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/http/routes/events.ts`**
+- [x] **Step 3: Implement `src/http/routes/events.ts`**
 
 `apps/orchestrator/src/http/routes/events.ts`:
 ```typescript
@@ -2212,7 +2212,7 @@ export function registerEventStream(
 }
 ```
 
-- [ ] **Step 4: Wire it into `server.ts`**
+- [x] **Step 4: Wire it into `server.ts`**
 
 Edit `apps/orchestrator/src/http/server.ts` — add import and registration:
 ```typescript
@@ -2221,7 +2221,7 @@ import { registerEventStream } from "./routes/events.js";
 registerEventStream(app, { events: deps.events });
 ```
 
-- [ ] **Step 5: Run test, verify pass**
+- [x] **Step 5: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test sse`
 Expected: PASS — 1 test.
@@ -2242,7 +2242,7 @@ On orchestrator startup: list git worktrees, list tasks in non-terminal states, 
 **Files:**
 - Create: `apps/orchestrator/src/runner/janitor.ts`, `apps/orchestrator/test/janitor.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/janitor.test.ts`:
 ```typescript
@@ -2274,12 +2274,12 @@ describe("reconcileWorktrees", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test janitor`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/runner/janitor.ts`**
+- [x] **Step 3: Implement `src/runner/janitor.ts`**
 
 `apps/orchestrator/src/runner/janitor.ts`:
 ```typescript
@@ -2314,7 +2314,7 @@ export async function reconcileWorktrees(opts: {
 }
 ```
 
-- [ ] **Step 4: Run test, verify pass**
+- [x] **Step 4: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test janitor`
 Expected: PASS — 1 test.
@@ -2335,7 +2335,7 @@ Pulls the pieces together into a runnable service. Loads config → creates db c
 **Files:**
 - Modify: `apps/orchestrator/src/index.ts`
 
-- [ ] **Step 1: Replace `src/index.ts`**
+- [x] **Step 1: Replace `src/index.ts`**
 
 `apps/orchestrator/src/index.ts`:
 ```typescript
@@ -2379,7 +2379,7 @@ main().catch((e) => {
 });
 ```
 
-- [ ] **Step 2: Build**
+- [x] **Step 2: Build**
 
 Run: `pnpm --filter @pi-harness/orchestrator build`
 Expected: clean.
@@ -2419,22 +2419,22 @@ git commit -m "feat(orchestrator): wire boot — db + adapters + janitor + http"
 
 The end-of-plan gate. Every test we wrote in Plan 1 + Plan 2 should still pass.
 
-- [ ] **Step 1: Full install**
+- [x] **Step 1: Full install**
 
 Run: `pnpm install`
 Expected: clean.
 
-- [ ] **Step 2: Typecheck everything**
+- [x] **Step 2: Typecheck everything**
 
 Run: `pnpm typecheck`
 Expected: clean across all workspaces.
 
-- [ ] **Step 3: Build everything**
+- [x] **Step 3: Build everything**
 
 Run: `pnpm build`
 Expected: every package builds.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `pnpm test`
 Expected output (Plan 1 + Plan 2 tests combined):

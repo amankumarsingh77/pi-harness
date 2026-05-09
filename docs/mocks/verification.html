@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pi-harness · Verification Gate</title>
+<style>
+  :root {
+    --bg:#0a0a0a; --bg-card:#111113; --bg-sub:#18181b; --bg-muted:#0f0f10; --bg-input:#050506;
+    --fg:#fafafa; --fg-body:#e4e4e7; --fg-label:#a1a1aa; --fg-subtle:#71717a; --fg-faint:#52525b; --fg-ghost:#3f3f46;
+    --border:#27272a; --border-soft:#1f1f23; --border-strong:#3f3f46;
+    --violet-fg:#a78bfa; --violet-bg:#3b1f5e;
+    --blue-fg:#60a5fa;   --blue-bg:#1e3a5f;
+    --amber-fg:#fbbf24;  --amber-fg2:#fcd34d; --amber-bg:#3f2d0c;
+    --cyan-fg:#22d3ee;   --cyan-fg2:#67e8f9;  --cyan-bg:#0e3a4a;
+    --red-fg:#f87171;    --red-fg2:#fca5a5;   --red-bg:#4a1414;
+    --green-fg:#34d399;  --green-fg2:#6ee7b7; --green-bg:#0d3a26;
+    --r-sm:4px; --r-md:6px; --r-lg:8px;
+    --font-display: ui-sans-serif, -apple-system, "SF Pro Display", "Geist", system-ui, sans-serif;
+    --font-body:    ui-sans-serif, -apple-system, "SF Pro Text", "Geist", system-ui, sans-serif;
+    --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono", "Geist Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg-body);
+    font-family: var(--font-body); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; min-height: 100vh;
+    background:
+      radial-gradient(1100px 600px at 0% -10%, rgba(52,211,153,0.04), transparent 60%),
+      radial-gradient(1000px 500px at 100% 30%, rgba(34,211,238,0.04), transparent 60%),
+      radial-gradient(800px 500px at 100% 100%, rgba(251,191,36,0.04), transparent 60%),
+      var(--bg);
+  }
+
+  .topbar { display:flex; align-items:center; gap:16px; padding:14px 24px; border-bottom:1px solid var(--border); background:rgba(10,10,10,0.85); backdrop-filter:saturate(140%) blur(8px); position:sticky; top:0; z-index:10; }
+  .brand { display:flex; align-items:baseline; gap:10px; }
+  .brand .logo { font-family:var(--font-mono); font-size:12px; letter-spacing:0.04em; color:var(--fg); background:var(--bg-sub); border:1px solid var(--border); border-radius:var(--r-sm); padding:3px 7px; }
+  .brand .title { font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--fg); letter-spacing:-0.01em; }
+  .brand .sub { color:var(--fg-faint); font-size:12px; }
+  .topbar .grow { flex: 1; }
+
+  .breadcrumb { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--fg-subtle); padding: 18px 24px 6px; }
+  .breadcrumb .sep { color:var(--fg-ghost); }
+  .breadcrumb a { color:var(--fg-subtle); text-decoration:none; }
+  .breadcrumb a:hover { color: var(--fg-body); }
+  .breadcrumb .now { color: var(--fg); font-weight: 500; }
+
+  .page-head {
+    padding: 0 24px 8px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .page-head h1 {
+    font-family: var(--font-display); font-size: 28px; font-weight: 600;
+    letter-spacing: -0.025em; margin: 0; color: var(--fg);
+  }
+  .pill { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; padding:5px 12px; border-radius:999px; line-height:1; }
+  .pill--cyan { background: var(--cyan-bg); color: var(--cyan-fg2); border: 1px solid rgba(34,211,238,0.25); }
+
+  .lede {
+    padding: 0 24px 22px;
+    color: var(--fg-subtle);
+    font-size: 13px;
+    max-width: 760px;
+  }
+  .lede strong {
+    color: var(--fg-body);
+    font-weight: 600;
+    border-bottom: 1px dashed var(--fg-faint);
+  }
+
+  /* the three columns */
+  .gate {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    padding: 0 24px 32px;
+  }
+
+  .col {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  .col__head {
+    padding: 14px 18px 12px;
+    display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .col__head h2 {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--fg-label);
+  }
+  .col__head .icon {
+    width: 20px; height: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--r-sm);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+  }
+  .col__head .count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .col--green .col__head { background: linear-gradient(180deg, rgba(52,211,153,0.08), transparent); border-bottom-color: rgba(52,211,153,0.18); }
+  .col--green .col__head h2 { color: var(--green-fg); }
+  .col--green .col__head .icon { background: rgba(52,211,153,0.12); color: var(--green-fg2); }
+  .col--green .col__head .count { color: var(--green-fg2); }
+
+  .col--amber .col__head { background: linear-gradient(180deg, rgba(251,191,36,0.07), transparent); border-bottom-color: rgba(251,191,36,0.2); }
+  .col--amber .col__head h2 { color: var(--amber-fg); }
+  .col--amber .col__head .icon { background: rgba(251,191,36,0.12); color: var(--amber-fg2); }
+  .col--amber .col__head .count { color: var(--amber-fg2); }
+
+  .col__body { padding: 16px 18px 18px; flex: 1; }
+  .col__sub { font-size: 11px; color: var(--fg-faint); margin: -4px 0 12px; font-family: var(--font-mono); letter-spacing: 0.04em; }
+
+  /* test list */
+  .tests { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+  .tests li {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 5px 0;
+    font-size: 12.5px;
+    color: var(--fg-body);
+    border-bottom: 1px dashed var(--border-soft);
+  }
+  .tests li:last-child { border-bottom: 0; }
+  .tests .tick { color: var(--green-fg); font-family: var(--font-mono); width: 12px; flex-shrink: 0; }
+  .tests .more { color: var(--fg-faint); font-size: 11px; }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--fg-subtle);
+    margin: 18px 0 8px;
+    display: block;
+  }
+  .coverage { display: flex; flex-direction: column; gap: 4px; }
+  .coverage__row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 12px; align-items: center;
+    font-family: var(--font-mono); font-size: 11.5px;
+    padding: 4px 0;
+  }
+  .coverage__row .file { color: var(--fg-body); }
+  .coverage__row .pct { color: var(--green-fg); font-weight: 600; }
+  .coverage__row.warn .pct { color: var(--amber-fg2); }
+  .coverage-bar { grid-column: 1 / -1; height: 3px; background: var(--bg-sub); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+  .coverage-bar > span { display: block; height: 100%; background: var(--green-fg); }
+
+  /* scenario card */
+  .scenario {
+    background: var(--bg-input);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+  .scenario:last-child { margin-bottom: 0; }
+  .scenario__head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--green-fg2);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .scenario__head::before {
+    content: "✓"; color: var(--green-fg);
+  }
+  .scenario .cmd { color: var(--fg-label); white-space: pre; overflow-x: auto; }
+  .scenario .cmd .prompt { color: var(--fg-faint); }
+  .scenario .cmd .flag { color: var(--cyan-fg2); }
+  .scenario .cmd .str { color: var(--amber-fg2); }
+  .scenario .arrow {
+    margin-top: 8px;
+    color: var(--green-fg);
+    font-weight: 600;
+  }
+  .scenario .arrow .code { color: var(--green-fg2); }
+  .scenario .expect { margin-top: 6px; color: var(--fg-faint); font-size: 10.5px; }
+  .scenario .expect .ok { color: var(--green-fg); }
+
+  /* visual column */
+  .visual-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .shot {
+    background: var(--bg-input);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .shot--match { border-color: rgba(52,211,153,0.3); }
+  .shot--fail  { border-color: rgba(251,191,36,0.4); grid-column: 1 / -1; }
+  .shot__head {
+    display: flex; align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-soft);
+    font-family: var(--font-mono);
+    font-size: 9px; letter-spacing: 0.14em; font-weight: 700;
+    color: var(--fg-subtle);
+  }
+  .shot__head .badge {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 9px; letter-spacing: 0.06em;
+    color: var(--green-fg2);
+    background: rgba(52,211,153,0.08);
+    border: 1px solid rgba(52,211,153,0.25);
+    padding: 2px 7px; border-radius: 3px;
+  }
+  .shot--fail .shot__head { color: var(--amber-fg); }
+  .shot__head .pulse-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--amber-fg);
+    box-shadow: 0 0 6px var(--amber-fg);
+    margin-left: auto;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .shot__img {
+    aspect-ratio: 16 / 10;
+    background:
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.012) 0 12px, transparent 12px 24px),
+      var(--bg-sub);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-faint);
+    font-family: var(--font-mono); font-size: 11px; text-align: center;
+    position: relative;
+  }
+  .shot--match .shot__img::before {
+    content: "";
+    position: absolute; inset: 16px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.04) 0 32px, transparent 32px),
+      linear-gradient(180deg, rgba(52,211,153,0.06) 36px, transparent 36px 60px, rgba(255,255,255,0.02) 60px);
+    border-radius: 2px;
+    border: 1px solid var(--border-soft);
+  }
+  .shot--match .shot__img::after {
+    content: "✓ webhook event · received";
+    position: absolute; top: 22px; left: 24px;
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--green-fg2);
+  }
+  .shot__img .label {
+    position: relative; z-index: 1;
+    background: rgba(0,0,0,0.4);
+    padding: 4px 10px; border-radius: 3px;
+  }
+  .shot--fail .shot__img {
+    aspect-ratio: 21 / 8;
+    background:
+      repeating-linear-gradient(135deg, rgba(251,191,36,0.04) 0 14px, transparent 14px 28px),
+      var(--bg-sub);
+  }
+
+  .shot__cap { padding: 8px 10px; font-size: 11px; color: var(--fg-subtle); border-top: 1px solid var(--border-soft); }
+  .shot__cap .strong { color: var(--fg-body); }
+
+  /* visual actions */
+  .v-actions {
+    display: flex; gap: 8px; margin-top: 14px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: inherit; font-size: 12px; font-weight: 600;
+    border-radius: var(--r-md); padding: 8px 12px;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .btn--disabled {
+    color: var(--fg-faint);
+    background: var(--bg-sub);
+    border-color: var(--border-soft);
+    cursor: not-allowed;
+  }
+  .btn--ghost {
+    color: var(--fg-body);
+    background: transparent;
+    border-color: var(--border);
+  }
+  .btn--ghost:hover { background: var(--bg-sub); }
+
+  /* big bottom strip — the gate verdict */
+  .verdict {
+    margin: 0 24px 32px;
+    padding: 18px 22px;
+    border-radius: var(--r-lg);
+    background: linear-gradient(90deg, rgba(34,211,238,0.06), rgba(167,139,250,0.04));
+    border: 1px solid rgba(34,211,238,0.18);
+    display: flex; align-items: center; gap: 18px;
+  }
+  .verdict__num {
+    font-family: var(--font-display);
+    font-size: 38px; font-weight: 600;
+    color: var(--fg);
+    letter-spacing: -0.03em;
+  }
+  .verdict__num em {
+    font-style: normal;
+    color: var(--cyan-fg2);
+  }
+  .verdict__copy { flex: 1; }
+  .verdict__title { font-family: var(--font-display); font-size: 16px; font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+  .verdict__sub   { font-size: 12.5px; color: var(--fg-subtle); margin-top: 2px; }
+
+  /* mockbar */
+  .mockbar { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; background: rgba(17,17,19,0.92); border: 1px solid var(--border); backdrop-filter: blur(10px); padding: 4px; border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 50; }
+  .mockbar a { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--fg-subtle); text-decoration: none; padding: 6px 12px; border-radius: 999px; }
+  .mockbar a:hover, .mockbar a.active { color: var(--fg); background: var(--bg-sub); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">π</span>
+    <span class="title">pi-harness</span>
+    <span class="sub">/ verification</span>
+  </div>
+  <div class="grow"></div>
+</header>
+
+<nav class="breadcrumb">
+  <a href="kanban.html">Tasks</a>
+  <span class="sep">›</span>
+  <a href="#">#37</a>
+  <span class="sep">›</span>
+  <a href="#">Webhook signature check</a>
+  <span class="sep">›</span>
+  <span class="now">Verify</span>
+</nav>
+
+<section class="page-head">
+  <h1>Verification Gate</h1>
+  <span class="pill pill--cyan">2 of 3 evidence ✓</span>
+</section>
+
+<p class="lede">
+  <strong>All three evidence classes must pass before a PR can ship — no overrides.</strong>
+  &nbsp;&nbsp; 24 unit ✓ · 3 functional ✓ · visual capturing (~25s remaining) · gate started 14:32:48
+</p>
+
+<section class="gate">
+
+  <!-- unit -->
+  <article class="col col--green">
+    <header class="col__head">
+      <span class="icon">✓</span>
+      <h2>UNIT&nbsp;+&nbsp;INTEGRATION</h2>
+      <span class="count">24 / 24</span>
+    </header>
+    <div class="col__body">
+      <div class="col__sub">vitest · ran in 1.42s</div>
+      <ul class="tests">
+        <li><span class="tick">✓</span> verifies HMAC signature</li>
+        <li><span class="tick">✓</span> rejects expired timestamps</li>
+        <li><span class="tick">✓</span> tolerates 5min clock skew</li>
+        <li><span class="tick">✓</span> rejects malformed signature</li>
+        <li><span class="tick">✓</span> rejects payload mutation</li>
+        <li><span class="tick">✓</span> replays past nonce — denied</li>
+        <li><span class="tick">✓</span> multi-tenant secret isolation</li>
+        <li><span class="more">+ 17 more</span></li>
+      </ul>
+
+      <span class="section-label">COVERAGE</span>
+      <div class="coverage">
+        <div class="coverage__row">
+          <span class="file">src/webhooks/verify.ts</span>
+          <span class="pct">96.4%</span>
+          <div class="coverage-bar"><span style="width:96.4%"></span></div>
+        </div>
+        <div class="coverage__row">
+          <span class="file">src/webhooks/sign.ts</span>
+          <span class="pct">100%</span>
+          <div class="coverage-bar"><span style="width:100%"></span></div>
+        </div>
+        <div class="coverage__row warn">
+          <span class="file">src/webhooks/index.ts</span>
+          <span class="pct">82.1%</span>
+          <div class="coverage-bar"><span style="width:82.1%; background: var(--amber-fg)"></span></div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- functional -->
+  <article class="col col--green">
+    <header class="col__head">
+      <span class="icon">↳</span>
+      <h2>FUNCTIONAL&nbsp;·&nbsp;API</h2>
+      <span class="count">3 / 3</span>
+    </header>
+    <div class="col__body">
+      <div class="col__sub">real HTTP · ephemeral server on :7411</div>
+
+      <div class="scenario">
+        <div class="scenario__head">signed-payload-200</div>
+        <div class="cmd"><span class="prompt">$</span> curl -X POST /webhooks/stripe \
+   <span class="flag">-H</span> <span class="str">'X-Sig: t=…,v1=…'</span> \
+   <span class="flag">-d</span> <span class="str">@fixtures/charge.json</span></div>
+        <div class="arrow">→ <span class="code">200 OK</span> &nbsp; { received: true }</div>
+        <div class="expect">expect status=200, body.received=true <span class="ok">✓</span></div>
+      </div>
+
+      <div class="scenario">
+        <div class="scenario__head">tampered-payload-401</div>
+        <div class="cmd"><span class="prompt">$</span> curl -X POST /webhooks/stripe \
+   <span class="flag">-H</span> <span class="str">'X-Sig: t=…,v1=BAD'</span> \
+   <span class="flag">-d</span> <span class="str">@fixtures/charge.json</span></div>
+        <div class="arrow">→ <span class="code">401 Unauthorized</span></div>
+        <div class="expect">expect status=401, body.error="bad_signature" <span class="ok">✓</span></div>
+      </div>
+
+      <div class="scenario">
+        <div class="scenario__head">replay-attack-401</div>
+        <div class="cmd"><span class="prompt">$</span> # send same payload twice in 5s
+<span class="prompt">$</span> curl … && curl …</div>
+        <div class="arrow">→ <span class="code">200</span>, then <span class="code">401</span> (replayed)</div>
+        <div class="expect">expect 2nd req status=401, body.error="replay" <span class="ok">✓</span></div>
+      </div>
+
+      <div style="font-size:11px; color:var(--fg-faint); margin-top:14px; font-family:var(--font-mono); letter-spacing:0.04em">
+        avg latency 18ms · 0 retries · last run 14:33:02 · server :7411 down after gate
+      </div>
+    </div>
+  </article>
+
+  <!-- visual -->
+  <article class="col col--amber">
+    <header class="col__head">
+      <span class="icon">⏳</span>
+      <h2>VISUAL&nbsp;·&nbsp;PLAYWRIGHT</h2>
+      <span class="count" style="display:flex; gap:6px; align-items:center">
+        capturing&hellip;
+        <span style="width:6px; height:6px; border-radius:50%; background: var(--amber-fg); box-shadow:0 0 6px var(--amber-fg); animation: pulse 1.4s ease-in-out infinite"></span>
+      </span>
+    </header>
+    <div class="col__body">
+      <div class="col__sub">real browser · /admin/webhooks · 1280×800</div>
+
+      <div class="visual-grid">
+        <div class="shot">
+          <div class="shot__head">EXPECTED</div>
+          <div class="shot__img">
+            <span class="label">📷 baseline.png</span>
+          </div>
+          <div class="shot__cap">webhook event row · <span class="strong">success badge</span></div>
+        </div>
+
+        <div class="shot shot--match">
+          <div class="shot__head">ACTUAL <span class="badge">✓ 0.00% diff</span></div>
+          <div class="shot__img">
+            <span class="label">📷 actual.png</span>
+          </div>
+          <div class="shot__cap">this run · <span class="strong">14:33:02</span></div>
+        </div>
+
+        <div class="shot shot--fail">
+          <div class="shot__head">FAILURE&nbsp;STATE&nbsp;·&nbsp;capturing… <span class="pulse-dot"></span></div>
+          <div class="shot__img">
+            <span class="label">capturing failure-state.png …</span>
+          </div>
+          <div class="shot__cap">submit invalid signature → expect <span class="strong">'rejected' toast</span> + red badge</div>
+        </div>
+      </div>
+
+      <div class="v-actions">
+        <button class="btn btn--disabled">⏸ Awaiting capture</button>
+        <button class="btn btn--ghost">View baseline</button>
+      </div>
+    </div>
+  </article>
+
+</section>
+
+<section class="verdict">
+  <div class="verdict__num">2/<em>3</em></div>
+  <div class="verdict__copy">
+    <div class="verdict__title">Gate is open · waiting on visual evidence</div>
+    <div class="verdict__sub">
+      Unit and functional both green. Visual capture in progress (~25s).
+      PR creation will unlock automatically once all three turn green.
+    </div>
+  </div>
+  <button class="btn btn--ghost" style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em">VIEW RUN LOG →</button>
+</section>
+
+<nav class="mockbar">
+  <a href="index.html">index</a>
+  <a href="kanban.html">kanban</a>
+  <a href="brainstorm.html">brainstorm</a>
+  <a href="task-detail.html">task</a>
+  <a href="verification.html" class="active">verify</a>
+</nav>
+
+</body>
+</html>

@@ -95,7 +95,7 @@ The dashboard needs to read `brainstorm.json`, `plan.json`, `proof-report.json`,
 - Create: `apps/orchestrator/src/http/routes/artifacts.ts`, `apps/orchestrator/src/http/routes/screenshots.ts`, `apps/orchestrator/test/http/artifacts.test.ts`
 - Modify: `apps/orchestrator/src/http/server.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/http/artifacts.test.ts`:
 ```typescript
@@ -194,12 +194,12 @@ describe("/api/tasks/:id/artifacts and /screenshots", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test http/artifacts`
 Expected: FAIL — `runsDir` not accepted by buildServer; routes don't exist.
 
-- [ ] **Step 3: Implement `src/http/routes/artifacts.ts`**
+- [x] **Step 3: Implement `src/http/routes/artifacts.ts`**
 
 `apps/orchestrator/src/http/routes/artifacts.ts`:
 ```typescript
@@ -248,7 +248,7 @@ export function registerArtifactRoutes(
 }
 ```
 
-- [ ] **Step 4: Implement `src/http/routes/screenshots.ts`**
+- [x] **Step 4: Implement `src/http/routes/screenshots.ts`**
 
 `apps/orchestrator/src/http/routes/screenshots.ts`:
 ```typescript
@@ -297,7 +297,7 @@ export function registerScreenshotRoutes(
 }
 ```
 
-- [ ] **Step 5: Wire into `server.ts`**
+- [x] **Step 5: Wire into `server.ts`**
 
 Edit `apps/orchestrator/src/http/server.ts`:
 ```typescript
@@ -322,7 +322,7 @@ Update `src/index.ts` to pass `runsDir: config.runsDir` into `buildServer`.
 
 Update existing tests that call `buildServer({ runs, events })` to pass `runsDir`. Use `os.tmpdir()` in tests where the path doesn't matter.
 
-- [ ] **Step 6: Run, verify pass**
+- [x] **Step 6: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test`
 Expected: every test still green; new artifact tests pass.
@@ -341,7 +341,7 @@ git commit -m "feat(orchestrator): GET /api/tasks/:id/artifacts and /screenshots
 **Files:**
 - Create: `apps/dashboard/package.json`, `apps/dashboard/next.config.mjs`, `apps/dashboard/tsconfig.json`, `apps/dashboard/postcss.config.mjs`, `apps/dashboard/app/layout.tsx`, `apps/dashboard/app/page.tsx` (placeholder), `apps/dashboard/app/globals.css`, `apps/dashboard/.gitignore`
 
-- [ ] **Step 1: Create `package.json`**
+- [x] **Step 1: Create `package.json`**
 
 `apps/dashboard/package.json`:
 ```json
@@ -384,7 +384,7 @@ git commit -m "feat(orchestrator): GET /api/tasks/:id/artifacts and /screenshots
 }
 ```
 
-- [ ] **Step 2: Create config files**
+- [x] **Step 2: Create config files**
 
 `apps/dashboard/next.config.mjs`:
 ```javascript
@@ -431,7 +431,7 @@ export default { plugins: { "@tailwindcss/postcss": {} } };
 next-env.d.ts
 ```
 
-- [ ] **Step 3: Create `app/globals.css` with design tokens**
+- [x] **Step 3: Create `app/globals.css` with design tokens**
 
 Lift the design tokens proven in `docs/mocks/`. **Every token here must match the mocks** so the implementation tracks the contract.
 
@@ -511,7 +511,7 @@ html, body {
 }
 ```
 
-- [ ] **Step 4: Create root layout**
+- [x] **Step 4: Create root layout**
 
 `apps/dashboard/app/layout.tsx`:
 ```typescript
@@ -537,7 +537,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
-- [ ] **Step 5: Create placeholder page**
+- [x] **Step 5: Create placeholder page**
 
 `apps/dashboard/app/page.tsx`:
 ```typescript
@@ -546,7 +546,7 @@ export default function Page() {
 }
 ```
 
-- [ ] **Step 6: Create QueryProvider seam (used in Task 4)**
+- [x] **Step 6: Create QueryProvider seam (used in Task 4)**
 
 `apps/dashboard/lib/query-provider.tsx`:
 ```typescript
@@ -565,12 +565,12 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
 }
 ```
 
-- [ ] **Step 7: Install + typecheck**
+- [x] **Step 7: Install + typecheck**
 
 Run: `pnpm install && pnpm --filter @pi-harness/dashboard typecheck`
 Expected: clean.
 
-- [ ] **Step 8: Smoke build**
+- [x] **Step 8: Smoke build**
 
 Run: `pnpm --filter @pi-harness/dashboard build`
 Expected: build succeeds; one route `/` generated.
@@ -591,7 +591,7 @@ The dashboard never calls the orchestrator directly from client components — i
 **Files:**
 - Create: `apps/dashboard/lib/api.ts`, `apps/dashboard/app/api/proxy/[...path]/route.ts`, `apps/dashboard/test/lib/api.test.ts`
 
-- [ ] **Step 1: Add vitest setup + config**
+- [x] **Step 1: Add vitest setup + config**
 
 `apps/dashboard/vitest.config.ts`:
 ```typescript
@@ -615,7 +615,7 @@ export default defineConfig({
 import "@testing-library/jest-dom/vitest";
 ```
 
-- [ ] **Step 2: Write failing API test**
+- [x] **Step 2: Write failing API test**
 
 `apps/dashboard/test/lib/api.test.ts`:
 ```typescript
@@ -657,12 +657,12 @@ describe("api", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/dashboard test lib/api`
 Expected: FAIL — module missing.
 
-- [ ] **Step 4: Implement `lib/api.ts`**
+- [x] **Step 4: Implement `lib/api.ts`**
 
 `apps/dashboard/lib/api.ts`:
 ```typescript
@@ -730,7 +730,7 @@ export const orchestrator = api({
 });
 ```
 
-- [ ] **Step 5: Implement proxy route**
+- [x] **Step 5: Implement proxy route**
 
 `apps/dashboard/app/api/proxy/[...path]/route.ts`:
 ```typescript
@@ -758,7 +758,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
 }
 ```
 
-- [ ] **Step 6: Run, verify pass**
+- [x] **Step 6: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/dashboard test lib/api`
 Expected: PASS — 3 tests.
@@ -779,7 +779,7 @@ The Task Detail page's "Agent Log · live (SSE)" relies on this. Reconnects with
 **Files:**
 - Create: `apps/dashboard/lib/use-events.ts`, `apps/dashboard/test/lib/use-events.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/dashboard/test/lib/use-events.test.ts`:
 ```typescript
@@ -832,12 +832,12 @@ describe("useEvents", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/dashboard test lib/use-events`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `lib/use-events.ts`**
+- [x] **Step 3: Implement `lib/use-events.ts`**
 
 `apps/dashboard/lib/use-events.ts`:
 ```typescript
@@ -897,7 +897,7 @@ export function useEvents(runId: string | null): UseEventsResult {
 }
 ```
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/dashboard test lib/use-events`
 Expected: PASS — 2 tests.
@@ -918,7 +918,7 @@ Three primitives reused across all five views. Density rule applies: each takes 
 **Files:**
 - Create: `apps/dashboard/components/ui/pill.tsx`, `card.tsx`, `button.tsx`, `skeleton.tsx`, `apps/dashboard/test/components/ui.test.tsx`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/dashboard/test/components/ui.test.tsx`:
 ```typescript
@@ -952,12 +952,12 @@ describe("Button", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/dashboard test components/ui`
 Expected: FAIL — modules missing.
 
-- [ ] **Step 3: Implement `components/ui/pill.tsx`**
+- [x] **Step 3: Implement `components/ui/pill.tsx`**
 
 `apps/dashboard/components/ui/pill.tsx`:
 ```typescript
@@ -1000,7 +1000,7 @@ export function Pill({
 
 Add `clsx` to `apps/dashboard/package.json` deps (`"clsx": "^2.1.1"`).
 
-- [ ] **Step 4: Implement `components/ui/button.tsx`**
+- [x] **Step 4: Implement `components/ui/button.tsx`**
 
 `apps/dashboard/components/ui/button.tsx`:
 ```typescript
@@ -1038,7 +1038,7 @@ export function Button(props: {
 }
 ```
 
-- [ ] **Step 5: Implement `components/ui/card.tsx`**
+- [x] **Step 5: Implement `components/ui/card.tsx`**
 
 `apps/dashboard/components/ui/card.tsx`:
 ```typescript
@@ -1068,7 +1068,7 @@ export function Card({
 }
 ```
 
-- [ ] **Step 6: Implement `components/ui/skeleton.tsx`**
+- [x] **Step 6: Implement `components/ui/skeleton.tsx`**
 
 `apps/dashboard/components/ui/skeleton.tsx`:
 ```typescript
@@ -1079,7 +1079,7 @@ export function Skeleton({ className }: { className?: string }) {
 }
 ```
 
-- [ ] **Step 7: Run, verify pass**
+- [x] **Step 7: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/dashboard test components/ui`
 Expected: PASS — 4 tests.
@@ -1101,7 +1101,7 @@ The home page. Real data from `GET /api/tasks`. Every count + filter chip is a r
 - Create: `apps/dashboard/components/topbar.tsx`, `apps/dashboard/components/kanban/board.tsx`, `apps/dashboard/components/kanban/column.tsx`, `apps/dashboard/components/kanban/card.tsx`, `apps/dashboard/lib/format.ts`, `apps/dashboard/test/components/kanban.test.tsx`
 - Modify: `apps/dashboard/app/page.tsx`
 
-- [ ] **Step 1: Write failing component test**
+- [x] **Step 1: Write failing component test**
 
 `apps/dashboard/test/components/kanban.test.tsx`:
 ```typescript
@@ -1173,7 +1173,7 @@ describe("KanbanBoard", () => {
 Run: `pnpm --filter @pi-harness/dashboard test components/kanban`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `lib/format.ts`**
+- [x] **Step 3: Implement `lib/format.ts`**
 
 `apps/dashboard/lib/format.ts`:
 ```typescript
@@ -1203,7 +1203,7 @@ export function formatRelative(date: Date | string): string {
 }
 ```
 
-- [ ] **Step 4: Implement `components/topbar.tsx`**
+- [x] **Step 4: Implement `components/topbar.tsx`**
 
 `apps/dashboard/components/topbar.tsx`:
 ```typescript
@@ -1251,7 +1251,7 @@ export function Topbar({
 }
 ```
 
-- [ ] **Step 5: Implement `components/kanban/card.tsx`**
+- [x] **Step 5: Implement `components/kanban/card.tsx`**
 
 `apps/dashboard/components/kanban/card.tsx`:
 ```typescript
@@ -1355,7 +1355,7 @@ export function pillForTask(t: Task, runCtx?: { stepIndex: number; totalSteps: n
 
 The board fetches the latest run for active tasks and passes `runCtx`. Update `TaskCard`'s signature to accept it.
 
-- [ ] **Step 6: Implement `components/kanban/column.tsx`**
+- [x] **Step 6: Implement `components/kanban/column.tsx`**
 
 `apps/dashboard/components/kanban/column.tsx`:
 ```typescript
@@ -1411,7 +1411,7 @@ export function KanbanColumn({
 }
 ```
 
-- [ ] **Step 7: Implement `components/kanban/board.tsx`**
+- [x] **Step 7: Implement `components/kanban/board.tsx`**
 
 `apps/dashboard/components/kanban/board.tsx`:
 ```typescript
@@ -1455,7 +1455,7 @@ export function KanbanBoard({
 }
 ```
 
-- [ ] **Step 8: Wire `app/page.tsx`**
+- [x] **Step 8: Wire `app/page.tsx`**
 
 `apps/dashboard/app/page.tsx`:
 ```typescript
@@ -1493,7 +1493,7 @@ export default async function HomePage() {
 }
 ```
 
-- [ ] **Step 9: Run, verify pass**
+- [x] **Step 9: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/dashboard test components/kanban`
 Expected: PASS — 4 tests.
@@ -1529,7 +1529,7 @@ A simple form. Posts to the proxy → orchestrator. Redirects to `/tasks/[id]` o
 **Files:**
 - Create: `apps/dashboard/app/tasks/new/page.tsx`, `apps/dashboard/app/tasks/new/actions.ts`
 
-- [ ] **Step 1: Implement Server Action**
+- [x] **Step 1: Implement Server Action**
 
 `apps/dashboard/app/tasks/new/actions.ts`:
 ```typescript
@@ -1548,7 +1548,7 @@ export async function createTask(formData: FormData) {
 }
 ```
 
-- [ ] **Step 2: Implement form page**
+- [x] **Step 2: Implement form page**
 
 `apps/dashboard/app/tasks/new/page.tsx`:
 ```typescript
@@ -1617,7 +1617,7 @@ The single most-information-dense page. Re-creates `task-detail.html` faithfully
 **Files:**
 - Create: `apps/dashboard/components/task-detail/phase-timeline.tsx`, `apps/dashboard/components/task-detail/agent-log.tsx`, `apps/dashboard/components/task-detail/run-context.tsx`, `apps/dashboard/app/tasks/[id]/page.tsx`, `apps/dashboard/test/components/task-detail.test.tsx`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/dashboard/test/components/task-detail.test.tsx`:
 ```typescript
@@ -1665,7 +1665,7 @@ describe("AgentLog", () => {
 Run: `pnpm --filter @pi-harness/dashboard test components/task-detail`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `components/task-detail/phase-timeline.tsx`**
+- [x] **Step 3: Implement `components/task-detail/phase-timeline.tsx`**
 
 `apps/dashboard/components/task-detail/phase-timeline.tsx`:
 ```typescript
@@ -1717,7 +1717,7 @@ export function PhaseTimeline({ runs, currentPhase }: { runs: Run[]; currentPhas
 }
 ```
 
-- [ ] **Step 4: Implement `components/task-detail/agent-log.tsx`**
+- [x] **Step 4: Implement `components/task-detail/agent-log.tsx`**
 
 `apps/dashboard/components/task-detail/agent-log.tsx`:
 ```typescript
@@ -1792,7 +1792,7 @@ function renderEventBody(e: AgentEvent): string {
 }
 ```
 
-- [ ] **Step 5: Implement `components/task-detail/run-context.tsx`**
+- [x] **Step 5: Implement `components/task-detail/run-context.tsx`**
 
 `apps/dashboard/components/task-detail/run-context.tsx`:
 ```typescript
@@ -1909,7 +1909,7 @@ export function LiveLog({ runId, initial }: { runId: string | null; initial: Age
 }
 ```
 
-- [ ] **Step 7: Implement `app/tasks/[id]/page.tsx`**
+- [x] **Step 7: Implement `app/tasks/[id]/page.tsx`**
 
 `apps/dashboard/app/tasks/[id]/page.tsx`:
 ```typescript
@@ -1978,7 +1978,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 }
 ```
 
-- [ ] **Step 8: Run tests, smoke**
+- [x] **Step 8: Run tests, smoke**
 
 Run: `pnpm --filter @pi-harness/dashboard test components/task-detail`
 Expected: PASS — 3 tests.
@@ -2001,7 +2001,7 @@ git commit -m "feat(dashboard): task detail with phase timeline + live SSE log"
 **Files:**
 - Create: `apps/dashboard/components/brainstorm/chat-panel.tsx`, `apps/dashboard/components/brainstorm/emerging-spec.tsx`, `apps/dashboard/components/plan/plan-preview.tsx`, `apps/dashboard/app/tasks/[id]/brainstorm/page.tsx`, `apps/dashboard/app/tasks/[id]/plan/page.tsx`
 
-- [ ] **Step 1: Implement `components/brainstorm/emerging-spec.tsx`**
+- [x] **Step 1: Implement `components/brainstorm/emerging-spec.tsx`**
 
 `apps/dashboard/components/brainstorm/emerging-spec.tsx`:
 ```typescript
@@ -2052,7 +2052,7 @@ export function EmergingSpec({ artifact }: { artifact: BrainstormArtifact }) {
 }
 ```
 
-- [ ] **Step 2: Implement `components/brainstorm/chat-panel.tsx`**
+- [x] **Step 2: Implement `components/brainstorm/chat-panel.tsx`**
 
 `apps/dashboard/components/brainstorm/chat-panel.tsx`:
 ```typescript
@@ -2092,7 +2092,7 @@ export function ChatPanel({ turns, runMeta }: { turns: BrainstormTurn[]; runMeta
 }
 ```
 
-- [ ] **Step 3: Implement `app/tasks/[id]/brainstorm/page.tsx`**
+- [x] **Step 3: Implement `app/tasks/[id]/brainstorm/page.tsx`**
 
 `apps/dashboard/app/tasks/[id]/brainstorm/page.tsx`:
 ```typescript
@@ -2147,7 +2147,7 @@ function EmptySpecPlaceholder() {
 }
 ```
 
-- [ ] **Step 4: Implement `components/plan/plan-preview.tsx` and the plan page**
+- [x] **Step 4: Implement `components/plan/plan-preview.tsx` and the plan page**
 
 `apps/dashboard/components/plan/plan-preview.tsx`:
 ```typescript
@@ -2227,7 +2227,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
 }
 ```
 
-- [ ] **Step 5: Smoke**
+- [x] **Step 5: Smoke**
 
 Visit `/tasks/<id>/brainstorm` and `/tasks/<id>/plan`. Should render either the empty state or real artifact.
 
@@ -2247,7 +2247,7 @@ The most distinctive page. Recreates `verification.html` faithfully with three c
 **Files:**
 - Create: `apps/dashboard/components/verify/evidence-column.tsx`, `apps/dashboard/components/verify/screenshot-pair.tsx`, `apps/dashboard/components/verify/verdict-strip.tsx`, `apps/dashboard/app/tasks/[id]/verify/page.tsx`, `apps/dashboard/test/components/verify.test.tsx`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/dashboard/test/components/verify.test.tsx`:
 ```typescript
@@ -2269,12 +2269,12 @@ describe("EvidenceColumn", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/dashboard test components/verify`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `components/verify/evidence-column.tsx`**
+- [x] **Step 3: Implement `components/verify/evidence-column.tsx`**
 
 `apps/dashboard/components/verify/evidence-column.tsx`:
 ```typescript
@@ -2328,7 +2328,7 @@ export function EvidenceColumn({
 }
 ```
 
-- [ ] **Step 4: Implement `components/verify/screenshot-pair.tsx`**
+- [x] **Step 4: Implement `components/verify/screenshot-pair.tsx`**
 
 `apps/dashboard/components/verify/screenshot-pair.tsx`:
 ```typescript
@@ -2391,7 +2391,7 @@ function Frame({
 }
 ```
 
-- [ ] **Step 5: Implement `components/verify/verdict-strip.tsx`**
+- [x] **Step 5: Implement `components/verify/verdict-strip.tsx`**
 
 `apps/dashboard/components/verify/verdict-strip.tsx`:
 ```typescript
@@ -2431,7 +2431,7 @@ export function VerdictStrip({
 }
 ```
 
-- [ ] **Step 6: Implement `app/tasks/[id]/verify/page.tsx`**
+- [x] **Step 6: Implement `app/tasks/[id]/verify/page.tsx`**
 
 `apps/dashboard/app/tasks/[id]/verify/page.tsx`:
 ```typescript
@@ -2525,7 +2525,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ id: str
 }
 ```
 
-- [ ] **Step 7: Run, verify pass + smoke**
+- [x] **Step 7: Run, verify pass + smoke**
 
 Run: `pnpm --filter @pi-harness/dashboard test components/verify`
 Expected: PASS — 2 tests.
@@ -2548,7 +2548,7 @@ Two safety nets before shipping:
 **Files:**
 - Create: `apps/dashboard/test/no-placeholders.test.ts`, `apps/dashboard/playwright.config.ts`, `apps/dashboard/e2e/kanban.spec.ts`, `apps/dashboard/e2e/task-flow.spec.ts`
 
-- [ ] **Step 1: Implement no-placeholders test**
+- [x] **Step 1: Implement no-placeholders test**
 
 `apps/dashboard/test/no-placeholders.test.ts`:
 ```typescript
@@ -2595,7 +2595,7 @@ describe("no-placeholders rule", () => {
 });
 ```
 
-- [ ] **Step 2: Implement Playwright config**
+- [x] **Step 2: Implement Playwright config**
 
 `apps/dashboard/playwright.config.ts`:
 ```typescript
@@ -2622,7 +2622,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 3: Implement e2e tests**
+- [x] **Step 3: Implement e2e tests**
 
 `apps/dashboard/e2e/kanban.spec.ts`:
 ```typescript
@@ -2681,17 +2681,17 @@ git commit -m "test(dashboard): no-placeholders + Playwright e2e"
 
 The final gate. All four plans together.
 
-- [ ] **Step 1: Clean install**
+- [x] **Step 1: Clean install**
 
 Run: `pnpm install`
 Expected: clean.
 
-- [ ] **Step 2: Typecheck + build**
+- [x] **Step 2: Typecheck + build**
 
 Run: `pnpm typecheck && pnpm build`
 Expected: every package + app builds.
 
-- [ ] **Step 3: Run all unit/integration tests**
+- [x] **Step 3: Run all unit/integration tests**
 
 Run: `pnpm test`
 Expected counts:
@@ -2704,7 +2704,7 @@ Expected counts:
 
 Total ≈ 85 tests.
 
-- [ ] **Step 4: Run e2e**
+- [x] **Step 4: Run e2e**
 
 ```bash
 docker-compose up -d postgres

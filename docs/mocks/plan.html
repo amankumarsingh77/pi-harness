@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pi-harness · T-093 · plan</title>
+<style>
+  :root {
+    --bg:               #0d0e10;
+    --bg-elev:          #131418;
+    --bg-elev-hover:    #181a1f;
+    --bg-input:         #0a0b0d;
+
+    --fg:               #f7f8f8;
+    --fg-body:          #e6e7e9;
+    --fg-mute:          #8a8f98;
+    --fg-mute-2:        #6b7079;
+    --fg-faint:         #4a4e57;
+
+    --line:             rgba(255,255,255,0.06);
+    --line-hover:       rgba(255,255,255,0.12);
+    --line-strong:      rgba(255,255,255,0.18);
+
+    --st-idle:          #8a8f98;
+    --st-progress:      #5e6ad2;
+    --st-review:        #f2c94c;
+    --st-blocked:       #eb5757;
+    --st-shipping:      #c084fc;
+    --st-done:          #4cb782;
+
+    --r:                6px;
+    --r-sm:             4px;
+
+    --font-sans: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg-body);
+    font-family: var(--font-sans);
+    font-size: 13px; line-height: 1.5;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection { background: rgba(94,106,210,0.35); }
+
+  /* ─── topbar ────────────────────────────────────────────────── */
+  .topbar {
+    height: 48px; padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 24px;
+    background: rgba(13,14,16,0.85);
+    backdrop-filter: saturate(140%) blur(8px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar__left { display: flex; align-items: center; gap: 24px; }
+  .logo {
+    font-weight: 600; font-size: 13.5px; color: var(--fg);
+    letter-spacing: -0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .logo__mark {
+    width: 16px; height: 16px; border-radius: 4px;
+    background: linear-gradient(135deg, #5e6ad2 0%, #c084fc 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  }
+  .nav { display: flex; align-items: center; gap: 2px; }
+  .nav a {
+    font-size: 12.5px; color: var(--fg-mute); text-decoration: none;
+    padding: 5px 10px; border-radius: 4px;
+  }
+  .nav a:hover { color: var(--fg-body); background: rgba(255,255,255,0.04); }
+  .topbar__center {
+    display: flex; justify-content: center; gap: 18px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+  }
+  .stat { display: inline-flex; align-items: center; gap: 6px; }
+  .stat__dot { width: 6px; height: 6px; border-radius: 50%; }
+  .stat--running .stat__dot { background: var(--st-progress); box-shadow: 0 0 6px rgba(94,106,210,0.5); animation: tick 2.4s ease-in-out infinite; }
+  .stat--blocked { color: var(--st-blocked); }
+  .stat--blocked .stat__dot { background: var(--st-blocked); }
+  .stat--done { color: var(--fg-mute-2); }
+  .topbar__right { display: flex; align-items: center; gap: 8px; }
+  .kbd {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+    border: 1px solid var(--line); background: var(--bg-elev);
+    padding: 4px 9px; border-radius: 4px; cursor: pointer;
+  }
+  .kbd kbd {
+    font-family: inherit; font-size: 10.5px; color: var(--fg-mute-2);
+    border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px;
+    background: rgba(255,255,255,0.02);
+  }
+  .btn {
+    background: var(--st-progress); color: #fff; border: 0;
+    font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+    padding: 6px 11px; border-radius: 4px; cursor: pointer;
+  }
+  .branch {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+    border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; cursor: pointer;
+  }
+
+  /* ─── head ─────────────────────────────────────────────────── */
+  .head {
+    padding: 16px 24px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .crumb {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px; color: var(--fg-mute-2);
+    margin-bottom: 10px;
+  }
+  .crumb a { color: var(--fg-mute); text-decoration: none; }
+  .crumb a:hover { color: var(--fg-body); }
+  .crumb .sep { color: var(--fg-faint); }
+  .crumb .id { color: var(--fg-body); }
+  .crumb .phase { color: var(--st-done); }
+
+  .head__row { display: flex; align-items: center; gap: 12px; }
+  .head__icon { width: 16px; height: 16px; color: var(--st-done); }
+  .head__title {
+    font-size: 17px; font-weight: 600;
+    letter-spacing: -0.018em;
+    color: var(--fg);
+    margin: 0; flex: 1;
+  }
+  .head__sub {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-mute);
+  }
+  .head__sub .accent { color: var(--fg-body); }
+  .head__actions { display: flex; gap: 6px; }
+  .ibtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-sans); font-size: 12px;
+    color: var(--fg-body); background: transparent;
+    border: 1px solid var(--line);
+    padding: 5px 10px; border-radius: 4px; cursor: pointer;
+  }
+  .ibtn:hover { border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+
+  /* ─── grid ─────────────────────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 48px - 64px - 56px);
+  }
+  .col-left {
+    border-right: 1px solid var(--line);
+    overflow: auto;
+  }
+  .col-right { background: var(--bg); overflow: auto; }
+
+  /* ─── plan markdown render ─────────────────────────────────── */
+  .plan {
+    padding: 22px 28px 28px;
+    max-width: 720px;
+  }
+  .plan h2 {
+    margin: 28px 0 12px;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-mute-2);
+    font-family: var(--font-mono);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .plan h2:first-child { margin-top: 0; }
+  .plan h2 .num {
+    color: var(--fg-faint);
+    font-size: 11.5px;
+  }
+
+  .plan p {
+    color: var(--fg-body);
+    font-size: 13.5px;
+    line-height: 1.65;
+    letter-spacing: -0.005em;
+    margin: 0 0 12px;
+  }
+  .plan p strong { color: var(--fg); font-weight: 600; }
+  .plan code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg);
+    background: rgba(255,255,255,0.04);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* file change list */
+  .files {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .file-row {
+    display: grid;
+    grid-template-columns: 16px 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .file-row:last-child { border-bottom: 0; }
+  .file-row__op {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+    line-height: 1;
+  }
+  .file-row__op.new   { color: var(--st-done); border: 1px solid rgba(76,183,130,0.3); }
+  .file-row__op.edit  { color: var(--st-progress); border: 1px solid rgba(94,106,210,0.3); }
+  .file-row__op.del   { color: var(--st-blocked); border: 1px solid rgba(235,87,87,0.3); }
+  .file-row__path { color: var(--fg); letter-spacing: 0.005em; }
+  .file-row__why {
+    color: var(--fg-mute);
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    letter-spacing: -0.005em;
+  }
+  .file-row__delta { color: var(--fg-mute-2); font-size: 11px; }
+
+  /* risks block */
+  .risks {
+    margin-bottom: 4px;
+  }
+  .risk {
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .risk:last-child { border-bottom: 0; }
+  .risk__dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--st-review);
+    margin-top: 7px;
+  }
+  .risk--high .risk__dot { background: var(--st-blocked); }
+  .risk__body { color: var(--fg-body); }
+  .risk__body strong { color: var(--fg); font-weight: 600; }
+
+  .open-q {
+    margin-top: 4px;
+    padding: 12px 14px;
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    background: rgba(242,201,76,0.04);
+    font-size: 12.5px;
+    color: var(--fg-mute);
+  }
+  .open-q .label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--st-review);
+    margin-right: 8px;
+  }
+  .open-q .body { color: var(--fg-body); }
+
+  /* ─── scenario editor ──────────────────────────────────────── */
+  .scn-head {
+    padding: 16px 24px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .scn-head h2 {
+    margin: 0;
+    font-size: 14px; font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .scn-head .lede {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--fg-mute);
+    line-height: 1.55;
+  }
+
+  .scn-list {
+    padding: 8px 16px 16px;
+  }
+  .scn {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 12px;
+    padding: 12px 8px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .scn:hover { background: rgba(255,255,255,0.025); }
+
+  .scn__check {
+    width: 14px; height: 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .scn--on .scn__check { background: var(--st-progress); border-color: var(--st-progress); }
+  .scn--on .scn__check::after {
+    content: "";
+    position: absolute;
+    left: 3px; top: 0;
+    width: 5px; height: 9px;
+    border-right: 1.5px solid #fff;
+    border-bottom: 1.5px solid #fff;
+    transform: rotate(45deg);
+  }
+  .scn--off .scn__check { border-style: dashed; }
+
+  .scn__body { min-width: 0; }
+  .scn__top {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 4px;
+  }
+  .scn__kind {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-mute-2);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .scn__kind .dot { width: 5px; height: 5px; border-radius: 50%; }
+  .scn__kind.api .dot     { background: var(--st-progress); }
+  .scn__kind.unit .dot    { background: var(--st-done); }
+  .scn__kind.visual .dot  { background: var(--st-review); }
+  .scn__id {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fg-mute-2);
+  }
+  .scn__src {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    margin-left: auto;
+  }
+  .scn__src.lib  { color: var(--fg-mute-2); }
+  .scn__src.new  { color: var(--st-done); }
+
+  .scn__name {
+    font-size: 13px;
+    color: var(--fg);
+    letter-spacing: -0.005em;
+    line-height: 1.45;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .scn--off .scn__name { color: var(--fg-mute); }
+  .scn__expr {
+    background: var(--bg-input);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 9px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-body);
+    line-height: 1.55;
+    word-break: break-all;
+  }
+  .scn__expr .verb { color: var(--st-progress); }
+  .scn__expr .url  { color: var(--fg); }
+  .scn__expr .arrow { color: var(--fg-faint); margin: 0 5px; }
+  .scn__expr .ok { color: var(--st-done); }
+  .scn__expr .key { color: var(--fg-mute); }
+
+  .scn__menu {
+    color: var(--fg-faint);
+    font-size: 14px;
+    cursor: pointer;
+    align-self: start;
+    opacity: 0;
+    transition: opacity 120ms;
+    padding: 0 4px;
+  }
+  .scn:hover .scn__menu { opacity: 1; }
+  .scn__menu:hover { color: var(--fg); }
+
+  .scn-add {
+    margin: 4px 8px 0;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px;
+    border: 1px dashed var(--line);
+    border-radius: 4px;
+    color: var(--fg-mute);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms, background 120ms;
+  }
+  .scn-add:hover { color: var(--fg-body); border-color: var(--line-hover); background: rgba(255,255,255,0.02); }
+
+  /* ─── verdict gate (sticky bottom strip) ───────────────────── */
+  .gate {
+    border-top: 1px solid var(--line);
+    background: var(--bg-elev);
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 16px;
+    position: sticky; bottom: 0;
+    backdrop-filter: blur(8px);
+  }
+  .gate__icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(94,106,210,0.12);
+    color: var(--st-progress);
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: inset 0 0 0 1px rgba(94,106,210,0.3);
+  }
+  .gate__body { flex: 1; line-height: 1.45; }
+  .gate__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .gate__sub {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-mute);
+    margin-top: 2px;
+  }
+  .gate__sub .accent { color: var(--fg-body); }
+  .gate__actions { display: flex; gap: 8px; }
+  .gate__btn-ghost {
+    background: transparent;
+    color: var(--fg-body);
+    border: 1px solid var(--line);
+    font-family: var(--font-sans); font-size: 12px;
+    padding: 7px 12px; border-radius: 6px; cursor: pointer;
+  }
+  .gate__btn-ghost:hover { border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+  .gate__btn-primary {
+    background: var(--st-progress);
+    color: #fff;
+    border: 0;
+    font-family: var(--font-sans); font-size: 12.5px; font-weight: 500;
+    padding: 7px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .gate__btn-primary:hover { filter: brightness(1.1); }
+
+  /* note: this run already auto-advanced past plan, so the gate
+     becomes a passive "approved" strip rather than a CTA. We show
+     the alternative (active gate) in the overlay below. */
+  .gate--approved .gate__icon {
+    background: rgba(76,183,130,0.12);
+    color: var(--st-done);
+    box-shadow: inset 0 0 0 1px rgba(76,183,130,0.3);
+  }
+
+  .si { width: 14px; height: 14px; }
+  @keyframes tick { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-done" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="6" fill="currentColor" />
+      <path d="M 4.2 7.2 L 6.2 9.1 L 9.8 5.2" fill="none" stroke="#0d0e10" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-progress" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M 7 7 L 7 1.5 A 5.5 5.5 0 0 1 12.5 7 Z" fill="currentColor" />
+    </symbol>
+    <symbol id="i-back" viewBox="0 0 12 12">
+      <path d="M 9 6 L 3 6 M 6 3 L 3 6 L 6 9" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-doc" viewBox="0 0 14 14">
+      <path d="M 3 2 H 8.5 L 11 4.5 V 12 H 3 Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+      <path d="M 8.5 2 V 4.5 H 11" fill="none" stroke="currentColor" stroke-width="1.2" />
+      <path d="M 5 7 H 9 M 5 9 H 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16">
+      <path d="M 8 3.5 L 8 12.5 M 3.5 8 L 12.5 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+    </symbol>
+    <symbol id="i-menu" viewBox="0 0 16 16">
+      <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
+      <circle cx="8"   cy="8" r="1.2" fill="currentColor" />
+      <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
+    </symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="topbar__left">
+    <div class="logo"><span class="logo__mark"></span> pi-harness</div>
+    <nav class="nav">
+      <a href="kanban-cards.html">Board</a>
+      <a href="runs.html">Runs</a>
+      <a href="scenarios.html">Scenarios</a>
+    </nav>
+  </div>
+  <div class="topbar__center">
+    <span class="stat stat--running"><span class="stat__dot"></span>3 running</span>
+    <span class="stat stat--blocked"><span class="stat__dot"></span>1 blocked</span>
+    <span class="stat stat--done">12 done today</span>
+  </div>
+  <div class="topbar__right">
+    <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd> Search</span>
+    <button class="btn">+ New task</button>
+    <span class="branch">main ▾</span>
+  </div>
+</header>
+
+<section class="head">
+  <div class="crumb">
+    <a href="kanban-cards.html"><svg class="si" style="width:10px;height:10px;vertical-align:-1px"><use href="#i-back"/></svg> Board</a>
+    <span class="sep">/</span>
+    <a href="task-detail.html" class="id">T-093</a>
+    <span class="sep">/</span>
+    <span class="phase">plan</span>
+  </div>
+  <div class="head__row">
+    <span class="head__icon"><svg class="si"><use href="#i-done"/></svg></span>
+    <h1 class="head__title">Auth redirect after login on mobile</h1>
+    <span class="head__sub">phase complete · <span class="accent">47s</span> · plan-author</span>
+    <div class="head__actions">
+      <button class="ibtn">Open plan.md</button>
+      <button class="ibtn">Re-run plan</button>
+    </div>
+  </div>
+</section>
+
+<div class="grid">
+
+  <!-- ── LEFT · PLAN MARKDOWN ─────────────────────────────────── -->
+  <main class="col-left">
+    <article class="plan">
+
+      <h2><span class="num">01</span> Approach</h2>
+      <p>
+        The bug is iOS-safari-only because Safari's ITP drops the OAuth provider's
+        cross-site cookie before the callback round-trips, so <code>session.ts</code>
+        never sees the original <code>continue=</code> URL. Per <strong>D2</strong>,
+        we'll round-trip the redirect target inside the signed OAuth
+        <code>state</code> parameter — first-party, under our control, opaque to the
+        provider.
+      </p>
+      <p>
+        Encode <code>{ to, nonce, exp }</code>, sign with the existing HMAC key in
+        <code>auth-secret.ts</code>, base64url-encode, send. On callback, verify
+        the signature, check <code>exp &lt; now + 5min</code>, redirect to <code>to</code>
+        if it's same-origin; otherwise hard-fail to <code>/</code> with a logged
+        warning.
+      </p>
+
+      <h2><span class="num">02</span> File changes</h2>
+      <div class="files">
+        <div class="file-row">
+          <span class="file-row__op edit">~</span>
+          <span class="file-row__path">src/auth/redirect.ts</span>
+          <span class="file-row__why">encode + parse <code>state</code> param; replace sessionStorage path</span>
+          <span class="file-row__delta">+~50 −~5</span>
+        </div>
+        <div class="file-row">
+          <span class="file-row__op new">+</span>
+          <span class="file-row__path">src/auth/mobile-flow.ts</span>
+          <span class="file-row__why">isolated helper for the iOS-safari code path</span>
+          <span class="file-row__delta">+~20</span>
+        </div>
+        <div class="file-row">
+          <span class="file-row__op edit">~</span>
+          <span class="file-row__path">src/auth/state.ts</span>
+          <span class="file-row__why">expose <code>signRedirectState()</code> / <code>verifyRedirectState()</code></span>
+          <span class="file-row__delta">+~12</span>
+        </div>
+        <div class="file-row">
+          <span class="file-row__op new">+</span>
+          <span class="file-row__path">test/auth/redirect.test.ts</span>
+          <span class="file-row__why">unit coverage for sign/verify + iOS-safari guard</span>
+          <span class="file-row__delta">+~85</span>
+        </div>
+        <div class="file-row">
+          <span class="file-row__op new">+</span>
+          <span class="file-row__path">test/auth/mobile.test.ts</span>
+          <span class="file-row__why">e2e walk through OAuth round-trip on mobile webkit</span>
+          <span class="file-row__delta">+~40</span>
+        </div>
+        <div class="file-row">
+          <span class="file-row__op edit">~</span>
+          <span class="file-row__path">CHANGELOG.md</span>
+          <span class="file-row__why">user-facing line for the fix</span>
+          <span class="file-row__delta">+1</span>
+        </div>
+      </div>
+
+      <h2><span class="num">03</span> Risks</h2>
+      <div class="risks">
+        <div class="risk risk--high">
+          <span class="risk__dot"></span>
+          <div class="risk__body">
+            <strong>Open redirect.</strong> If <code>verifyRedirectState()</code> doesn't
+            check same-origin, a signed link from us could redirect to an attacker's
+            domain. <em>Mitigation:</em> reject any <code>to</code> whose origin
+            doesn't match <code>req.host</code>, fail closed to <code>/</code>.
+          </div>
+        </div>
+        <div class="risk">
+          <span class="risk__dot"></span>
+          <div class="risk__body">
+            <strong>2KB <code>state</code> ceiling.</strong> Some OAuth providers
+            cap <code>state</code> at ~2KB. Long deep-link URLs could exceed this.
+            See open question Q1 — plan-author defaults to truncating with a
+            warning, plan reviewer can override.
+          </div>
+        </div>
+        <div class="risk">
+          <span class="risk__dot"></span>
+          <div class="risk__body">
+            <strong>Replay window.</strong> 5-minute <code>exp</code> is generous.
+            If we tighten later, expired sessions during slow OAuth flows will
+            redirect to root with no error UI.
+          </div>
+        </div>
+      </div>
+
+      <h2><span class="num">04</span> Open from brainstorm</h2>
+      <div class="open-q">
+        <span class="label">Q1</span>
+        <span class="body">
+          Cap on the round-trippable URL length, or accept anything? Long URLs in
+          <code>state</code> approach the OAuth 2KB limit. Plan-author has chosen
+          to truncate to 1.5KB with a debug log; flip the toggle below to make
+          this a hard reject instead.
+        </span>
+      </div>
+
+    </article>
+  </main>
+
+  <!-- ── RIGHT · SCENARIO EDITOR ──────────────────────────────── -->
+  <aside class="col-right">
+    <div class="scn-head">
+      <h2>Scenarios</h2>
+      <div class="lede">
+        Each scenario the verify phase will run. Pulled from the Scenarios
+        library where possible — toggling one off skips it for this run only.
+      </div>
+    </div>
+
+    <div class="scn-list">
+
+      <div class="scn scn--on">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind unit"><span class="dot"></span>unit</span>
+            <span class="scn__id">S-024</span>
+            <span class="scn__src lib">from library</span>
+          </div>
+          <div class="scn__name">Auth redirect preserves deep-link query string</div>
+          <div class="scn__expr">
+            <span class="key">redirectAfterLogin("/r?x=1#h")</span>
+            <span class="arrow">→</span> "/r?x=1#h" · path = /r · hash kept
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn scn--on">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind unit"><span class="dot"></span>unit</span>
+            <span class="scn__id">S-041</span>
+            <span class="scn__src new">new · this run</span>
+          </div>
+          <div class="scn__name">signRedirectState rejects expired payloads</div>
+          <div class="scn__expr">
+            <span class="key">verifyRedirectState(token, now + 6min)</span>
+            <span class="arrow">→</span> <span class="ok">throws</span> <span class="key">RedirectStateExpired</span>
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn scn--on">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind unit"><span class="dot"></span>unit</span>
+            <span class="scn__id">S-042</span>
+            <span class="scn__src new">new · this run</span>
+          </div>
+          <div class="scn__name">verifyRedirectState rejects cross-origin <code>to</code></div>
+          <div class="scn__expr">
+            <span class="key">to = "https://evil.example/x"</span>
+            <span class="arrow">→</span> falls back to <span class="ok">/</span> · logs warning
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn scn--on">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind api"><span class="dot"></span>api</span>
+            <span class="scn__id">S-014</span>
+            <span class="scn__src lib">from library</span>
+          </div>
+          <div class="scn__name">Login returns 200 + bearer token</div>
+          <div class="scn__expr">
+            <span class="verb">POST</span> <span class="url">/api/auth/login</span>
+            <span class="arrow">→</span> <span class="ok">200</span>
+            <span class="key">body.token</span> matches <span class="ok">/^Bearer\s\w+/</span>
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn scn--on">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind api"><span class="dot"></span>api</span>
+            <span class="scn__id">S-043</span>
+            <span class="scn__src new">new · this run</span>
+          </div>
+          <div class="scn__name">/auth/callback redirects to encoded <code>to</code></div>
+          <div class="scn__expr">
+            <span class="verb">GET</span> <span class="url">/auth/callback?state=&lt;signed&gt;</span>
+            <span class="arrow">→</span> <span class="ok">302</span> · Location: /r/abc?x=1
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn scn--on">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind visual"><span class="dot"></span>visual</span>
+            <span class="scn__id">S-033</span>
+            <span class="scn__src lib">from library</span>
+          </div>
+          <div class="scn__name">Login redirect · iOS safari viewport</div>
+          <div class="scn__expr">
+            playwright · webkit · 375 × 812
+            <span class="arrow">→</span> baseline diff &lt; 0.5%
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn scn--off">
+        <span class="scn__check"></span>
+        <div class="scn__body">
+          <div class="scn__top">
+            <span class="scn__kind visual"><span class="dot"></span>visual</span>
+            <span class="scn__id">S-029</span>
+            <span class="scn__src lib">from library</span>
+          </div>
+          <div class="scn__name">Empty state · new account dashboard</div>
+          <div class="scn__expr">
+            unrelated to this change · skipped for this run
+          </div>
+        </div>
+        <span class="scn__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+      </div>
+
+      <div class="scn-add">
+        <svg class="si"><use href="#i-plus"/></svg>
+        <span>add scenario · pick from library or write inline</span>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<!-- ── VERDICT GATE STRIP ─────────────────────────────────────── -->
+<section class="gate gate--approved">
+  <span class="gate__icon"><svg class="si"><use href="#i-done"/></svg></span>
+  <div class="gate__body">
+    <div class="gate__title">Plan approved · auto-advanced to Code</div>
+    <div class="gate__sub">
+      <span class="accent">6 of 7</span> scenarios enabled · all must pass before PR ·
+      coder picked up plan rev <span class="accent">a3</span> at 14:03:26
+    </div>
+  </div>
+  <div class="gate__actions">
+    <button class="gate__btn-ghost">Diff vs previous plan</button>
+    <button class="gate__btn-primary">Open Code phase ↗</button>
+  </div>
+</section>
+
+</body>
+</html>

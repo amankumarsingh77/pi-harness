@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pi-harness · kanban</title>
+<style>
+  /* ─────────────────────────────────────────────────────────────────
+     Linear-inspired tokens. Calm dark surface, single accent per
+     state, hairline borders, no decorative chrome.
+     ───────────────────────────────────────────────────────────────── */
+  :root {
+    --bg:               #0d0e10;
+    --bg-elev:          #131418;
+    --bg-elev-hover:    #181a1f;
+    --bg-input:         #0a0b0d;
+
+    --fg:               #f7f8f8;
+    --fg-body:          #e6e7e9;
+    --fg-mute:          #8a8f98;
+    --fg-mute-2:        #6b7079;
+    --fg-faint:         #4a4e57;
+
+    --line:             rgba(255,255,255,0.06);
+    --line-hover:       rgba(255,255,255,0.12);
+    --line-strong:      rgba(255,255,255,0.18);
+
+    /* Status palette — used ONLY by status icons, never as bg. */
+    --st-idle:          #8a8f98;   /* backlog / intake          */
+    --st-progress:      #5e6ad2;   /* in-progress (Linear blue) */
+    --st-review:        #f2c94c;   /* awaiting human            */
+    --st-blocked:       #eb5757;   /* failure                   */
+    --st-shipping:      #c084fc;   /* PR open                   */
+    --st-done:          #4cb782;   /* merged                    */
+
+    --r:                6px;
+    --r-sm:             4px;
+
+    --font-sans: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg-body);
+    font-family: var(--font-sans);
+    font-size: 13px; line-height: 1.5;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  ::selection { background: rgba(94,106,210,0.35); }
+
+  /* ─── topbar ─────────────────────────────────────────────────── */
+  .topbar {
+    height: 48px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 24px;
+    background: rgba(13,14,16,0.85);
+    backdrop-filter: saturate(140%) blur(8px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar__left { display: flex; align-items: center; gap: 24px; }
+  .logo {
+    font-weight: 600; font-size: 13.5px; color: var(--fg);
+    letter-spacing: -0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .logo__mark {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #5e6ad2 0%, #c084fc 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  }
+  .nav { display: flex; align-items: center; gap: 2px; }
+  .nav a {
+    font-size: 12.5px;
+    color: var(--fg-mute);
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    letter-spacing: -0.005em;
+    transition: color 120ms ease, background 120ms ease;
+  }
+  .nav a:hover { color: var(--fg-body); background: rgba(255,255,255,0.04); }
+  .nav a.active { color: var(--fg); }
+
+  .topbar__center {
+    display: flex; justify-content: center; align-items: center; gap: 18px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+    letter-spacing: 0.02em;
+  }
+  .stat { display: inline-flex; align-items: center; gap: 6px; }
+  .stat__dot { width: 6px; height: 6px; border-radius: 50%; }
+  .stat--running .stat__dot {
+    background: var(--st-progress);
+    box-shadow: 0 0 6px rgba(94,106,210,0.5);
+    animation: tick 2.4s ease-in-out infinite;
+  }
+  .stat--blocked { color: var(--st-blocked); }
+  .stat--blocked .stat__dot { background: var(--st-blocked); }
+  .stat--done { color: var(--fg-mute-2); }
+
+  .topbar__right { display: flex; align-items: center; gap: 8px; }
+  .kbd {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+    border: 1px solid var(--line);
+    background: var(--bg-elev);
+    padding: 4px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms;
+  }
+  .kbd:hover { color: var(--fg-body); border-color: var(--line-hover); }
+  .kbd kbd {
+    font-family: inherit; font-size: 10.5px;
+    color: var(--fg-mute-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 4px;
+    background: rgba(255,255,255,0.02);
+  }
+  .btn {
+    background: var(--st-progress);
+    color: #fff;
+    border: 0;
+    font-family: var(--font-sans);
+    font-size: 12px; font-weight: 500;
+    letter-spacing: -0.005em;
+    padding: 6px 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: filter 120ms ease;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .branch {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+    border: 1px solid var(--line);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms;
+  }
+  .branch:hover { color: var(--fg-body); border-color: var(--line-hover); }
+
+  /* ─── filter bar ─────────────────────────────────────────────── */
+  .filterbar {
+    height: 40px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 6px;
+    color: var(--fg-mute);
+    font-size: 12px;
+  }
+  .filter {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px;
+    border-radius: 4px;
+    border: 1px dashed var(--line);
+    color: var(--fg-mute);
+    cursor: pointer;
+    font-size: 11.5px;
+    transition: color 120ms, border-color 120ms, background 120ms;
+  }
+  .filter:hover { color: var(--fg-body); border-color: var(--line-hover); background: rgba(255,255,255,0.02); }
+  .filter--applied {
+    border-style: solid;
+    border-color: var(--line-strong);
+    background: rgba(255,255,255,0.03);
+    color: var(--fg-body);
+  }
+  .filter__sep { margin: 0 8px; color: var(--fg-faint); }
+  .filterbar__right { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--fg-mute-2); font-family: var(--font-mono); }
+
+  /* ─── board ──────────────────────────────────────────────────── */
+  .board-wrap {
+    overflow-x: auto;
+    padding: 16px 20px 80px;
+  }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(280px, 1fr));
+    gap: 12px;
+    min-width: max-content;
+  }
+  .col {
+    display: flex; flex-direction: column;
+    gap: 0;
+    min-width: 0;
+  }
+  .col__head {
+    display: flex; align-items: center; gap: 8px;
+    height: 40px; padding: 0 6px;
+    color: var(--fg-mute);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+  .col__head .col__icon { display: inline-flex; }
+  .col__head .col__name {
+    text-transform: capitalize;
+    color: var(--fg-body);
+  }
+  .col__head .col__count {
+    color: var(--fg-mute-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    margin-left: 2px;
+  }
+  .col__head .col__add {
+    margin-left: auto;
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-mute-2);
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms, background 120ms, color 120ms;
+  }
+  .col:hover .col__add { opacity: 1; }
+  .col__add:hover { background: rgba(255,255,255,0.05); color: var(--fg); }
+  .col__list {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+  }
+
+  /* ─── card ───────────────────────────────────────────────────── */
+  .card {
+    position: relative;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    padding: 10px 12px 12px;
+    display: flex; flex-direction: column;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .card:hover {
+    background: var(--bg-elev-hover);
+    border-color: var(--line-hover);
+  }
+  .card__top {
+    display: flex; align-items: center;
+    gap: 8px;
+    color: var(--fg-mute);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+  .card__icon { flex-shrink: 0; line-height: 0; }
+  .card__id { color: var(--fg-mute); }
+  .card__age { margin-left: auto; color: var(--fg-mute-2); }
+  .card__menu {
+    width: 22px; height: 22px;
+    margin-left: 4px; margin-right: -4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-mute-2);
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 120ms, background 120ms, color 120ms;
+  }
+  .card:hover .card__menu { opacity: 1; }
+  .card__menu:hover { background: rgba(255,255,255,0.06); color: var(--fg); }
+
+  .card__title {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--fg);
+    line-height: 1.4;
+    letter-spacing: -0.012em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card__meta {
+    display: flex; align-items: center; gap: 0;
+    color: var(--fg-mute-2);
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.01em;
+    flex-wrap: wrap;
+  }
+  .card__meta > * + *::before {
+    content: "·";
+    margin: 0 7px;
+    color: var(--fg-faint);
+  }
+  .card__meta .accent { color: var(--fg-body); }
+  .card__meta .review { color: var(--st-review); }
+  .card__meta .blocked { color: var(--st-blocked); }
+  .card__meta .live { color: var(--st-progress); }
+  .card__meta .merged { color: var(--st-done); }
+  .card__meta .pr { color: var(--st-shipping); }
+
+  /* When the card is "needs you" (review or blocked), show a thin
+     left edge accent — a 2px inner line, not a full rail. Linear uses
+     this trick on lozenges that need attention. */
+  .card.is-attention::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--st-attention, var(--st-review));
+  }
+  .card.is-attention.is-blocked::before { background: var(--st-blocked); }
+
+  /* ─── status icons (SVG inline) ──────────────────────────────── */
+  .si { width: 14px; height: 14px; }
+
+  /* live state — apply on the icon's wrapper */
+  .is-live .card__icon { animation: tick 2.4s ease-in-out infinite; }
+
+  /* ─── empty column hint ──────────────────────────────────────── */
+  .col__empty {
+    height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px dashed var(--line);
+    border-radius: var(--r);
+    color: var(--fg-faint);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms;
+  }
+  .col__empty:hover { color: var(--fg-mute); border-color: var(--line-hover); }
+
+  /* ─── animations ─────────────────────────────────────────────── */
+  @keyframes tick {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SVG SYMBOLS — Linear-style status icons, used inline via <use>.
+     ═════════════════════════════════════════════════════════════════ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- intake/backlog: dashed ring -->
+    <symbol id="i-intake" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none"
+              stroke="currentColor" stroke-width="1.5"
+              stroke-dasharray="2 2.4" />
+    </symbol>
+
+    <!-- in-progress: quarter pie inside ring -->
+    <symbol id="i-progress" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none"
+              stroke="currentColor" stroke-width="1.5" />
+      <path d="M 7 7 L 7 1.5 A 5.5 5.5 0 0 1 12.5 7 Z"
+            fill="currentColor" />
+    </symbol>
+
+    <!-- review: half pie inside ring (= "halfway, awaiting you") -->
+    <symbol id="i-review" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none"
+              stroke="currentColor" stroke-width="1.5" />
+      <path d="M 7 7 L 7 1.5 A 5.5 5.5 0 0 1 7 12.5 Z"
+            fill="currentColor" />
+    </symbol>
+
+    <!-- blocked: ring with bar through it -->
+    <symbol id="i-blocked" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none"
+              stroke="currentColor" stroke-width="1.5" />
+      <path d="M 4 7 L 10 7"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </symbol>
+
+    <!-- shipping (PR open): ring with inner dot -->
+    <symbol id="i-shipping" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none"
+              stroke="currentColor" stroke-width="1.5" />
+      <circle cx="7" cy="7" r="2.2" fill="currentColor" />
+    </symbol>
+
+    <!-- done: filled circle with check -->
+    <symbol id="i-done" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="6" fill="currentColor" />
+      <path d="M 4.2 7.2 L 6.2 9.1 L 9.8 5.2"
+            fill="none" stroke="#0d0e10" stroke-width="1.6"
+            stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+
+    <!-- triple dot icon for hover menu -->
+    <symbol id="i-menu" viewBox="0 0 16 16">
+      <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
+      <circle cx="8"   cy="8" r="1.2" fill="currentColor" />
+      <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
+    </symbol>
+
+    <!-- plus -->
+    <symbol id="i-plus" viewBox="0 0 16 16">
+      <path d="M 8 3.5 L 8 12.5 M 3.5 8 L 12.5 8"
+            stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TOPBAR
+     ═════════════════════════════════════════════════════════════════ -->
+<header class="topbar">
+  <div class="topbar__left">
+    <div class="logo">
+      <span class="logo__mark"></span>
+      pi-harness
+    </div>
+    <nav class="nav">
+      <a href="#" class="active">Board</a>
+      <a href="#">Runs</a>
+      <a href="#">Scenarios</a>
+    </nav>
+  </div>
+
+  <div class="topbar__center">
+    <span class="stat stat--running"><span class="stat__dot"></span>3 running</span>
+    <span class="stat stat--blocked"><span class="stat__dot"></span>1 blocked</span>
+    <span class="stat stat--done">12 done today</span>
+  </div>
+
+  <div class="topbar__right">
+    <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd> Search</span>
+    <button class="btn">+ New task</button>
+    <span class="branch">main ▾</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     FILTER BAR  — Linear has this between topbar and board.
+     Filters are dashed-bordered "add filter" affordances at rest;
+     applied filters become solid lozenges.
+     ═════════════════════════════════════════════════════════════════ -->
+<div class="filterbar">
+  <span class="filter filter--applied">Status: any</span>
+  <span class="filter">+ Phase</span>
+  <span class="filter">+ Branch</span>
+  <span class="filter">+ Updated</span>
+  <span class="filter__sep">|</span>
+  <span class="filter">Group by phase</span>
+  <span class="filterbar__right">
+    <span>22 tasks</span>
+  </span>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     BOARD
+     ═════════════════════════════════════════════════════════════════ -->
+<main class="board-wrap">
+  <div class="board">
+
+    <!-- ── INTAKE ───────────────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-idle)">
+          <svg class="si"><use href="#i-intake"/></svg>
+        </span>
+        <span class="col__name">Intake</span>
+        <span class="col__count">2</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-idle)">
+              <svg class="si"><use href="#i-intake"/></svg>
+            </span>
+            <span class="card__id">T-104</span>
+            <span class="card__age">14m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Add email digest for weekly summary</div>
+          <div class="card__meta">
+            <span>created 14m ago</span>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-idle)">
+              <svg class="si"><use href="#i-intake"/></svg>
+            </span>
+            <span class="card__id">T-103</span>
+            <span class="card__age">42m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Refactor billing webhook signature check</div>
+          <div class="card__meta">
+            <span>created 42m ago</span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ── BRAINSTORM ───────────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-progress)">
+          <svg class="si"><use href="#i-progress"/></svg>
+        </span>
+        <span class="col__name">Brainstorm</span>
+        <span class="col__count">1</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card is-live">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-progress)">
+              <svg class="si"><use href="#i-progress"/></svg>
+            </span>
+            <span class="card__id">T-101</span>
+            <span class="card__age">2m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Add per-user rate limiting on /api/upload</div>
+          <div class="card__meta">
+            <span class="live">brainstorm</span>
+            <span>3 decisions</span>
+            <span>2 open</span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ── PLAN (review) ────────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-review)">
+          <svg class="si"><use href="#i-review"/></svg>
+        </span>
+        <span class="col__name">Plan</span>
+        <span class="col__count">1</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card is-attention" style="--st-attention: var(--st-review)">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-review)">
+              <svg class="si"><use href="#i-review"/></svg>
+            </span>
+            <span class="card__id">T-098</span>
+            <span class="card__age">47s</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">CSV export for admin reports</div>
+          <div class="card__meta">
+            <span class="review">awaiting review</span>
+            <span>4 files</span>
+            <span>3 scenarios</span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ── CODE ─────────────────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-progress)">
+          <svg class="si"><use href="#i-progress"/></svg>
+        </span>
+        <span class="col__name">Code</span>
+        <span class="col__count">2</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card is-live">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-progress)">
+              <svg class="si"><use href="#i-progress"/></svg>
+            </span>
+            <span class="card__id">T-093</span>
+            <span class="card__age">19m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Auth redirect after login on mobile</div>
+          <div class="card__meta">
+            <span class="live">code</span>
+            <span>6 files</span>
+            <span>tests <span class="accent">18/24</span></span>
+          </div>
+        </article>
+
+        <article class="card is-live">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-progress)">
+              <svg class="si"><use href="#i-progress"/></svg>
+            </span>
+            <span class="card__id">T-092</span>
+            <span class="card__age">6m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Debounce search box on dashboard</div>
+          <div class="card__meta">
+            <span class="live">code</span>
+            <span>2 files</span>
+            <span>tests <span class="accent">8/8</span></span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ── VERIFY (blocked) ─────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-blocked)">
+          <svg class="si"><use href="#i-blocked"/></svg>
+        </span>
+        <span class="col__name">Verify</span>
+        <span class="col__count">1</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card is-attention is-blocked">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-blocked)">
+              <svg class="si"><use href="#i-blocked"/></svg>
+            </span>
+            <span class="card__id">T-091</span>
+            <span class="card__age">3m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Theme switcher persistence</div>
+          <div class="card__meta">
+            <span class="blocked">1 visual diff &gt; 0.5%</span>
+            <span>unit 24/24</span>
+            <span>api 3/3</span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ── PR ───────────────────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-shipping)">
+          <svg class="si"><use href="#i-shipping"/></svg>
+        </span>
+        <span class="col__name">PR</span>
+        <span class="col__count">1</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-shipping)">
+              <svg class="si"><use href="#i-shipping"/></svg>
+            </span>
+            <span class="card__id">T-090</span>
+            <span class="card__age">5m</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Stripe webhook idempotency keys</div>
+          <div class="card__meta">
+            <span class="pr">#1284</span>
+            <span>ci ▸ tests</span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ── DONE ─────────────────────────────────────────────── -->
+    <section class="col">
+      <header class="col__head">
+        <span class="col__icon" style="color: var(--st-done)">
+          <svg class="si"><use href="#i-done"/></svg>
+        </span>
+        <span class="col__name">Done</span>
+        <span class="col__count">2</span>
+        <span class="col__add"><svg class="si"><use href="#i-plus"/></svg></span>
+      </header>
+      <div class="col__list">
+
+        <article class="card">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-done)">
+              <svg class="si"><use href="#i-done"/></svg>
+            </span>
+            <span class="card__id">T-088</span>
+            <span class="card__age">1h</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Login redirect bug on safari</div>
+          <div class="card__meta">
+            <span class="merged">#1278 merged</span>
+            <span>1h ago</span>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card__top">
+            <span class="card__icon" style="color: var(--st-done)">
+              <svg class="si"><use href="#i-done"/></svg>
+            </span>
+            <span class="card__id">T-087</span>
+            <span class="card__age">3h</span>
+            <span class="card__menu"><svg class="si"><use href="#i-menu"/></svg></span>
+          </div>
+          <div class="card__title">Empty state for new accounts</div>
+          <div class="card__meta">
+            <span class="merged">#1276 merged</span>
+            <span>3h ago</span>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+  </div>
+</main>
+
+</body>
+</html>

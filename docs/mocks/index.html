@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pi-harness · Mocks</title>
+<style>
+  :root {
+    --bg:#0a0a0a; --bg-card:#111113; --bg-sub:#18181b; --bg-muted:#0f0f10; --bg-input:#050506;
+    --fg:#fafafa; --fg-body:#e4e4e7; --fg-label:#a1a1aa; --fg-subtle:#71717a; --fg-faint:#52525b; --fg-ghost:#3f3f46;
+    --border:#27272a; --border-soft:#1f1f23; --border-strong:#3f3f46;
+    --violet-fg:#a78bfa; --violet-bg:#3b1f5e;
+    --blue-fg:#60a5fa;   --blue-bg:#1e3a5f;
+    --amber-fg:#fbbf24;  --amber-fg2:#fcd34d; --amber-bg:#3f2d0c;
+    --cyan-fg:#22d3ee;   --cyan-fg2:#67e8f9;  --cyan-bg:#0e3a4a;
+    --red-fg:#f87171;    --red-fg2:#fca5a5;   --red-bg:#4a1414;
+    --green-fg:#34d399;  --green-fg2:#6ee7b7; --green-bg:#0d3a26;
+    --r-sm:4px; --r-md:6px; --r-lg:8px;
+    --font-display: ui-sans-serif, -apple-system, "SF Pro Display", "Geist", system-ui, sans-serif;
+    --font-body:    ui-sans-serif, -apple-system, "SF Pro Text", "Geist", system-ui, sans-serif;
+    --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono", "Geist Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg-body);
+    font-family: var(--font-body); font-size: 13px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased; min-height: 100vh;
+    background:
+      radial-gradient(1400px 700px at 50% -10%, rgba(167,139,250,0.05), transparent 60%),
+      radial-gradient(1000px 500px at 100% 100%, rgba(96,165,250,0.03), transparent 60%),
+      var(--bg);
+  }
+
+  .container {
+    max-width: 1200px; margin: 0 auto;
+    padding: 64px 32px 120px;
+  }
+
+  /* hero */
+  .hero {
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 48px;
+    margin-bottom: 48px;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 64px;
+    align-items: end;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 0.18em;
+    color: var(--fg-faint);
+    text-transform: uppercase;
+    margin-bottom: 24px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-fg); box-shadow: 0 0 6px var(--green-fg); }
+  .eyebrow .ver { color: var(--fg-subtle); }
+
+  h1.title {
+    font-family: var(--font-display);
+    font-size: 64px; font-weight: 600;
+    line-height: 1.02;
+    letter-spacing: -0.04em;
+    margin: 0;
+    color: var(--fg);
+  }
+  h1.title em {
+    font-style: normal;
+    color: var(--violet-fg);
+    -webkit-text-stroke: 0;
+    background: linear-gradient(180deg, #c4b5fd 0%, var(--violet-fg) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lede {
+    color: var(--fg-subtle);
+    font-size: 15px;
+    margin-top: 24px;
+    max-width: 560px;
+    line-height: 1.6;
+  }
+  .lede strong { color: var(--fg-body); font-weight: 600; }
+
+  .hero__meta {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg);
+    padding: 20px 22px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg-label);
+    line-height: 1.9;
+  }
+  .hero__meta .row { display: flex; justify-content: space-between; }
+  .hero__meta .k { color: var(--fg-faint); letter-spacing: 0.04em; }
+  .hero__meta .v { color: var(--fg); }
+  .hero__meta .v.amber { color: var(--amber-fg2); }
+  .hero__meta .v.violet { color: var(--violet-fg); }
+  .hero__meta .v.green { color: var(--green-fg); }
+
+  /* cards grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+
+  .mock {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    display: flex; flex-direction: column;
+    transition: border-color 160ms ease, transform 160ms ease, box-shadow 240ms ease;
+    position: relative;
+  }
+  .mock:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-2px);
+    box-shadow: 0 16px 40px -16px rgba(0,0,0,0.6);
+  }
+
+  .mock__num {
+    position: absolute;
+    top: 16px; right: 18px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-faint);
+    letter-spacing: 0.08em;
+  }
+
+  .mock__preview {
+    height: 180px;
+    background: var(--bg-input);
+    border-bottom: 1px solid var(--border-soft);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .mock__body {
+    padding: 20px 22px 22px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .mock__name {
+    font-family: var(--font-display);
+    font-size: 18px; font-weight: 600;
+    color: var(--fg);
+    letter-spacing: -0.015em;
+  }
+  .mock__file {
+    font-family: var(--font-mono);
+    font-size: 10px; color: var(--fg-faint);
+    letter-spacing: 0.06em;
+  }
+  .mock__desc {
+    color: var(--fg-subtle);
+    font-size: 13px;
+    line-height: 1.55;
+    margin-top: 4px;
+  }
+  .mock__cta {
+    margin-top: 12px;
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--fg-label);
+  }
+  .mock__cta .arrow {
+    transition: transform 160ms ease;
+  }
+  .mock:hover .mock__cta { color: var(--fg); }
+  .mock:hover .mock__cta .arrow { transform: translateX(3px); }
+
+  /* per-mock preview */
+  /* 1. kanban — mini columns */
+  .preview-kanban {
+    padding: 16px;
+    display: grid; grid-template-columns: repeat(8, 1fr);
+    gap: 6px; height: 100%;
+  }
+  .preview-kanban .mc {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-top: 2px solid var(--col, var(--fg-ghost));
+    border-radius: 4px;
+    display: flex; flex-direction: column;
+    gap: 4px;
+    padding: 6px 4px;
+  }
+  .preview-kanban .mc .mt {
+    background: var(--bg-sub);
+    height: 22px;
+    border-radius: 3px;
+    border: 1px solid var(--border-soft);
+  }
+  .preview-kanban .mc .mt.active { border-color: var(--col); }
+
+  /* 2. brainstorm — chat bubbles */
+  .preview-brain {
+    padding: 18px;
+    display: flex; flex-direction: column; gap: 8px;
+    height: 100%;
+  }
+  .preview-brain .bubble {
+    height: 26px;
+    border-radius: 8px;
+    background: var(--bg-sub); border: 1px solid var(--border-soft);
+  }
+  .preview-brain .bubble--a { width: 72%; border-left: 2px solid var(--violet-fg); }
+  .preview-brain .bubble--y { width: 56%; align-self: flex-end; background: rgba(52,211,153,0.07); border-color: rgba(52,211,153,0.2); }
+  .preview-brain .bubble--a2 { width: 64%; border-left: 2px solid var(--violet-fg); }
+  .preview-brain .typing {
+    display: flex; gap: 4px; padding: 8px 12px;
+    background: var(--bg-sub); border: 1px solid var(--border-soft); border-left: 2px solid var(--violet-fg);
+    border-radius: 8px; width: fit-content;
+  }
+  .preview-brain .typing span { width: 5px; height: 5px; border-radius: 50%; background: var(--violet-fg); opacity: 0.6; }
+
+  /* 3. task — log lines */
+  .preview-task {
+    padding: 14px 18px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    line-height: 1.7;
+    color: var(--fg-faint);
+    height: 100%;
+    overflow: hidden;
+  }
+  .preview-task .line { display: grid; grid-template-columns: 50px 80px 1fr; gap: 8px; }
+  .preview-task .t { color: var(--fg-faint); }
+  .preview-task .ty { font-weight: 700; }
+  .preview-task .ty.b { color: var(--blue-fg); }
+  .preview-task .ty.g { color: var(--green-fg); }
+  .preview-task .ty.r { color: var(--red-fg); }
+  .preview-task .ty.v { color: var(--violet-fg); }
+  .preview-task .m { color: var(--fg-label); }
+
+  /* 4. verify — three columns mini */
+  .preview-verify {
+    padding: 16px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    height: 100%;
+  }
+  .preview-verify .v {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: 4px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .preview-verify .v .h {
+    height: 22px;
+    font-family: var(--font-mono);
+    font-size: 8.5px; font-weight: 700;
+    letter-spacing: 0.1em;
+    display: flex; align-items: center; padding: 0 8px;
+  }
+  .preview-verify .v.unit  .h { background: rgba(52,211,153,0.1);   color: var(--green-fg2); }
+  .preview-verify .v.func  .h { background: rgba(52,211,153,0.1);   color: var(--green-fg2); }
+  .preview-verify .v.vis   .h { background: rgba(251,191,36,0.1);   color: var(--amber-fg2); }
+  .preview-verify .v .b {
+    flex: 1;
+    padding: 6px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .preview-verify .v .row { height: 5px; background: var(--bg-sub); border-radius: 1px; }
+  .preview-verify .v.vis .row { background: var(--bg-input); height: 24px; border: 1px dashed var(--border); border-radius: 2px; }
+
+  /* footer */
+  .footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-soft);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--font-mono);
+    font-size: 10.5px; letter-spacing: 0.06em;
+    color: var(--fg-faint);
+  }
+  .footer a { color: var(--fg-subtle); text-decoration: none; }
+  .footer a:hover { color: var(--fg); }
+
+  /* legend */
+  .legend {
+    margin: 36px 0 24px;
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .swatch {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fg-label);
+    letter-spacing: 0.04em;
+  }
+  .swatch .dot { width: 6px; height: 6px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<main class="container">
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">
+        <span class="dot"></span>
+        <span>pi-harness · ui mocks</span>
+        <span class="ver">v0.1 · 2026-05-08</span>
+      </div>
+      <h1 class="title">A multi-agent<br>coding harness, <em>visualized.</em></h1>
+      <p class="lede">
+        Five views that together describe how a task moves from a one-liner ticket
+        to a verified PR — through brainstorm, plan, code, and a three-class
+        verification gate. Built on <strong>pi.dev</strong>, agents on
+        <strong>pi-subagents</strong>, dashboard in Next.js + SSE.
+      </p>
+    </div>
+
+    <aside class="hero__meta">
+      <div class="row"><span class="k">workflow</span><span class="v">backend-feature</span></div>
+      <div class="row"><span class="k">phases</span><span class="v">5 · brainstorm → pr</span></div>
+      <div class="row"><span class="k">evidence</span><span class="v green">unit + functional + visual</span></div>
+      <div class="row"><span class="k">isolation</span><span class="v">git worktree per run</span></div>
+      <div class="row"><span class="k">subagents</span><span class="v">13 vendored · 4 ours</span></div>
+      <div class="row"><span class="k">retries</span><span class="v amber">2 · then human triage</span></div>
+    </aside>
+  </header>
+
+  <section class="grid">
+
+    <!-- 1. kanban -->
+    <a class="mock" href="kanban.html">
+      <span class="mock__num">01</span>
+      <div class="mock__preview">
+        <div class="preview-kanban">
+          <div class="mc" style="--col: var(--fg-ghost)">
+            <div class="mt"></div><div class="mt"></div><div class="mt"></div>
+          </div>
+          <div class="mc" style="--col: var(--violet-fg)">
+            <div class="mt active"></div>
+          </div>
+          <div class="mc" style="--col: var(--blue-fg)">
+            <div class="mt active"></div><div class="mt"></div>
+          </div>
+          <div class="mc" style="--col: var(--amber-fg)">
+            <div class="mt active"></div><div class="mt active"></div>
+          </div>
+          <div class="mc" style="--col: var(--cyan-fg)">
+            <div class="mt active"></div>
+          </div>
+          <div class="mc" style="--col: var(--red-fg)">
+            <div class="mt active"></div>
+          </div>
+          <div class="mc" style="--col: var(--green-fg)">
+            <div class="mt active"></div>
+          </div>
+          <div class="mc" style="--col: var(--fg-ghost)">
+            <div class="mt"></div><div class="mt"></div><div class="mt"></div><div class="mt"></div>
+          </div>
+        </div>
+      </div>
+      <div class="mock__body">
+        <div class="mock__name">Kanban Board</div>
+        <div class="mock__file">kanban.html · home view</div>
+        <div class="mock__desc">
+          Eight columns, one per workflow phase. Cards carry status pills, branch names,
+          and live phase progress. Color-coded column accents make state legible at a glance.
+        </div>
+        <div class="mock__cta">OPEN <span class="arrow">→</span></div>
+      </div>
+    </a>
+
+    <!-- 2. brainstorm -->
+    <a class="mock" href="brainstorm.html">
+      <span class="mock__num">02</span>
+      <div class="mock__preview">
+        <div class="preview-brain">
+          <div class="bubble bubble--a"></div>
+          <div class="bubble bubble--y"></div>
+          <div class="bubble bubble--a2"></div>
+          <div class="typing"><span></span><span></span><span></span></div>
+        </div>
+      </div>
+      <div class="mock__body">
+        <div class="mock__name">Brainstorm &amp; Plan Review</div>
+        <div class="mock__file">brainstorm.html · human-in-the-loop</div>
+        <div class="mock__desc">
+          The Brainstorm Agent asks scoping questions one at a time. The right pane
+          shows the spec emerging in real time, then a plan-review preview with
+          precedents — approve to move to Code.
+        </div>
+        <div class="mock__cta">OPEN <span class="arrow">→</span></div>
+      </div>
+    </a>
+
+    <!-- 3. task -->
+    <a class="mock" href="task-detail.html">
+      <span class="mock__num">03</span>
+      <div class="mock__preview">
+        <div class="preview-task">
+          <div class="line"><span class="t">14:32:01</span><span class="ty b">phase</span><span class="m">code · started</span></div>
+          <div class="line"><span class="t">14:32:07</span><span class="ty">edit</span><span class="m">rate-limit.ts +42 −3</span></div>
+          <div class="line"><span class="t">14:32:18</span><span class="ty r">fail</span><span class="m">3 passed · 1 failed</span></div>
+          <div class="line"><span class="t">14:32:20</span><span class="ty v">msg</span><span class="m">"adding bucket reset…"</span></div>
+          <div class="line"><span class="t">14:32:32</span><span class="ty g">ok</span><span class="m">4 passed</span></div>
+          <div class="line"><span class="t">14:32:34</span><span class="ty g">ok</span><span class="m">commit a3f01b2</span></div>
+          <div class="line"><span class="t">14:32:35</span><span class="ty v">msg</span><span class="m">"task 4 complete · moving to 5…"</span></div>
+        </div>
+      </div>
+      <div class="mock__body">
+        <div class="mock__name">Task Detail · Live Run</div>
+        <div class="mock__file">task-detail.html · executing phase</div>
+        <div class="mock__desc">
+          Phase timeline strip, live SSE agent log on the left, sidebar with worktree info,
+          active subagents, file diffs, and cost meter. Watch a run unfold in real time.
+        </div>
+        <div class="mock__cta">OPEN <span class="arrow">→</span></div>
+      </div>
+    </a>
+
+    <!-- 4. verification -->
+    <a class="mock" href="verification.html">
+      <span class="mock__num">04</span>
+      <div class="mock__preview">
+        <div class="preview-verify">
+          <div class="v unit">
+            <div class="h">UNIT&nbsp;✓</div>
+            <div class="b">
+              <div class="row"></div><div class="row"></div><div class="row"></div>
+              <div class="row"></div><div class="row"></div><div class="row"></div>
+            </div>
+          </div>
+          <div class="v func">
+            <div class="h">API&nbsp;✓</div>
+            <div class="b">
+              <div class="row" style="height:18px; background: var(--bg-input); border-radius:2px;"></div>
+              <div class="row" style="height:18px; background: var(--bg-input); border-radius:2px;"></div>
+              <div class="row" style="height:18px; background: var(--bg-input); border-radius:2px;"></div>
+            </div>
+          </div>
+          <div class="v vis">
+            <div class="h">VISUAL&nbsp;⏳</div>
+            <div class="b">
+              <div class="row"></div>
+              <div class="row"></div>
+              <div class="row" style="flex:1"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock__body">
+        <div class="mock__name">Verification Gate</div>
+        <div class="mock__file">verification.html · the differentiator</div>
+        <div class="mock__desc">
+          Three evidence classes side-by-side: unit/integration tests, real HTTP scenarios
+          via curl, and Playwright screenshots compared against baselines. All must turn
+          green before a PR can ship.
+        </div>
+        <div class="mock__cta">OPEN <span class="arrow">→</span></div>
+      </div>
+    </a>
+
+  </section>
+
+  <div class="legend">
+    <span class="swatch"><span class="dot" style="background: var(--violet-fg)"></span> brainstorm</span>
+    <span class="swatch"><span class="dot" style="background: var(--blue-fg)"></span> planning</span>
+    <span class="swatch"><span class="dot" style="background: var(--amber-fg)"></span> executing</span>
+    <span class="swatch"><span class="dot" style="background: var(--cyan-fg)"></span> verifying</span>
+    <span class="swatch"><span class="dot" style="background: var(--red-fg)"></span> failed</span>
+    <span class="swatch"><span class="dot" style="background: var(--green-fg)"></span> ready / done</span>
+  </div>
+
+  <footer class="footer">
+    <span>docs/mocks · static html · open any file directly in a browser</span>
+    <span><a href="../superpowers/specs/2026-05-08-pi-harness-design.md">view spec →</a></span>
+  </footer>
+</main>
+
+</body>
+</html>

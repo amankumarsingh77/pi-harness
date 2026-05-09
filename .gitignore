@@ -4,5 +4,19 @@ dist
 *.log
 .env
 .env.local
+.env.harness
 .harness/
 coverage
+
+# Local agent / tooling state — not project source
+.claude/
+.pi/
+.playwright-mcp/
+skills-lock.json
+
+# OS / editor noise
+.DS_Store
+
+# Manual screenshots used during exploration
+plan-head.png
+plan-page-actual.png

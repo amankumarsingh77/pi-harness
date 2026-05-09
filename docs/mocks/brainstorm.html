@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pi-harness · T-093 · brainstorm</title>
+<style>
+  /* Identical token set to kanban-cards / task-detail. */
+  :root {
+    --bg:               #0d0e10;
+    --bg-elev:          #131418;
+    --bg-elev-hover:    #181a1f;
+    --bg-input:         #0a0b0d;
+
+    --fg:               #f7f8f8;
+    --fg-body:          #e6e7e9;
+    --fg-mute:          #8a8f98;
+    --fg-mute-2:        #6b7079;
+    --fg-faint:         #4a4e57;
+
+    --line:             rgba(255,255,255,0.06);
+    --line-hover:       rgba(255,255,255,0.12);
+    --line-strong:      rgba(255,255,255,0.18);
+
+    --st-idle:          #8a8f98;
+    --st-progress:      #5e6ad2;
+    --st-review:        #f2c94c;
+    --st-blocked:       #eb5757;
+    --st-shipping:      #c084fc;
+    --st-done:          #4cb782;
+
+    --r:                6px;
+    --r-sm:             4px;
+
+    --font-sans: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg-body);
+    font-family: var(--font-sans);
+    font-size: 13px; line-height: 1.5;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection { background: rgba(94,106,210,0.35); }
+
+  /* ─── topbar (shared) ───────────────────────────────────────── */
+  .topbar {
+    height: 48px; padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 24px;
+    background: rgba(13,14,16,0.85);
+    backdrop-filter: saturate(140%) blur(8px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar__left { display: flex; align-items: center; gap: 24px; }
+  .logo {
+    font-weight: 600; font-size: 13.5px; color: var(--fg);
+    letter-spacing: -0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .logo__mark {
+    width: 16px; height: 16px; border-radius: 4px;
+    background: linear-gradient(135deg, #5e6ad2 0%, #c084fc 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  }
+  .nav { display: flex; align-items: center; gap: 2px; }
+  .nav a {
+    font-size: 12.5px; color: var(--fg-mute); text-decoration: none;
+    padding: 5px 10px; border-radius: 4px;
+  }
+  .nav a:hover { color: var(--fg-body); background: rgba(255,255,255,0.04); }
+  .nav a.active { color: var(--fg); }
+  .topbar__center {
+    display: flex; justify-content: center; gap: 18px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+  }
+  .stat { display: inline-flex; align-items: center; gap: 6px; }
+  .stat__dot { width: 6px; height: 6px; border-radius: 50%; }
+  .stat--running .stat__dot { background: var(--st-progress); box-shadow: 0 0 6px rgba(94,106,210,0.5); animation: tick 2.4s ease-in-out infinite; }
+  .stat--blocked { color: var(--st-blocked); }
+  .stat--blocked .stat__dot { background: var(--st-blocked); }
+  .stat--done { color: var(--fg-mute-2); }
+  .topbar__right { display: flex; align-items: center; gap: 8px; }
+  .kbd {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+    border: 1px solid var(--line); background: var(--bg-elev);
+    padding: 4px 9px; border-radius: 4px; cursor: pointer;
+  }
+  .kbd kbd {
+    font-family: inherit; font-size: 10.5px; color: var(--fg-mute-2);
+    border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px;
+    background: rgba(255,255,255,0.02);
+  }
+  .btn {
+    background: var(--st-progress); color: #fff; border: 0;
+    font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+    padding: 6px 11px; border-radius: 4px; cursor: pointer;
+  }
+  .branch {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+    border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; cursor: pointer;
+  }
+
+  /* ─── detail head ───────────────────────────────────────────── */
+  .head {
+    padding: 16px 24px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .crumb {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px; color: var(--fg-mute-2);
+    margin-bottom: 10px;
+  }
+  .crumb a { color: var(--fg-mute); text-decoration: none; }
+  .crumb a:hover { color: var(--fg-body); }
+  .crumb .sep { color: var(--fg-faint); }
+  .crumb .id { color: var(--fg-body); }
+  .crumb .phase { color: var(--st-review); }
+
+  .head__row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .head__icon {
+    width: 16px; height: 16px;
+    color: var(--st-done);
+  }
+  .head__title {
+    font-size: 17px; font-weight: 600;
+    letter-spacing: -0.018em;
+    color: var(--fg);
+    margin: 0;
+    flex: 1;
+  }
+  .head__sub {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-mute);
+    flex-shrink: 0;
+  }
+  .head__sub .accent { color: var(--fg-body); }
+
+  .head__actions { display: flex; gap: 6px; }
+  .ibtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-sans); font-size: 12px;
+    color: var(--fg-body); background: transparent;
+    border: 1px solid var(--line);
+    padding: 5px 10px; border-radius: 4px; cursor: pointer;
+  }
+  .ibtn:hover { border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+
+  /* ─── body grid ─────────────────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 48px - 80px);
+  }
+  .col-left {
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .col-right {
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .col-right__scroll {
+    flex: 1;
+    overflow: auto;
+  }
+
+  /* ─── chat transcript ───────────────────────────────────────── */
+  .chat-head {
+    height: 36px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px;
+    color: var(--fg-mute);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  .chat-head .label { color: var(--fg-mute-2); text-transform: uppercase; }
+  .chat-head .meta { margin-left: auto; color: var(--fg-mute-2); }
+
+  .chat {
+    flex: 1;
+    padding: 18px 24px 12px;
+    overflow: auto;
+    display: flex; flex-direction: column;
+    gap: 18px;
+  }
+
+  .turn { display: flex; gap: 12px; }
+  .turn__avatar {
+    width: 22px; height: 22px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-top: 1px;
+  }
+  .turn--agent .turn__avatar {
+    background: rgba(94,106,210,0.18);
+    color: #c4cbf5;
+    box-shadow: inset 0 0 0 1px rgba(94,106,210,0.4);
+  }
+  .turn--user .turn__avatar {
+    background: rgba(255,255,255,0.04);
+    color: var(--fg-body);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+
+  .turn__body { flex: 1; min-width: 0; }
+  .turn__hd {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .turn__name {
+    color: var(--fg-body);
+    letter-spacing: -0.005em;
+  }
+  .turn--agent .turn__name { color: #c4cbf5; }
+  .turn__t { color: var(--fg-faint); }
+
+  .turn__msg {
+    color: var(--fg-body);
+    font-size: 13.5px;
+    line-height: 1.6;
+    letter-spacing: -0.005em;
+  }
+  .turn__msg p { margin: 0 0 8px; }
+  .turn__msg p:last-child { margin: 0; }
+  .turn__msg code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg);
+    background: rgba(255,255,255,0.05);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .turn__msg .quoted {
+    margin: 6px 0 0;
+    padding-left: 10px;
+    border-left: 2px solid var(--line-strong);
+    color: var(--fg-mute);
+    font-size: 12.5px;
+  }
+
+  /* answer chips — when the agent offers options the user clicks one */
+  .turn__chips {
+    margin-top: 10px;
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+    border: 1px dashed var(--line);
+    border-radius: 4px;
+    padding: 4px 9px;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms, background 120ms;
+  }
+  .chip:hover { color: var(--fg-body); border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+  .chip--picked {
+    border-style: solid;
+    border-color: var(--line-strong);
+    background: rgba(255,255,255,0.04);
+    color: var(--fg);
+  }
+
+  /* mark a turn that produced a spec entry */
+  .turn__produced {
+    margin-top: 8px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--st-done);
+  }
+  .turn__produced::before {
+    content: "↳";
+    color: var(--fg-faint);
+  }
+
+  /* composer (read-only when phase is done) */
+  .composer {
+    border-top: 1px solid var(--line);
+    padding: 14px 24px 18px;
+    background: var(--bg);
+  }
+  .composer__inner {
+    display: flex; align-items: flex-end; gap: 10px;
+    border: 1px solid var(--line);
+    background: var(--bg-input);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .composer__inner.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .composer__textarea {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    resize: none;
+    min-height: 40px;
+    outline: none;
+    padding: 0;
+  }
+  .composer__textarea::placeholder { color: var(--fg-faint); }
+  .composer__send {
+    background: var(--st-progress); color: #fff; border: 0;
+    font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+    padding: 7px 12px; border-radius: 6px; cursor: pointer;
+  }
+  .composer__hint {
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute-2);
+  }
+  .composer__hint .lock { color: var(--fg-mute); }
+  .composer__hint .lock::before {
+    content: "● ";
+    color: var(--st-done);
+  }
+
+  /* ─── emerging spec ─────────────────────────────────────────── */
+  .spec-head {
+    padding: 16px 24px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .spec-head h2 {
+    margin: 0;
+    font-size: 14px; font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+  }
+  .spec-head .stats {
+    margin-top: 6px;
+    display: flex; gap: 0;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-mute);
+  }
+  .spec-head .stats > * + *::before {
+    content: "·";
+    color: var(--fg-faint);
+    margin: 0 7px;
+  }
+  .spec-head .stats .ok      { color: var(--st-done); }
+  .spec-head .stats .open    { color: var(--st-review); }
+  .spec-head .stats .tbd     { color: var(--st-blocked); }
+
+  .spec {
+    padding: 4px 24px 24px;
+  }
+  .spec__section {
+    padding: 16px 0 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .spec__section:last-child { border-bottom: 0; }
+  .spec__h {
+    display: flex; align-items: baseline; gap: 8px;
+    margin: 0 0 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-mute-2);
+  }
+  .spec__h .count {
+    color: var(--fg-faint);
+    font-size: 10.5px;
+  }
+  .spec__goal {
+    font-size: 13.5px;
+    color: var(--fg);
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    padding-bottom: 14px;
+  }
+
+  .decisions, .questions {
+    display: flex; flex-direction: column;
+    gap: 0;
+    padding-bottom: 12px;
+  }
+  .item {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .item:last-child { border-bottom: 0; }
+  .item__bullet {
+    width: 14px; height: 14px;
+    margin-top: 3px;
+    flex-shrink: 0;
+  }
+  .item__body {
+    color: var(--fg-body);
+    letter-spacing: -0.005em;
+  }
+  .item__body .k {
+    color: var(--fg-mute);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    margin-right: 4px;
+  }
+  .item__body code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg);
+    background: rgba(255,255,255,0.04);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .item__src {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    align-self: start;
+    margin-top: 4px;
+    cursor: pointer;
+    transition: color 120ms;
+  }
+  .item__src:hover { color: var(--fg-mute); }
+
+  .item--open .item__body em {
+    font-style: normal;
+    color: var(--st-review);
+    font-weight: 500;
+  }
+
+  /* per-question action chips */
+  .q-actions {
+    grid-column: 2 / 4;
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .q-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    color: var(--fg-body);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 4px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 120ms, color 120ms, background 120ms;
+  }
+  .q-chip:hover { border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+  .q-chip--primary { color: var(--st-review); border-color: rgba(242,201,76,0.35); }
+  .q-chip--primary:hover { border-color: var(--st-review); }
+
+  /* once a question is decided */
+  .item--decided .item__bullet { color: var(--st-done); }
+  .item--decided .q-actions { display: none; }
+  .item--decided .item__body em {
+    color: var(--st-done);
+  }
+  .item--decided .item__body::after {
+    content: "";
+  }
+  .item__resolved {
+    grid-column: 2 / 4;
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+    display: none;
+  }
+  .item--decided .item__resolved { display: block; }
+  .item--decided .item__resolved::before {
+    content: "↳ ";
+    color: var(--fg-faint);
+  }
+  .item--decided .item__resolved .ok { color: var(--st-done); }
+
+  /* ─── approval gate (sticky bottom of spec column) ──────────── */
+  .gate {
+    border-top: 1px solid var(--line);
+    background: var(--bg-elev);
+    padding: 14px 24px;
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    gap: 14px;
+    align-items: center;
+  }
+  .gate__icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(242,201,76,0.10);
+    color: var(--st-review);
+    box-shadow: inset 0 0 0 1px rgba(242,201,76,0.3);
+  }
+  .gate__body {
+    line-height: 1.45;
+    min-width: 0;
+  }
+  .gate__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .gate__sub {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-mute);
+    margin-top: 2px;
+  }
+  .gate__sub .accent { color: var(--fg-body); }
+  .gate__sub .blocking { color: var(--st-review); }
+  .gate__btn {
+    background: var(--st-progress);
+    color: #fff;
+    border: 0;
+    font-family: var(--font-sans);
+    font-size: 12.5px; font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: filter 120ms;
+  }
+  .gate__btn:hover { filter: brightness(1.1); }
+  .gate__btn:disabled {
+    background: rgba(255,255,255,0.04);
+    color: var(--fg-faint);
+    cursor: not-allowed;
+    border: 1px solid var(--line);
+  }
+  .gate__btn-ghost {
+    background: transparent;
+    color: var(--fg-body);
+    border: 1px solid var(--line);
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-right: 6px;
+  }
+  .gate__btn-ghost:hover { border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+
+  /* once everything is resolved, gate flips to ready state */
+  .gate--ready .gate__icon {
+    background: rgba(94,106,210,0.12);
+    color: var(--st-progress);
+    box-shadow: inset 0 0 0 1px rgba(94,106,210,0.4);
+  }
+
+  /* artifact footer */
+  .artifact {
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-mute);
+  }
+  .artifact .file {
+    color: var(--fg-body);
+    background: rgba(255,255,255,0.04);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .artifact__act {
+    margin-left: auto;
+    color: var(--fg-mute);
+    cursor: pointer;
+  }
+  .artifact__act:hover { color: var(--fg-body); }
+
+  .si { width: 14px; height: 14px; }
+  @keyframes tick { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-done" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="6" fill="currentColor" />
+      <path d="M 4.2 7.2 L 6.2 9.1 L 9.8 5.2" fill="none" stroke="#0d0e10" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-review" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M 7 7 L 7 1.5 A 5.5 5.5 0 0 1 7 12.5 Z" fill="currentColor" />
+    </symbol>
+    <symbol id="i-back" viewBox="0 0 12 12">
+      <path d="M 9 6 L 3 6 M 6 3 L 3 6 L 6 9" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-doc" viewBox="0 0 14 14">
+      <path d="M 3 2 H 8.5 L 11 4.5 V 12 H 3 Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+      <path d="M 8.5 2 V 4.5 H 11" fill="none" stroke="currentColor" stroke-width="1.2" />
+      <path d="M 5 7 H 9 M 5 9 H 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+    </symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="topbar__left">
+    <div class="logo"><span class="logo__mark"></span> pi-harness</div>
+    <nav class="nav">
+      <a href="kanban-cards.html">Board</a>
+      <a href="runs.html">Runs</a>
+      <a href="scenarios.html">Scenarios</a>
+    </nav>
+  </div>
+  <div class="topbar__center">
+    <span class="stat stat--running"><span class="stat__dot"></span>3 running</span>
+    <span class="stat stat--blocked"><span class="stat__dot"></span>1 blocked</span>
+    <span class="stat stat--done">12 done today</span>
+  </div>
+  <div class="topbar__right">
+    <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd> Search</span>
+    <button class="btn">+ New task</button>
+    <span class="branch">main ▾</span>
+  </div>
+</header>
+
+<section class="head">
+  <div class="crumb">
+    <a href="kanban-cards.html"><svg class="si" style="width:10px;height:10px;vertical-align:-1px"><use href="#i-back"/></svg> Board</a>
+    <span class="sep">/</span>
+    <a href="task-detail.html" class="id">T-093</a>
+    <span class="sep">/</span>
+    <span class="phase">brainstorm</span>
+  </div>
+  <div class="head__row">
+    <span class="head__icon" style="color: var(--st-review)"><svg class="si"><use href="#i-review"/></svg></span>
+    <h1 class="head__title">Auth redirect after login on mobile</h1>
+    <span class="head__sub">awaiting your review · <span class="accent">2m 14s</span> · 7 turns</span>
+    <div class="head__actions">
+      <button class="ibtn">Re-run brainstorm</button>
+      <button class="ibtn">View artifact</button>
+    </div>
+  </div>
+</section>
+
+<div class="grid">
+
+  <!-- ── LEFT · CHAT ──────────────────────────────────────────── -->
+  <main class="col-left">
+    <div class="chat-head">
+      <span class="label">TRANSCRIPT</span>
+      <span>brainstorm-agent · vendored</span>
+      <span class="meta">7 turns · 14:02:11 → 14:04:25</span>
+    </div>
+
+    <div class="chat">
+
+      <div class="turn turn--agent">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">brainstorm-agent</span>
+            <span class="turn__t">14:02:14</span>
+          </div>
+          <div class="turn__msg">
+            <p>I read the auth flow in <code>src/auth/</code>. There are three places a redirect can happen: <code>routes/login.ts</code>, <code>state.ts</code>, and a guard in <code>middleware/session.ts</code>. The bug is likely in the last one. Before I scope, two things:</p>
+            <p>1. On <strong>mobile safari specifically</strong>, what's the symptom — does the user land on <code>/login</code> repeatedly, or on a blank page?</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="turn turn--user">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">aman</span>
+            <span class="turn__t">14:02:31</span>
+          </div>
+          <div class="turn__msg">
+            <p>Lands on <code>/login</code> repeatedly. Only on iOS safari. Chrome on iOS is fine. Desktop fine.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="turn turn--agent">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">brainstorm-agent</span>
+            <span class="turn__t">14:02:48</span>
+          </div>
+          <div class="turn__msg">
+            <p>iOS-safari-only narrows it. Most likely a cookie / storage issue — safari blocks third-party cookies in the OAuth flow, so the session token never round-trips back. Two scoping calls I need from you:</p>
+            <p>2. Does the redirect need to <strong>preserve the deep link</strong> the user was trying to reach (e.g. <code>/r/abc</code>), or is landing on the dashboard fine?</p>
+          </div>
+          <div class="turn__chips">
+            <span class="chip chip--picked">preserve deep link</span>
+            <span class="chip">land on dashboard</span>
+            <span class="chip">either is fine</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="turn turn--user">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">aman</span>
+            <span class="turn__t">14:03:02</span>
+          </div>
+          <div class="turn__msg">
+            <p>preserve deep link — the support tickets are about losing where they were.</p>
+          </div>
+          <div class="turn__produced">decision: preserve deep link across login round-trip</div>
+        </div>
+      </div>
+
+      <div class="turn turn--agent">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">brainstorm-agent</span>
+            <span class="turn__t">14:03:21</span>
+          </div>
+          <div class="turn__msg">
+            <p>3. For storage of the pre-login URL — <code>sessionStorage</code> is fine for desktop but it doesn't survive a top-level navigation in safari ITP. Two options:</p>
+          </div>
+          <div class="turn__chips">
+            <span class="chip chip--picked">stash in OAuth <code>state</code> param</span>
+            <span class="chip">first-party cookie · 5min ttl</span>
+            <span class="chip">URL fragment</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="turn turn--user">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">aman</span>
+            <span class="turn__t">14:03:38</span>
+          </div>
+          <div class="turn__msg">
+            <p>state param. We already sign it.</p>
+          </div>
+          <div class="turn__produced">decision: stash redirect URL in signed OAuth <code>state</code> param</div>
+        </div>
+      </div>
+
+      <div class="turn turn--agent">
+        <div class="turn__avatar">A</div>
+        <div class="turn__body">
+          <div class="turn__hd">
+            <span class="turn__name">brainstorm-agent</span>
+            <span class="turn__t">14:04:12</span>
+          </div>
+          <div class="turn__msg">
+            <p>Got what I need. One thing I'm leaving as <strong>open</strong> for the plan author:</p>
+            <p class="quoted">Should we cap the round-trippable URL length, or accept anything? Long URLs in <code>state</code> push us close to the 2KB OAuth limit when the provider re-emits.</p>
+            <p>Writing the artifact now.</p>
+          </div>
+          <div class="turn__produced">artifact: <code>brainstorm.md</code> · 3 decisions · 1 open · 14:04:25</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer__inner disabled">
+        <textarea class="composer__textarea" placeholder="Type a follow-up… (locked while phase is complete)" disabled></textarea>
+        <button class="composer__send" disabled>Send</button>
+      </div>
+      <div class="composer__hint">
+        <span class="lock">phase complete</span> — re-running brainstorm starts a new run on a fresh worktree.
+      </div>
+    </div>
+  </main>
+
+  <!-- ── RIGHT · EMERGING SPEC ────────────────────────────────── -->
+  <aside class="col-right">
+    <div class="col-right__scroll">
+
+    <div class="spec-head">
+      <h2>Emerging spec</h2>
+      <div class="stats">
+        <span class="ok">3 decisions</span>
+        <span class="open">2 open</span>
+        <span>1 needs your call</span>
+      </div>
+    </div>
+
+    <div class="spec">
+
+      <section class="spec__section">
+        <h3 class="spec__h">Goal</h3>
+        <div class="spec__goal">
+          Fix the iOS-safari login flow so users land back on the page they were trying to reach,
+          not on <code>/login</code>. Bug only reproduces in mobile safari due to ITP cookie blocking.
+        </div>
+      </section>
+
+      <section class="spec__section">
+        <h3 class="spec__h">Decisions <span class="count">3</span></h3>
+        <div class="decisions">
+
+          <div class="item">
+            <span class="item__bullet" style="color: var(--st-done)">
+              <svg class="si"><use href="#i-done"/></svg>
+            </span>
+            <div class="item__body">
+              <span class="k">D1</span>
+              Preserve the user's pre-login URL across the OAuth round-trip — landing back on the dashboard is not acceptable.
+            </div>
+            <span class="item__src">turn 4 ↗</span>
+          </div>
+
+          <div class="item">
+            <span class="item__bullet" style="color: var(--st-done)">
+              <svg class="si"><use href="#i-done"/></svg>
+            </span>
+            <div class="item__body">
+              <span class="k">D2</span>
+              Stash the redirect URL in the signed OAuth <code>state</code> parameter, not in <code>sessionStorage</code> or a cookie. Safari ITP doesn't carry sessionStorage across top-level navigation.
+            </div>
+            <span class="item__src">turn 6 ↗</span>
+          </div>
+
+          <div class="item">
+            <span class="item__bullet" style="color: var(--st-done)">
+              <svg class="si"><use href="#i-done"/></svg>
+            </span>
+            <div class="item__body">
+              <span class="k">D3</span>
+              Symptom on iOS safari is repeated landing on <code>/login</code>, not a blank page. Test target is mobile safari only — desktop and iOS chrome are healthy.
+            </div>
+            <span class="item__src">turn 2 ↗</span>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="spec__section">
+        <h3 class="spec__h">Open questions <span class="count">2 · 1 needs you</span></h3>
+        <div class="questions">
+
+          <!-- Q1 — undecided. Chips block the gate. -->
+          <div class="item item--open">
+            <span class="item__bullet" style="color: var(--st-review)">
+              <svg class="si"><use href="#i-review"/></svg>
+            </span>
+            <div class="item__body">
+              <span class="k">Q1</span>
+              Cap on round-trippable URL length, or accept anything? Long URLs in <code>state</code> approach the 2KB OAuth limit. <em>Needs a call before plan can run.</em>
+            </div>
+            <span class="item__src">turn 7 ↗</span>
+            <div class="q-actions">
+              <button class="q-chip q-chip--primary">Answer inline…</button>
+              <button class="q-chip">Defer to plan</button>
+            </div>
+          </div>
+
+          <!-- Q2 — already decided. Shows the post-resolution shape. -->
+          <div class="item item--open item--decided">
+            <span class="item__bullet">
+              <svg class="si"><use href="#i-done"/></svg>
+            </span>
+            <div class="item__body">
+              <span class="k">Q2</span>
+              Should iOS chrome be tested too, since it shares the WebKit engine?
+            </div>
+            <span class="item__src">turn 3 ↗</span>
+            <div class="item__resolved">
+              <span class="ok">deferred to plan</span> · plan author chooses whether to add a chrome-iOS scenario
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="spec__section">
+        <h3 class="spec__h">Files mentioned</h3>
+        <div class="decisions">
+          <div class="item">
+            <span class="item__bullet"></span>
+            <div class="item__body">
+              <code>src/auth/redirect.ts</code> · <code>src/auth/state.ts</code> · <code>middleware/session.ts</code>
+            </div>
+            <span class="item__src">scoped</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="artifact">
+        <svg class="si"><use href="#i-doc"/></svg>
+        <span>artifact written to</span>
+        <span class="file">.harness/runs/r_8f3a/brainstorm.md</span>
+        <span class="artifact__act">Open ↗</span>
+      </div>
+    </div>
+
+    </div><!-- /col-right__scroll -->
+
+    <!-- ── APPROVAL GATE ───────────────────────────────────────── -->
+    <section class="gate">
+      <span class="gate__icon"><svg class="si"><use href="#i-review"/></svg></span>
+      <div class="gate__body">
+        <div class="gate__title">1 open question needs your call</div>
+        <div class="gate__sub">
+          <span class="blocking">Q1</span> blocks plan ·
+          decide each open question to unlock <span class="accent">Approve & continue</span>
+        </div>
+      </div>
+      <div>
+        <button class="gate__btn-ghost">Re-open chat</button>
+        <button class="gate__btn" disabled>Approve & continue</button>
+      </div>
+    </section>
+
+  </aside>
+</div>
+
+</body>
+</html>

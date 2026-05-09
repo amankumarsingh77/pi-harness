@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>pi-harness · new task</title>
+<style>
+  :root {
+    --bg:               #0d0e10;
+    --bg-elev:          #131418;
+    --bg-elev-hover:    #181a1f;
+    --bg-input:         #0a0b0d;
+
+    --fg:               #f7f8f8;
+    --fg-body:          #e6e7e9;
+    --fg-mute:          #8a8f98;
+    --fg-mute-2:        #6b7079;
+    --fg-faint:         #4a4e57;
+
+    --line:             rgba(255,255,255,0.06);
+    --line-hover:       rgba(255,255,255,0.12);
+    --line-strong:      rgba(255,255,255,0.18);
+
+    --st-idle:          #8a8f98;
+    --st-progress:      #5e6ad2;
+    --st-review:        #f2c94c;
+    --st-blocked:       #eb5757;
+    --st-shipping:      #c084fc;
+    --st-done:          #4cb782;
+
+    --r:                6px;
+
+    --font-sans: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg-body);
+    font-family: var(--font-sans);
+    font-size: 13px; line-height: 1.5;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection { background: rgba(94,106,210,0.35); }
+
+  /* ─── topbar ────────────────────────────────────────────────── */
+  .topbar {
+    height: 48px; padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 24px;
+    background: rgba(13,14,16,0.85);
+    backdrop-filter: saturate(140%) blur(8px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar__left { display: flex; align-items: center; gap: 24px; }
+  .logo {
+    font-weight: 600; font-size: 13.5px; color: var(--fg);
+    letter-spacing: -0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .logo__mark {
+    width: 16px; height: 16px; border-radius: 4px;
+    background: linear-gradient(135deg, #5e6ad2 0%, #c084fc 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  }
+  .nav { display: flex; align-items: center; gap: 2px; }
+  .nav a {
+    font-size: 12.5px; color: var(--fg-mute); text-decoration: none;
+    padding: 5px 10px; border-radius: 4px;
+  }
+  .nav a:hover { color: var(--fg-body); background: rgba(255,255,255,0.04); }
+  .topbar__center {
+    display: flex; justify-content: center; gap: 18px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+  }
+  .stat { display: inline-flex; align-items: center; gap: 6px; }
+  .stat__dot { width: 6px; height: 6px; border-radius: 50%; }
+  .stat--running .stat__dot { background: var(--st-progress); box-shadow: 0 0 6px rgba(94,106,210,0.5); animation: tick 2.4s ease-in-out infinite; }
+  .stat--blocked { color: var(--st-blocked); }
+  .stat--blocked .stat__dot { background: var(--st-blocked); }
+  .stat--done { color: var(--fg-mute-2); }
+  .topbar__right { display: flex; align-items: center; gap: 8px; }
+  .kbd {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+    border: 1px solid var(--line); background: var(--bg-elev);
+    padding: 4px 9px; border-radius: 4px; cursor: pointer;
+  }
+  .kbd kbd {
+    font-family: inherit; font-size: 10.5px; color: var(--fg-mute-2);
+    border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px;
+    background: rgba(255,255,255,0.02);
+  }
+  .branch {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-mute);
+    border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; cursor: pointer;
+  }
+
+  /* ─── page ──────────────────────────────────────────────────── */
+  .page {
+    max-width: 1180px;
+    margin: 40px auto 80px;
+    padding: 0 32px;
+  }
+  .crumb {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute-2);
+    margin-bottom: 18px;
+  }
+  .crumb a { color: var(--fg-mute); text-decoration: none; }
+  .crumb a:hover { color: var(--fg-body); }
+  .crumb .sep { color: var(--fg-faint); }
+  .crumb .id { color: var(--fg-body); }
+
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .card__head {
+    padding: 18px 22px 16px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card__head .icon {
+    width: 16px; height: 16px;
+    color: var(--st-idle);
+  }
+  .card__head h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    color: var(--fg);
+  }
+  .card__head .pre-id {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute-2);
+  }
+  .card__body { padding: 18px 22px 22px; }
+
+  .field { display: block; margin-bottom: 16px; }
+  .field__label {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--fg-mute);
+    text-transform: uppercase;
+  }
+  .field__hint {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-faint);
+    text-transform: none;
+    letter-spacing: 0.01em;
+  }
+
+  .input, .textarea {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+    outline: none;
+    transition: border-color 120ms;
+    -webkit-font-smoothing: antialiased;
+  }
+  .input::placeholder, .textarea::placeholder { color: var(--fg-faint); }
+  .input:focus, .textarea:focus { border-color: var(--st-progress); }
+  .textarea {
+    min-height: 144px;
+    resize: vertical;
+    font-family: var(--font-sans);
+    line-height: 1.6;
+  }
+
+  /* ─── tag input ─────────────────────────────────────────────── */
+  .tagbox {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 8px;
+    min-height: 40px;
+    transition: border-color 120ms;
+  }
+  .tagbox:focus-within { border-color: var(--st-progress); }
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 22px; padding: 0 4px 0 8px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--fg-body);
+    text-transform: lowercase;
+  }
+  .tag__x {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    color: var(--fg-mute-2);
+    cursor: pointer;
+  }
+  .tag__x:hover { color: var(--fg); background: rgba(255,255,255,0.06); }
+  .tagbox input {
+    flex: 1; min-width: 120px;
+    background: transparent; border: 0; outline: 0;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px; line-height: 22px;
+    padding: 0 4px;
+  }
+  .tagbox input::placeholder { color: var(--fg-faint); }
+  .tag-suggest {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 8px;
+  }
+  .tag-suggest .tag {
+    cursor: pointer;
+    color: var(--fg-mute);
+    background: transparent;
+  }
+  .tag-suggest .tag:hover { color: var(--fg-body); border-color: var(--line-hover); }
+
+  /* ─── priority picker ───────────────────────────────────────── */
+  .pri {
+    position: relative;
+    display: inline-block;
+  }
+  .pri__trigger {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 12px 0 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--fg-body);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 120ms, background 120ms;
+  }
+  .pri__trigger:hover { border-color: var(--line-hover); }
+  .pri__trigger[aria-expanded="true"] { border-color: var(--st-progress); }
+  .pri__icon { width: 14px; height: 14px; color: var(--fg-mute); flex-shrink: 0; }
+  .pri__chev { width: 10px; height: 10px; color: var(--fg-mute-2); margin-left: 2px; }
+  .pri__label { color: var(--fg-body); }
+  .pri__label--empty { color: var(--fg-mute); }
+
+  .pri__menu {
+    position: absolute;
+    top: calc(100% + 6px); left: 0;
+    min-width: 220px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-hover);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 30;
+    display: none;
+  }
+  .pri.open .pri__menu { display: block; }
+  .pri__opt {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: var(--fg-body);
+    font-size: 13px;
+  }
+  .pri__opt:hover { background: rgba(255,255,255,0.04); }
+  .pri__opt[aria-selected="true"] { background: rgba(94,106,210,0.12); }
+  .pri__opt .pri__icon { color: var(--fg-mute); }
+  .pri__opt .check {
+    margin-left: auto; width: 12px; height: 12px; color: var(--st-progress);
+    visibility: hidden;
+  }
+  .pri__opt[aria-selected="true"] .check { visibility: visible; }
+
+  /* priority svg semantics — bars rendered solid when active */
+  .pi-bars rect.b { fill: var(--fg-faint); }
+  .pi-bars rect.b.on { fill: var(--fg-body); }
+  .pri__opt:hover .pi-bars rect.b.on { fill: var(--fg); }
+  .pri__trigger .pi-bars rect.b.on { fill: var(--fg-body); }
+  .pi-urgent { color: var(--st-blocked); }
+  .pri__trigger.has-urgent .pri__icon { color: var(--st-blocked); }
+
+  .actions {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+  .actions__hint {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-mute-2);
+    line-height: 1.6;
+  }
+  .actions__hint kbd {
+    font-family: inherit;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.02);
+    border-radius: 3px;
+    padding: 1px 4px;
+    color: var(--fg-mute);
+    font-size: 10.5px;
+  }
+  .btn {
+    background: var(--st-progress); color: #fff; border: 0;
+    font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+    padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    transition: filter 120ms;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn--ghost {
+    background: transparent;
+    color: var(--fg-body);
+    border: 1px solid var(--line);
+  }
+  .btn--ghost:hover { border-color: var(--line-hover); background: rgba(255,255,255,0.03); }
+
+  @keyframes tick {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  .si { width: 14px; height: 14px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-intake" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2.4" />
+    </symbol>
+    <symbol id="i-back" viewBox="0 0 12 12">
+      <path d="M 9 6 L 3 6 M 6 3 L 3 6 L 6 9" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-pri-none" viewBox="0 0 14 14">
+      <rect x="2.5" y="6.25" width="2.2" height="1.5" rx="0.6" fill="currentColor" />
+      <rect x="5.9" y="6.25" width="2.2" height="1.5" rx="0.6" fill="currentColor" />
+      <rect x="9.3" y="6.25" width="2.2" height="1.5" rx="0.6" fill="currentColor" />
+    </symbol>
+    <symbol id="i-pri-low" viewBox="0 0 14 14" class="pi-bars">
+      <rect class="b on" x="2"  y="9"  width="2.4" height="3" rx="0.6" />
+      <rect class="b"    x="5.8" y="6.5" width="2.4" height="5.5" rx="0.6" />
+      <rect class="b"    x="9.6" y="3.5" width="2.4" height="8.5" rx="0.6" />
+    </symbol>
+    <symbol id="i-pri-medium" viewBox="0 0 14 14" class="pi-bars">
+      <rect class="b on" x="2"  y="9"  width="2.4" height="3" rx="0.6" />
+      <rect class="b on" x="5.8" y="6.5" width="2.4" height="5.5" rx="0.6" />
+      <rect class="b"    x="9.6" y="3.5" width="2.4" height="8.5" rx="0.6" />
+    </symbol>
+    <symbol id="i-pri-high" viewBox="0 0 14 14" class="pi-bars">
+      <rect class="b on" x="2"  y="9"  width="2.4" height="3" rx="0.6" />
+      <rect class="b on" x="5.8" y="6.5" width="2.4" height="5.5" rx="0.6" />
+      <rect class="b on" x="9.6" y="3.5" width="2.4" height="8.5" rx="0.6" />
+    </symbol>
+    <symbol id="i-pri-urgent" viewBox="0 0 14 14">
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2.4" fill="currentColor" />
+      <rect x="6.4" y="3.6" width="1.2" height="4.6" rx="0.6" fill="#0d0e10" />
+      <rect x="6.4" y="9.2" width="1.2" height="1.4" rx="0.6" fill="#0d0e10" />
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 12 12">
+      <path d="M 2.5 6.2 L 5 8.6 L 9.5 3.6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-chev" viewBox="0 0 10 10">
+      <path d="M 2.2 3.8 L 5 6.6 L 7.8 3.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="topbar__left">
+    <div class="logo"><span class="logo__mark"></span> pi-harness</div>
+    <nav class="nav">
+      <a href="kanban-cards.html">Board</a>
+      <a href="runs.html">Runs</a>
+      <a href="scenarios.html">Scenarios</a>
+    </nav>
+  </div>
+  <div class="topbar__center">
+    <span class="stat stat--running"><span class="stat__dot"></span>3 running</span>
+    <span class="stat stat--blocked"><span class="stat__dot"></span>1 blocked</span>
+    <span class="stat stat--done">12 done today</span>
+  </div>
+  <div class="topbar__right">
+    <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd> Search</span>
+    <span class="branch">main ▾</span>
+  </div>
+</header>
+
+<div class="page">
+  <div class="crumb">
+    <a href="kanban-cards.html"><svg class="si" style="width:10px;height:10px;vertical-align:-1px"><use href="#i-back"/></svg> Board</a>
+    <span class="sep">/</span>
+    <span class="id">New task</span>
+  </div>
+
+    <form class="card" onsubmit="event.preventDefault()">
+      <div class="card__head">
+        <span class="icon"><svg class="si"><use href="#i-intake"/></svg></span>
+        <h1>Create a task</h1>
+        <span class="pre-id">T-105</span>
+      </div>
+
+      <div class="card__body">
+
+        <label class="field">
+          <span class="field__label">
+            <span>Title</span>
+            <span class="field__hint">one line, present tense</span>
+          </span>
+          <input class="input" type="text" placeholder="Add per-user rate limiting on /api/upload" />
+        </label>
+
+        <label class="field">
+          <span class="field__label">
+            <span>Description</span>
+            <span class="field__hint">supports markdown · the brainstorm agent reads this verbatim</span>
+          </span>
+          <textarea class="textarea" placeholder="What's the goal? Any constraints? Existing files to look at?
+&#10;e.g. — Throttle /api/upload to 30 req/min per user. Reset hourly. Should respect the existing token-bucket helper in src/lib/throttle.ts."></textarea>
+        </label>
+
+        <div class="field">
+          <span class="field__label">
+            <span>Priority</span>
+            <span class="field__hint">how the orchestrator orders the queue</span>
+          </span>
+          <div class="pri" id="pri">
+            <button type="button" class="pri__trigger" id="priTrigger" aria-haspopup="listbox" aria-expanded="false">
+              <svg class="pri__icon" id="priTriggerIcon"><use href="#i-pri-none"/></svg>
+              <span class="pri__label pri__label--empty" id="priTriggerLabel">No priority</span>
+              <svg class="pri__chev"><use href="#i-chev"/></svg>
+            </button>
+            <div class="pri__menu" role="listbox">
+              <div class="pri__opt" role="option" data-value="none" aria-selected="true">
+                <svg class="pri__icon"><use href="#i-pri-none"/></svg>
+                <span>No priority</span>
+                <svg class="check"><use href="#i-check"/></svg>
+              </div>
+              <div class="pri__opt" role="option" data-value="urgent">
+                <svg class="pri__icon pi-urgent"><use href="#i-pri-urgent"/></svg>
+                <span>Urgent</span>
+                <svg class="check"><use href="#i-check"/></svg>
+              </div>
+              <div class="pri__opt" role="option" data-value="high">
+                <svg class="pri__icon"><use href="#i-pri-high"/></svg>
+                <span>High</span>
+                <svg class="check"><use href="#i-check"/></svg>
+              </div>
+              <div class="pri__opt" role="option" data-value="medium">
+                <svg class="pri__icon"><use href="#i-pri-medium"/></svg>
+                <span>Medium</span>
+                <svg class="check"><use href="#i-check"/></svg>
+              </div>
+              <div class="pri__opt" role="option" data-value="low">
+                <svg class="pri__icon"><use href="#i-pri-low"/></svg>
+                <span>Low</span>
+                <svg class="check"><use href="#i-check"/></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="field__label">
+            <span>Tags</span>
+            <span class="field__hint">shown on the kanban card · enter or comma to add</span>
+          </span>
+          <div class="tagbox" id="tagbox">
+            <span class="tag">backend<span class="tag__x" data-remove>×</span></span>
+            <span class="tag">rate-limit<span class="tag__x" data-remove>×</span></span>
+            <input type="text" placeholder="Add a tag…" id="taginput" />
+          </div>
+          <div class="tag-suggest">
+            <span class="tag" data-add>bugfix</span>
+            <span class="tag" data-add>perf</span>
+            <span class="tag" data-add>refactor</span>
+            <span class="tag" data-add>infra</span>
+            <span class="tag" data-add>frontend</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <span class="actions__hint">
+            Creating a task does <span style="color:var(--fg-body)">not</span> start a run — no worktree, no LLM tokens spent.
+            Press <kbd>⌘</kbd> <kbd>↵</kbd> to create.
+          </span>
+          <button type="button" class="btn btn--ghost">Cancel</button>
+          <button type="submit" class="btn">Create task</button>
+        </div>
+      </div>
+    </form>
+</div>
+
+<script>
+  (function () {
+    var box = document.getElementById('tagbox');
+    var input = document.getElementById('taginput');
+    if (!box || !input) return;
+
+    function addTag(label) {
+      label = (label || '').trim().toLowerCase().replace(/\s+/g, '-');
+      if (!label) return;
+      var existing = Array.prototype.map.call(
+        box.querySelectorAll('.tag'),
+        function (n) { return n.firstChild.textContent.trim(); }
+      );
+      if (existing.indexOf(label) !== -1) return;
+      var el = document.createElement('span');
+      el.className = 'tag';
+      el.innerHTML = document.createTextNode(label).textContent +
+        '<span class="tag__x" data-remove>×</span>';
+      el.firstChild.textContent = label;
+      box.insertBefore(el, input);
+    }
+
+    box.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t && t.dataset && t.dataset.remove !== undefined) {
+        t.parentNode.remove();
+      } else if (t === box) {
+        input.focus();
+      }
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        addTag(input.value);
+        input.value = '';
+      } else if (e.key === 'Backspace' && !input.value) {
+        var tags = box.querySelectorAll('.tag');
+        if (tags.length) tags[tags.length - 1].remove();
+      }
+    });
+
+    document.querySelectorAll('.tag-suggest [data-add]').forEach(function (n) {
+      n.addEventListener('click', function () { addTag(n.textContent); });
+    });
+  })();
+
+  (function () {
+    var root = document.getElementById('pri');
+    var trigger = document.getElementById('priTrigger');
+    var triggerIcon = document.getElementById('priTriggerIcon');
+    var triggerLabel = document.getElementById('priTriggerLabel');
+    if (!root || !trigger) return;
+
+    var ICONS = {
+      none: '#i-pri-none',
+      urgent: '#i-pri-urgent',
+      high: '#i-pri-high',
+      medium: '#i-pri-medium',
+      low: '#i-pri-low'
+    };
+
+    function close() {
+      root.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+    function open() {
+      root.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+    }
+    trigger.addEventListener('click', function (e) {
+      e.stopPropagation();
+      root.classList.contains('open') ? close() : open();
+    });
+    document.addEventListener('click', function (e) {
+      if (!root.contains(e.target)) close();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') close();
+    });
+
+    root.querySelectorAll('.pri__opt').forEach(function (opt) {
+      opt.addEventListener('click', function () {
+        root.querySelectorAll('.pri__opt').forEach(function (o) {
+          o.setAttribute('aria-selected', 'false');
+        });
+        opt.setAttribute('aria-selected', 'true');
+
+        var value = opt.dataset.value;
+        var label = opt.querySelector('span').textContent;
+        triggerIcon.querySelector('use').setAttribute('href', ICONS[value]);
+        triggerIcon.classList.toggle('pi-urgent', value === 'urgent');
+        trigger.classList.toggle('has-urgent', value === 'urgent');
+        triggerLabel.textContent = label;
+        triggerLabel.classList.toggle('pri__label--empty', value === 'none');
+        close();
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

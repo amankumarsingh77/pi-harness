@@ -1,0 +1,36 @@
+import { describe, it, expect, vi } from "vitest";
+import { api, ApiError } from "@/lib/api";
+
+describe("api", () => {
+  it("listTasks returns parsed shape", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({ tasks: [], counts: { backlog: 0 } }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    const r = await a.listTasks();
+    expect(r.tasks).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledWith("http://x/api/tasks", expect.any(Object));
+  });
+
+  it("throws ApiError on non-2xx", async () => {
+    const a = api({
+      baseUrl: "http://x",
+      fetch: async () => Response.json({ error: "not_found", message: "x" }, { status: 404 }),
+    });
+    await expect(a.getTask("nope")).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("createTask POSTs body", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({ id: "1", status: "backlog", title: "t", description: "" }, { status: 201 }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    await a.createTask({ title: "t" });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://x/api/tasks",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ title: "t" }) }),
+    );
+  });
+});

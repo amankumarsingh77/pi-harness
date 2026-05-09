@@ -73,7 +73,7 @@ The contracts every phase driver writes against. Defining these first means each
 - Create: `packages/shared/src/types/artifacts.ts`, `packages/shared/src/schemas/artifacts.ts`, `packages/shared/test/artifacts.test.ts`
 - Modify: `packages/shared/src/index.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `packages/shared/test/artifacts.test.ts`:
 ```typescript
@@ -131,12 +131,12 @@ describe("artifact schemas", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/shared test artifacts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `src/types/artifacts.ts`**
+- [x] **Step 3: Implement `src/types/artifacts.ts`**
 
 `packages/shared/src/types/artifacts.ts`:
 ```typescript
@@ -195,7 +195,7 @@ export type ProofReport = {
 };
 ```
 
-- [ ] **Step 4: Implement `src/schemas/artifacts.ts`**
+- [x] **Step 4: Implement `src/schemas/artifacts.ts`**
 
 `packages/shared/src/schemas/artifacts.ts`:
 ```typescript
@@ -259,7 +259,7 @@ export const ProofReportSchema = z.object({
 });
 ```
 
-- [ ] **Step 5: Re-export from index**
+- [x] **Step 5: Re-export from index**
 
 Edit `packages/shared/src/index.ts` to add:
 ```typescript
@@ -273,12 +273,12 @@ export {
 } from "./schemas/artifacts.js";
 ```
 
-- [ ] **Step 6: Run, verify pass**
+- [x] **Step 6: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/shared test artifacts`
 Expected: PASS — 4 tests.
 
-- [ ] **Step 7: Build**
+- [x] **Step 7: Build**
 
 Run: `pnpm --filter @pi-harness/shared build`
 Expected: clean.
@@ -299,7 +299,7 @@ The subagent the planner invokes in phase 6 of its pipeline (spec §7.1). It rea
 **Files:**
 - Create: `subagents/ours/verification-author.md`
 
-- [ ] **Step 1: Create `subagents/ours/verification-author.md`**
+- [x] **Step 1: Create `subagents/ours/verification-author.md`**
 
 `subagents/ours/verification-author.md`:
 ```markdown
@@ -372,7 +372,7 @@ scenarios:
 - Don't emit Markdown, prose, or commentary — YAML only.
 ```
 
-- [ ] **Step 2: Verify it parses as valid frontmatter**
+- [x] **Step 2: Verify it parses as valid frontmatter**
 
 Run:
 ```bash
@@ -410,7 +410,7 @@ The two helper subagents the Verifier Agent calls. `proof-capture` runs a single
 **Files:**
 - Create: `subagents/ours/proof-capture.md`, `subagents/ours/screenshot-taker.md`
 
-- [ ] **Step 1: Create `subagents/ours/proof-capture.md`**
+- [x] **Step 1: Create `subagents/ours/proof-capture.md`**
 
 `subagents/ours/proof-capture.md`:
 ```markdown
@@ -467,7 +467,7 @@ Print the JSON as your final assistant message, prefixed with `RESULT:` on its o
 - Don't print debug output between command invocations; the orchestrator parses your final RESULT line.
 ```
 
-- [ ] **Step 2: Create `subagents/ours/screenshot-taker.md`**
+- [x] **Step 2: Create `subagents/ours/screenshot-taker.md`**
 
 `subagents/ours/screenshot-taker.md`:
 ```markdown
@@ -514,7 +514,7 @@ If any step fails, exit non-zero with `OUTPUT: ERROR <message>`.
 - Don't add visual baselines or diff logic — that's the Verifier's responsibility.
 ```
 
-- [ ] **Step 3: Verify both parse**
+- [x] **Step 3: Verify both parse**
 
 Run:
 ```bash
@@ -551,11 +551,11 @@ Plan 1 only resolved `_vendored/`. The phase drivers in this plan dispatch `veri
 **Files:**
 - Modify: `subagents/index.ts`, `subagents/test/loader.test.ts`
 
-- [ ] **Step 1: Read current loader**
+- [x] **Step 1: Read current loader**
 
 Read `subagents/index.ts`. It exports `resolveAgentPath(name)` and `listVendoredAgents()`.
 
-- [ ] **Step 2: Add failing test**
+- [x] **Step 2: Add failing test**
 
 Append to `subagents/test/loader.test.ts`:
 ```typescript
@@ -577,12 +577,12 @@ describe("ours/ resolution", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/subagents test`
 Expected: FAIL — `listOurAgents` not exported.
 
-- [ ] **Step 4: Update `subagents/index.ts`**
+- [x] **Step 4: Update `subagents/index.ts`**
 
 Add to `subagents/index.ts`:
 ```typescript
@@ -657,7 +657,7 @@ A small filesystem helper every phase driver uses to read/write `.harness/runs/<
 **Files:**
 - Create: `apps/orchestrator/src/agents/artifacts-store.ts`, `apps/orchestrator/test/agents/artifacts-store.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/agents/artifacts-store.test.ts`:
 ```typescript
@@ -704,12 +704,12 @@ describe("ArtifactsStore", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test artifacts-store`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/agents/artifacts-store.ts`**
+- [x] **Step 3: Implement `src/agents/artifacts-store.ts`**
 
 `apps/orchestrator/src/agents/artifacts-store.ts`:
 ```typescript
@@ -876,7 +876,7 @@ function scenariosToYaml(file: { scenarios: unknown[] }): string {
 }
 ```
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test artifacts-store`
 Expected: PASS — 2 tests.
@@ -897,7 +897,7 @@ The Brainstorm phase. Drives the SSE chat in the dashboard and emits `Brainstorm
 **Files:**
 - Create: `apps/orchestrator/src/agents/prompts/brainstorm.md`, `apps/orchestrator/src/agents/brainstorm.ts`, `apps/orchestrator/test/agents/brainstorm.test.ts`
 
-- [ ] **Step 1: Create `prompts/brainstorm.md`**
+- [x] **Step 1: Create `prompts/brainstorm.md`**
 
 `apps/orchestrator/src/agents/prompts/brainstorm.md`:
 ```markdown
@@ -930,7 +930,7 @@ The orchestrator parses this block. If parsing fails it kicks the run back; emit
 - Don't summarize the chat in prose. The JSON block is the summary.
 ```
 
-- [ ] **Step 2: Write failing test (mocked pi-bridge)**
+- [x] **Step 2: Write failing test (mocked pi-bridge)**
 
 `apps/orchestrator/test/agents/brainstorm.test.ts`:
 ```typescript
@@ -1004,12 +1004,12 @@ describe("runBrainstorm", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test brainstorm`
 Expected: FAIL — module not found.
 
-- [ ] **Step 4: Implement `src/agents/brainstorm.ts`**
+- [x] **Step 4: Implement `src/agents/brainstorm.ts`**
 
 `apps/orchestrator/src/agents/brainstorm.ts`:
 ```typescript
@@ -1100,7 +1100,7 @@ function parseFinalArtifact(
 }
 ```
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test brainstorm`
 Expected: PASS — 2 tests.
@@ -1121,7 +1121,7 @@ The Planning Agent fans out to 5–7 rpiv subagents in parallel during phases 2�
 **Files:**
 - Create: `apps/orchestrator/src/agents/plan-fanout.ts`, `apps/orchestrator/test/agents/plan-fanout.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `apps/orchestrator/test/agents/plan-fanout.test.ts`:
 ```typescript
@@ -1179,12 +1179,12 @@ describe("fanoutResearch", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test plan-fanout`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/agents/plan-fanout.ts`**
+- [x] **Step 3: Implement `src/agents/plan-fanout.ts`**
 
 `apps/orchestrator/src/agents/plan-fanout.ts`:
 ```typescript
@@ -1248,7 +1248,7 @@ export async function fanoutResearch(opts: {
 }
 ```
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test plan-fanout`
 Expected: PASS — 3 tests.
@@ -1269,7 +1269,7 @@ Wires the full §7.1 pipeline: scope → fanout → synthesize → claim-verify 
 **Files:**
 - Create: `apps/orchestrator/src/agents/prompts/plan.md`, `apps/orchestrator/src/agents/plan.ts`, `apps/orchestrator/test/agents/plan.test.ts`
 
-- [ ] **Step 1: Create `prompts/plan.md`**
+- [x] **Step 1: Create `prompts/plan.md`**
 
 `apps/orchestrator/src/agents/prompts/plan.md`:
 ```markdown
@@ -1320,7 +1320,7 @@ Same shape as Brainstorm: emit on a single line:
 then a fenced ```json block, then nothing.
 ```
 
-- [ ] **Step 2: Write failing test (mocks both fanout and pi session)**
+- [x] **Step 2: Write failing test (mocks both fanout and pi session)**
 
 `apps/orchestrator/test/agents/plan.test.ts`:
 ```typescript
@@ -1394,12 +1394,12 @@ describe("runPlan", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/plan`
 Expected: FAIL.
 
-- [ ] **Step 4: Implement `src/agents/plan.ts`**
+- [x] **Step 4: Implement `src/agents/plan.ts`**
 
 `apps/orchestrator/src/agents/plan.ts`:
 ```typescript
@@ -1529,7 +1529,7 @@ function parseFinalPlan(
 }
 ```
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/plan`
 Expected: PASS — 1 test.
@@ -1550,7 +1550,7 @@ Coder reads the plan and implements it inside the worktree using TDD. The system
 **Files:**
 - Create: `apps/orchestrator/src/agents/prompts/code.md`, `apps/orchestrator/src/agents/code.ts`, `apps/orchestrator/test/agents/code.test.ts`
 
-- [ ] **Step 1: Create `prompts/code.md`**
+- [x] **Step 1: Create `prompts/code.md`**
 
 `apps/orchestrator/src/agents/prompts/code.md`:
 ```markdown
@@ -1589,7 +1589,7 @@ then a JSON block fenced by ```json with shape:
 If you cannot complete, emit `<coder-blocked>` plus a one-line reason; do NOT emit the JSON block.
 ```
 
-- [ ] **Step 2: Write failing test**
+- [x] **Step 2: Write failing test**
 
 `apps/orchestrator/test/agents/code.test.ts`:
 ```typescript
@@ -1674,12 +1674,12 @@ describe("runCode", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/code`
 Expected: FAIL.
 
-- [ ] **Step 4: Implement `src/agents/code.ts`**
+- [x] **Step 4: Implement `src/agents/code.ts`**
 
 `apps/orchestrator/src/agents/code.ts`:
 ```typescript
@@ -1804,7 +1804,7 @@ function parseCoderJson(text: string): { ok: true; value: CoderEmitted } | { ok:
 }
 ```
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/code`
 Expected: PASS — 2 tests.
@@ -1827,7 +1827,7 @@ This task implements the api-scenario path; UI scenarios land in Task 11.
 **Files:**
 - Create: `apps/orchestrator/src/agents/verify-runner.ts`, `apps/orchestrator/test/agents/verify-runner.test.ts`
 
-- [ ] **Step 1: Write failing test (uses a real ephemeral http server in-test)**
+- [x] **Step 1: Write failing test (uses a real ephemeral http server in-test)**
 
 `apps/orchestrator/test/agents/verify-runner.test.ts`:
 ```typescript
@@ -1922,12 +1922,12 @@ describe("runApiScenario", () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [x] **Step 2: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test verify-runner`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `src/agents/verify-runner.ts`**
+- [x] **Step 3: Implement `src/agents/verify-runner.ts`**
 
 `apps/orchestrator/src/agents/verify-runner.ts`:
 ```typescript
@@ -2005,7 +2005,7 @@ export async function runApiScenario(opts: {
 }
 ```
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test verify-runner`
 Expected: PASS — 3 tests.
@@ -2027,7 +2027,7 @@ Adds `runUiScenario()` and `runUiVisualScenario()` driving real headless Chromiu
 - Modify: `apps/orchestrator/src/agents/verify-runner.ts`
 - Create: `apps/orchestrator/test/agents/verify-runner-ui.test.ts`, `apps/orchestrator/test/fixtures/ui/index.html`
 
-- [ ] **Step 1: Add `playwright` dependency**
+- [x] **Step 1: Add `playwright` dependency**
 
 Edit `apps/orchestrator/package.json` to add under `dependencies`:
 ```json
@@ -2039,7 +2039,7 @@ pnpm --filter @pi-harness/orchestrator install
 pnpm --filter @pi-harness/orchestrator exec playwright install chromium
 ```
 
-- [ ] **Step 2: Create test fixture html**
+- [x] **Step 2: Create test fixture html**
 
 `apps/orchestrator/test/fixtures/ui/index.html`:
 ```html
@@ -2053,7 +2053,7 @@ pnpm --filter @pi-harness/orchestrator exec playwright install chromium
 </body></html>
 ```
 
-- [ ] **Step 3: Write failing test**
+- [x] **Step 3: Write failing test**
 
 `apps/orchestrator/test/agents/verify-runner-ui.test.ts`:
 ```typescript
@@ -2123,12 +2123,12 @@ describe("runUiScenario (Playwright)", () => {
 });
 ```
 
-- [ ] **Step 4: Run, verify fail**
+- [x] **Step 4: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test verify-runner-ui`
 Expected: FAIL — `runUiScenario` not exported.
 
-- [ ] **Step 5: Append UI runners to `src/agents/verify-runner.ts`**
+- [x] **Step 5: Append UI runners to `src/agents/verify-runner.ts`**
 
 Append:
 ```typescript
@@ -2248,7 +2248,7 @@ function matchesGlob(url: string, pattern: string): boolean {
 }
 ```
 
-- [ ] **Step 6: Run, verify pass**
+- [x] **Step 6: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test verify-runner-ui`
 Expected: PASS — 2 tests.
@@ -2269,7 +2269,7 @@ Reads the plan's `verificationScenarios`, runs each through the right runner, ag
 **Files:**
 - Create: `apps/orchestrator/src/agents/prompts/verify.md` (mostly documentation; the Verifier is code-driven), `apps/orchestrator/src/agents/verify.ts`, `apps/orchestrator/test/agents/verify.test.ts`
 
-- [ ] **Step 1: Create `prompts/verify.md`**
+- [x] **Step 1: Create `prompts/verify.md`**
 
 `apps/orchestrator/src/agents/prompts/verify.md`:
 ```markdown
@@ -2287,7 +2287,7 @@ The Verifier phase is **not** an LLM-driven loop. The orchestrator's `runVerify(
 - Return ok = (every scenario.ok === true).
 ```
 
-- [ ] **Step 2: Write failing test**
+- [x] **Step 2: Write failing test**
 
 `apps/orchestrator/test/agents/verify.test.ts`:
 ```typescript
@@ -2391,12 +2391,12 @@ describe("runVerify", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/verify`
 Expected: FAIL.
 
-- [ ] **Step 4: Implement `src/agents/verify.ts`**
+- [x] **Step 4: Implement `src/agents/verify.ts`**
 
 `apps/orchestrator/src/agents/verify.ts`:
 ```typescript
@@ -2452,7 +2452,7 @@ export async function runVerify(opts: VerifyOpts): Promise<VerifyResult> {
 }
 ```
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/verify`
 Expected: PASS — 2 tests.
@@ -2473,7 +2473,7 @@ Reads the plan + proof report, builds a PR body, opens it via `gh pr create`. Co
 **Files:**
 - Create: `apps/orchestrator/src/agents/prompts/pr.md`, `apps/orchestrator/src/agents/pr.ts`, `apps/orchestrator/test/agents/pr.test.ts`
 
-- [ ] **Step 1: Create `prompts/pr.md`**
+- [x] **Step 1: Create `prompts/pr.md`**
 
 `apps/orchestrator/src/agents/prompts/pr.md`:
 ```markdown
@@ -2490,7 +2490,7 @@ Like the Verifier, the PR phase is code-driven, not LLM-driven. `runPr()`:
 Failure modes: `gh` not installed, network error, no remote configured. All surface as `runPr().error`.
 ```
 
-- [ ] **Step 2: Write failing test**
+- [x] **Step 2: Write failing test**
 
 `apps/orchestrator/test/agents/pr.test.ts`:
 ```typescript
@@ -2580,12 +2580,12 @@ describe("runPr", () => {
 });
 ```
 
-- [ ] **Step 3: Run, verify fail**
+- [x] **Step 3: Run, verify fail**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/pr`
 Expected: FAIL.
 
-- [ ] **Step 4: Implement `src/agents/pr.ts`**
+- [x] **Step 4: Implement `src/agents/pr.ts`**
 
 `apps/orchestrator/src/agents/pr.ts`:
 ```typescript
@@ -2656,7 +2656,7 @@ function buildPrBody(
 }
 ```
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
 Run: `pnpm --filter @pi-harness/orchestrator test agents/pr`
 Expected: PASS — 2 tests.
@@ -2679,11 +2679,11 @@ The shape of `phase-prompts.ts` is no longer "return system+user strings" — it
 **Files:**
 - Modify: `apps/orchestrator/src/runner/phase-prompts.ts`, `apps/orchestrator/src/runner/run-loop.ts`
 
-- [ ] **Step 1: Read current `phase-prompts.ts`**
+- [x] **Step 1: Read current `phase-prompts.ts`**
 
 It currently exports `getPromptFor(phase): { system, user }` — used in run-loop. We deprecate that and add a new export.
 
-- [ ] **Step 2: Replace `phase-prompts.ts`**
+- [x] **Step 2: Replace `phase-prompts.ts`**
 
 `apps/orchestrator/src/runner/phase-prompts.ts`:
 ```typescript
@@ -2854,7 +2854,7 @@ function mapResultPlan(r: {
 }
 ```
 
-- [ ] **Step 3: Update `run-loop.ts` to call `runPhase` with the new signature**
+- [x] **Step 3: Update `run-loop.ts` to call `runPhase` with the new signature**
 
 Replace the relevant block in `apps/orchestrator/src/runner/run-loop.ts`. Since the run-loop now needs `PhaseDeps`, the loop signature grows to accept it:
 
@@ -2886,7 +2886,7 @@ await runs.updateRun(run.id, {
 
 And if `result.branch` is set, persist on the task: `if (result.branch) await runs.updateTask(task.id, { branchName: result.branch });`
 
-- [ ] **Step 4: Update `run-loop.test.ts` to use the new shape**
+- [x] **Step 4: Update `run-loop.test.ts` to use the new shape**
 
 The Plan 2 test mocked `dispatcher.runPhase`. Adjust to mock `phaseDeps`:
 
@@ -2918,7 +2918,7 @@ vi.mock("../src/runner/phase-prompts.js", () => ({
 }));
 ```
 
-- [ ] **Step 5: Run all orchestrator tests**
+- [x] **Step 5: Run all orchestrator tests**
 
 Run: `pnpm --filter @pi-harness/orchestrator test`
 Expected: every existing test still passes; run-loop test still green.
@@ -2936,12 +2936,12 @@ git commit -m "feat(orchestrator): wire real phase drivers into runPhase dispatc
 
 The end-of-plan gate.
 
-- [ ] **Step 1: Full install + typecheck + build**
+- [x] **Step 1: Full install + typecheck + build**
 
 Run: `pnpm install && pnpm typecheck && pnpm build`
 Expected: clean across all packages.
 
-- [ ] **Step 2: Run all tests**
+- [x] **Step 2: Run all tests**
 
 Run: `pnpm test`
 

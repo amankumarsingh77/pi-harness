@@ -1,0 +1,76 @@
+import { pgTable, text, timestamp, integer, jsonb, doublePrecision, uuid, index, boolean } from "drizzle-orm/pg-core";
+
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    status: text("status").notNull().default("backlog"),
+    workflow: text("workflow"),
+    worktreePath: text("worktree_path"),
+    branchName: text("branch_name"),
+    retryCount: integer("retry_count").notNull().default(0),
+    // True only while in brainstorming and waiting for user approval of the
+    // design+spec bundle. Cleared on approve, request-changes, or any other
+    // exit from the gate.
+    awaitingApproval: boolean("awaiting_approval").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("tasks_status_idx").on(t.status),
+  }),
+);
+
+export const runs = pgTable(
+  "runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    phase: text("phase").notNull(),
+    status: text("status").notNull().default("pending"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    error: text("error"),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+  },
+  (t) => ({
+    taskIdx: index("runs_task_idx").on(t.taskId),
+  }),
+);
+
+export const events = pgTable(
+  "events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    taskId: uuid("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull().references(() => runs.id, { onDelete: "cascade" }),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => ({
+    runIdx: index("events_run_idx").on(t.runId),
+    tsIdx: index("events_ts_idx").on(t.ts),
+  }),
+);
+
+export const artifacts = pgTable(
+  "artifacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    taskId: uuid("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    path: text("path").notNull(),
+    contentType: text("content_type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    taskIdx: index("artifacts_task_idx").on(t.taskId),
+  }),
+);

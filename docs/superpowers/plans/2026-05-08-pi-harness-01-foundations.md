@@ -639,7 +639,7 @@ git commit -m "feat(shared): add Scenario types and Zod schema with duplicate-id
 **Files:**
 - Create: `packages/db/package.json`, `packages/db/tsconfig.json`, `packages/db/drizzle.config.ts`, `packages/db/src/schema.ts`, `packages/db/src/client.ts`, `packages/db/src/index.ts`
 
-- [ ] **Step 1: Create `packages/db/package.json`**
+- [x] **Step 1: Create `packages/db/package.json`**
 
 `packages/db/package.json`:
 ```json
@@ -674,7 +674,7 @@ git commit -m "feat(shared): add Scenario types and Zod schema with duplicate-id
 }
 ```
 
-- [ ] **Step 2: Create `packages/db/tsconfig.json`**
+- [x] **Step 2: Create `packages/db/tsconfig.json`**
 
 `packages/db/tsconfig.json`:
 ```json
@@ -688,7 +688,7 @@ git commit -m "feat(shared): add Scenario types and Zod schema with duplicate-id
 }
 ```
 
-- [ ] **Step 3: Create `src/schema.ts`**
+- [x] **Step 3: Create `src/schema.ts`**
 
 `packages/db/src/schema.ts`:
 ```typescript
@@ -766,7 +766,7 @@ export const artifacts = pgTable(
 );
 ```
 
-- [ ] **Step 4: Create `src/client.ts`**
+- [x] **Step 4: Create `src/client.ts`**
 
 `packages/db/src/client.ts`:
 ```typescript
@@ -783,7 +783,7 @@ export function createDb(databaseUrl: string) {
 export type DbClient = ReturnType<typeof createDb>["db"];
 ```
 
-- [ ] **Step 5: Create `src/index.ts`**
+- [x] **Step 5: Create `src/index.ts`**
 
 `packages/db/src/index.ts`:
 ```typescript
@@ -791,7 +791,7 @@ export * from "./schema.js";
 export * from "./client.js";
 ```
 
-- [ ] **Step 6: Create `drizzle.config.ts`**
+- [x] **Step 6: Create `drizzle.config.ts`**
 
 `packages/db/drizzle.config.ts`:
 ```typescript
@@ -808,21 +808,21 @@ export default {
 } satisfies Config;
 ```
 
-- [ ] **Step 7: Add `dotenv` to db deps**
+- [x] **Step 7: Add `dotenv` to db deps**
 
 Edit `packages/db/package.json` to add `"dotenv": "^16.4.0"` under `dependencies`.
 
-- [ ] **Step 8: Install + build**
+- [x] **Step 8: Install + build**
 
 Run: `pnpm install && pnpm --filter @pi-harness/db build`
 Expected: clean build.
 
-- [ ] **Step 9: Generate initial migration**
+- [x] **Step 9: Generate initial migration**
 
 Run: `pnpm --filter @pi-harness/db generate`
 Expected: `packages/db/migrations/0000_*.sql` created with `CREATE TABLE tasks`, `runs`, `events`, `artifacts`.
 
-- [ ] **Step 10: Apply migration**
+- [x] **Step 10: Apply migration**
 
 Run: `pnpm --filter @pi-harness/db migrate`
 Expected: tables created in local Postgres. Verify: `psql $DATABASE_URL -c '\dt'` lists all four tables.
@@ -841,7 +841,7 @@ git commit -m "feat(db): drizzle schema for tasks/runs/events/artifacts"
 **Files:**
 - Create: `packages/db/test/schema.test.ts`, `packages/db/vitest.config.ts`
 
-- [ ] **Step 1: Create `vitest.config.ts`**
+- [x] **Step 1: Create `vitest.config.ts`**
 
 `packages/db/vitest.config.ts`:
 ```typescript
@@ -856,7 +856,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: Write failing test**
+- [x] **Step 2: Write failing test**
 
 `packages/db/test/schema.test.ts`:
 ```typescript
@@ -908,7 +908,7 @@ describe("schema round-trip", () => {
 });
 ```
 
-- [ ] **Step 3: Run test, verify it passes**
+- [x] **Step 3: Run test, verify it passes**
 
 Run: `pnpm --filter @pi-harness/db test`
 Expected: PASS — 2 tests. (Requires Postgres up + migrated, done in Task 5.)
@@ -929,7 +929,7 @@ git commit -m "test(db): round-trip insert/select + cascade verification"
 
 The pi-bridge is the **only** module that imports pi SDKs. v1 ships a thin async wrapper; we keep the surface narrow on purpose.
 
-- [ ] **Step 1: Create `packages/pi-bridge/package.json`**
+- [x] **Step 1: Create `packages/pi-bridge/package.json`**
 
 `packages/pi-bridge/package.json`:
 ```json
@@ -960,7 +960,7 @@ The pi-bridge is the **only** module that imports pi SDKs. v1 ships a thin async
 }
 ```
 
-- [ ] **Step 2: Create `packages/pi-bridge/tsconfig.json`**
+- [x] **Step 2: Create `packages/pi-bridge/tsconfig.json`**
 
 `packages/pi-bridge/tsconfig.json`:
 ```json
@@ -974,7 +974,7 @@ The pi-bridge is the **only** module that imports pi SDKs. v1 ships a thin async
 }
 ```
 
-- [ ] **Step 3: Create `src/types.ts`**
+- [x] **Step 3: Create `src/types.ts`**
 
 `packages/pi-bridge/src/types.ts`:
 ```typescript
@@ -1028,7 +1028,7 @@ export type PiSubagentResult = {
 export type EventTranslator = (e: PiBridgeEvent) => Omit<AgentEvent, "id" | "ts" | "runId" | "taskId">;
 ```
 
-- [ ] **Step 4: Create `src/index.ts`**
+- [x] **Step 4: Create `src/index.ts`**
 
 `packages/pi-bridge/src/index.ts`:
 ```typescript
@@ -1037,7 +1037,7 @@ export { createSession } from "./session.js";
 export { runSubagent } from "./subagent.js";
 ```
 
-- [ ] **Step 5: Build (will fail; placeholder commit)**
+- [x] **Step 5: Build (will fail; placeholder commit)**
 
 Skip build until Task 8 lands `session.ts` and `subagent.ts`. Do not commit yet.
 
@@ -1050,7 +1050,7 @@ The actual pi SDK integration is intentionally minimal: we expose `createSession
 **Files:**
 - Create: `packages/pi-bridge/src/session.ts`, `packages/pi-bridge/src/subagent.ts`, `packages/pi-bridge/src/_mock.ts`, `packages/pi-bridge/test/session.test.ts`
 
-- [ ] **Step 1: Write failing test (uses injected mock)**
+- [x] **Step 1: Write failing test (uses injected mock)**
 
 `packages/pi-bridge/test/session.test.ts`:
 ```typescript
@@ -1090,12 +1090,12 @@ describe("createSession", () => {
 });
 ```
 
-- [ ] **Step 2: Run test, verify fail**
+- [x] **Step 2: Run test, verify fail**
 
 Run: `pnpm --filter @pi-harness/pi-bridge test`
 Expected: FAIL — `createSession` not exported.
 
-- [ ] **Step 3: Implement `_mock.ts`**
+- [x] **Step 3: Implement `_mock.ts`**
 
 `packages/pi-bridge/src/_mock.ts`:
 ```typescript
@@ -1118,7 +1118,7 @@ export type PiSdkAdapter = {
 export type MockPiAdapter = PiSdkAdapter;
 ```
 
-- [ ] **Step 4: Implement `session.ts`**
+- [x] **Step 4: Implement `session.ts`**
 
 `packages/pi-bridge/src/session.ts`:
 ```typescript
@@ -1173,7 +1173,7 @@ export async function createSession(
 }
 ```
 
-- [ ] **Step 5: Implement `subagent.ts`**
+- [x] **Step 5: Implement `subagent.ts`**
 
 `packages/pi-bridge/src/subagent.ts`:
 ```typescript
@@ -1249,17 +1249,17 @@ export async function runSubagent(spec: PiSubagentSpec): Promise<PiSubagentResul
 }
 ```
 
-- [ ] **Step 6: Run test, verify pass**
+- [x] **Step 6: Run test, verify pass**
 
 Run: `pnpm --filter @pi-harness/pi-bridge test`
 Expected: PASS — 1 test.
 
-- [ ] **Step 7: Build**
+- [x] **Step 7: Build**
 
 Run: `pnpm --filter @pi-harness/pi-bridge build`
 Expected: clean.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/pi-bridge
@@ -1522,14 +1522,14 @@ Replace the hard-coded `_vendored/${spec.agent}.md` path lookup in `runSubagent`
 **Files:**
 - Modify: `packages/pi-bridge/package.json`, `packages/pi-bridge/src/subagent.ts`
 
-- [ ] **Step 1: Add subagents dep**
+- [x] **Step 1: Add subagents dep**
 
 Edit `packages/pi-bridge/package.json`, add to `dependencies`:
 ```json
 "@pi-harness/subagents": "workspace:*"
 ```
 
-- [ ] **Step 2: Update `subagent.ts`**
+- [x] **Step 2: Update `subagent.ts`**
 
 In `packages/pi-bridge/src/subagent.ts`:
 
@@ -1563,12 +1563,12 @@ export async function runSubagent(spec: PiSubagentSpec): Promise<PiSubagentResul
   // ...rest unchanged
 ```
 
-- [ ] **Step 3: Install + build**
+- [x] **Step 3: Install + build**
 
 Run: `pnpm install && pnpm --filter @pi-harness/pi-bridge build`
 Expected: clean.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `pnpm test`
 Expected: all packages pass.
@@ -1593,17 +1593,17 @@ A smoke task: simulate what a new contributor sees.
 Run: `pnpm -r exec rm -rf dist node_modules .turbo && rm -rf node_modules && pnpm install`
 Expected: lockfile resolved, all workspaces installed.
 
-- [ ] **Step 2: Typecheck all**
+- [x] **Step 2: Typecheck all**
 
 Run: `pnpm typecheck`
 Expected: clean across `@pi-harness/shared`, `@pi-harness/db`, `@pi-harness/pi-bridge`, `@pi-harness/subagents`.
 
-- [ ] **Step 3: Build all**
+- [x] **Step 3: Build all**
 
 Run: `pnpm build`
 Expected: clean. Each package has a `dist/` with `.js` + `.d.ts`.
 
-- [ ] **Step 4: Test all**
+- [x] **Step 4: Test all**
 
 Run: `pnpm test`
 Expected: PASS — scenario-schema (4), db round-trip (2), pi-bridge session (1), subagent loader (3) = 10 tests passing.
