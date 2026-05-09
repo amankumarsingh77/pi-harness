@@ -1,26 +1,53 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { Artifact } from "@pi-harness/shared";
+import { unlink } from "node:fs/promises";
+import { dirname, resolve as resolvePath, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+  AgentSession,
+  AgentSessionOptions,
+  PiBridgeEvent,
+} from "@pi-harness/pi-bridge";
+import { AuthError } from "@pi-harness/pi-bridge";
+import type { PhaseModelConfig } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import {
-  BRAINSTORM_SCRIPT,
-  type BrainstormAnswer,
-  type QuestionStep,
-} from "./brainstorm-script.js";
+  makeMarkReadyTool,
+  makeSubmitQuestionsTool,
+} from "./brainstorm-tools.js";
+
+// agents/ → src/ → orchestrator/ → apps/ → repo root → subagents/ours/brainstorm.md
+// At dist-runtime: dist/agents → dist → orchestrator → apps → repo root.
+// Both layouts have the same depth (4 levels up).
+const HERE = dirname(fileURLToPath(import.meta.url));
+const BRAINSTORM_PROMPT_PATH = resolvePath(
+  HERE,
+  "..",
+  "..",
+  "..",
+  "..",
+  "subagents",
+  "ours",
+  "brainstorm.md",
+);
+
+export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
 export type BrainstormOpts = {
   taskId: string;
-  cwd: string;                  // worktree path
+  cwd: string;
   store: ArtifactsStore;
   bus: BrainstormEventBus;
+  phaseModel: PhaseModelConfig;
+  sessionPath: string;
+  createAgentSession: CreateAgentSessionFn;
+  ticketTitle?: string;
+  ticketDescription?: string;
 };
 
 export type BrainstormResult = {
   ok: boolean;
-  // True only when the agent reached `ready` — both artifacts now have
-  // status: ready. False (with ok:true) means we halted on a question and
-  // are waiting for the user.
+  // True only when both artifacts have status: ready (mark_ready succeeded).
   ready: boolean;
   costUsd: number;
   inputTokens: number;
@@ -28,111 +55,274 @@ export type BrainstormResult = {
   error?: string;
 };
 
-// Run one "tick" of the scripted brainstorm subagent. Walks BRAINSTORM_SCRIPT
-// from the cursor (computed from JSONL), emitting events through the bus and
-// updating design.md / spec.md as user answers arrive. Halts on the next
-// unanswered question; returns ready=true once `ready` is reached.
-//
-// This is a mock — it doesn't talk to a real LLM. The cost / token fields
-// stay zero. See brainstorm-script.ts for the canned content.
-export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormResult> {
-  try {
-    const events = readJsonlEvents(opts.cwd, opts.taskId);
-    const answers = collectAnswers(events);
-    const cursor = computeCursor(answers);
+type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
 
-    for (let i = cursor; i < BRAINSTORM_SCRIPT.length; i++) {
-      const step = BRAINSTORM_SCRIPT[i]!;
-      switch (step.kind) {
-        case "probe": {
-          if (!hasSystemEvent(events, "probe_complete")) {
-            await opts.bus.publish({ kind: "brainstorm_system", systemKind: "probe_complete" });
-          }
-          break;
-        }
-        case "question": {
-          const answered = answers.find((a) => a.questionId === step.id);
-          if (!answered) {
-            if (!hasQuestionEvent(events, step.id)) {
-              await opts.bus.publish({
-                kind: "brainstorm_question",
-                questionId: step.id,
-                prompt: step.prompt,
-                options: step.options,
-                sectionTarget: step.sectionTarget,
-                ...(step.multiSelect ? { multiSelect: true } : {}),
-              });
-            }
-            return { ok: true, ready: false, costUsd: 0, inputTokens: 0, outputTokens: 0 };
-          }
-          await applyAnswerToArtifact(opts, step, answered);
-          break;
-        }
-        case "questions": {
-          // Emit every question in the batch that isn't already in the JSONL.
-          // Halt as soon as we know at least one is still unanswered. When
-          // all are answered, fold each answer into its target artifact and
-          // advance past the batch.
-          for (const q of step.questions) {
-            if (!hasQuestionEvent(events, q.id)) {
-              await opts.bus.publish({
-                kind: "brainstorm_question",
-                questionId: q.id,
-                prompt: q.prompt,
-                options: q.options,
-                sectionTarget: q.sectionTarget,
-                ...(q.multiSelect ? { multiSelect: true } : {}),
-              });
-            }
-          }
-          const allAnswered = step.questions.every((q) =>
-            answers.some((a) => a.questionId === q.id),
-          );
-          if (!allAnswered) {
-            return { ok: true, ready: false, costUsd: 0, inputTokens: 0, outputTokens: 0 };
-          }
-          for (const q of step.questions) {
-            const ans = answers.find((a) => a.questionId === q.id)!;
-            await applyAnswerToArtifact(opts, q, ans);
-          }
-          break;
-        }
-        case "self_critique": {
-          if (!hasSystemEvent(events, "self_critique_passed")) {
-            await opts.bus.publish({
-              kind: "brainstorm_system",
-              systemKind: "self_critique_passed",
-            });
-          }
-          break;
-        }
-        case "ready": {
-          await markReady(opts);
-          if (!hasSystemEvent(events, "status_changed")) {
-            await opts.bus.publish({
-              kind: "brainstorm_system",
-              systemKind: "status_changed",
-              data: { status: "ready" },
-            });
-          }
-          return { ok: true, ready: true, costUsd: 0, inputTokens: 0, outputTokens: 0 };
-        }
-      }
-    }
-    return { ok: true, ready: true, costUsd: 0, inputTokens: 0, outputTokens: 0 };
-  } catch (e) {
-    return {
-      ok: false,
-      ready: false,
-      costUsd: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      error: (e as Error).message,
-    };
+type Decision =
+  | { kind: "noop" }
+  | { kind: "initial" }
+  | { kind: "answers"; prompt: string }
+  | { kind: "revision"; prompt: string };
+
+type HaltReason = "questions" | "ready" | "exhausted";
+
+// Drives one brainstorm tick: open or resume a real pi agent session, decide
+// what to feed it from the JSONL log, drain the turn, and report whether the
+// agent reached the ready state. Tool side-effects (publishing questions,
+// flipping artifact status) are owned by the brainstorm-tools module; this
+// function only inspects events to decide *why* the turn ended.
+export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormResult> {
+  const events = readJsonlEvents(opts.cwd, opts.taskId);
+
+  if (hasReadyEvent(events)) {
+    return zeroUsage({ ok: true, ready: true });
   }
+
+  const decision = decide(events);
+  if (decision.kind === "noop") {
+    return zeroUsage({ ok: true, ready: false });
+  }
+
+  const promptText =
+    decision.kind === "initial"
+      ? buildInitialPrompt({
+          taskId: opts.taskId,
+          cwd: opts.cwd,
+          ...(opts.ticketTitle !== undefined ? { title: opts.ticketTitle } : {}),
+          ...(opts.ticketDescription !== undefined
+            ? { description: opts.ticketDescription }
+            : {}),
+        })
+      : decision.prompt;
+
+  return runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
 }
 
-type JsonlEvent = Record<string, unknown> & { type?: string; kind?: string };
+async function runTurnNoSession(
+  opts: BrainstormOpts,
+  promptText: string,
+): Promise<BrainstormResult> {
+  return runTurn(opts, promptText, undefined, /* allowRetry */ false);
+}
+
+async function runTurn(
+  opts: BrainstormOpts,
+  promptText: string,
+  sessionPath: string | undefined,
+  allowRetry: boolean,
+): Promise<BrainstormResult> {
+  let haltReason: HaltReason = "exhausted";
+  let lastWriteWasReady = false;
+
+  const submitQuestionsTool = makeSubmitQuestionsTool({ bus: opts.bus });
+  const markReadyTool = makeMarkReadyTool({
+    store: opts.store,
+    bus: opts.bus,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
+
+  const handleEvent = (e: PiBridgeEvent): void => {
+    if (e.kind === "tool_call" && e.tool === "submit_questions") {
+      haltReason = "questions";
+      return;
+    }
+    if (e.kind === "tool_result" && e.tool === "mark_ready") {
+      // The tool's details encodes whether mark_ready was accepted. We watch
+      // for ok:true to flip haltReason; a rejection (missing section) leaves
+      // the agent free to write more and re-call mark_ready in the same turn.
+      const out = e.output as { details?: { ok?: boolean } } | undefined;
+      if (out?.details?.ok === true) {
+        haltReason = "ready";
+        lastWriteWasReady = true;
+      }
+      return;
+    }
+  };
+
+  let systemPrompt: string;
+  try {
+    systemPrompt = readFileSync(BRAINSTORM_PROMPT_PATH, "utf8");
+  } catch (err) {
+    return zeroUsage({
+      ok: false,
+      ready: false,
+      error: `brainstorm: cannot read system prompt: ${(err as Error).message}`,
+    });
+  }
+
+  let session: AgentSession;
+  try {
+    session = await opts.createAgentSession({
+      cwd: opts.cwd,
+      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+      ...(opts.phaseModel.thinkingLevel !== "off"
+        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+        : {}),
+      maxTurns: opts.phaseModel.maxTurns,
+      systemPrompt,
+      ...(sessionPath !== undefined ? { sessionPath } : {}),
+      customTools: [submitQuestionsTool, markReadyTool],
+      onEvent: handleEvent,
+    });
+  } catch (err) {
+    if (err instanceof AuthError) {
+      await opts.bus.publish({
+        kind: "brainstorm_system",
+        systemKind: "status_changed",
+        data: { status: "blocked", reason: err.message },
+      });
+      return zeroUsage({
+        ok: false,
+        ready: false,
+        error: `missing API key for ${opts.phaseModel.provider}`,
+      });
+    }
+    // Treat any other open-time error as a candidate corrupted-session-file
+    // case. The bridge surfaces SessionManager.open failures synchronously
+    // through createAgentSession; we delete the file and retry once with no
+    // sessionPath so the conversation continues from the JSONL replay path.
+    if (allowRetry && existsSync(opts.sessionPath)) {
+      try {
+        await unlink(opts.sessionPath);
+        await opts.bus.publish({
+          kind: "brainstorm_system",
+          systemKind: "status_changed",
+          data: { status: "session_reset", reason: (err as Error).message },
+        });
+        return runTurnNoSession(opts, promptText);
+      } catch {
+        // fall through to error return
+      }
+    }
+    return zeroUsage({
+      ok: false,
+      ready: false,
+      error: (err as Error).message,
+    });
+  }
+
+  let usage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+  try {
+    usage = await session.prompt(promptText);
+  } catch (err) {
+    await session.close().catch(() => {});
+    const message = (err as Error).message;
+    if (message === "maxTurns exceeded") {
+      return zeroUsage({
+        ok: false,
+        ready: false,
+        error: "brainstorm: maxTurns exceeded",
+      });
+    }
+    return zeroUsage({ ok: false, ready: false, error: message });
+  }
+
+  await session.close();
+
+  const [design, spec] = await Promise.all([
+    opts.store.readArtifact(opts.cwd, opts.taskId, "design"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "spec"),
+  ]);
+  const ready =
+    lastWriteWasReady ||
+    (design?.fm.status === "ready" && spec?.fm.status === "ready");
+
+  // haltReason "exhausted" means the agent ended its turn without calling a
+  // brainstorm-completing tool. Not a hard failure — the next answers-delta
+  // tick (or user revision) will resume it. Surfaced via the result fields
+  // for the run-loop / dashboard to log; we don't fail the tick.
+  return {
+    ok: true,
+    ready: Boolean(ready),
+    costUsd: usage.costUsd,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(haltReason === "exhausted" && !ready
+      ? { error: "brainstorm: agent ended turn without questions or ready" }
+      : {}),
+  };
+}
+
+function decide(events: JsonlEvent[]): Decision {
+  if (events.length === 0) return { kind: "initial" };
+
+  const lastAgentIdx = lastIndexWhere(
+    events,
+    (e) => e.kind === "brainstorm_question" || e.kind === "brainstorm_system",
+  );
+
+  // Revision wins over answers when both postdate the last agent activity:
+  // a user requesting changes after answering means the answers belong to
+  // the prior round and the agent should re-evaluate against the comment.
+  const newRevisions = events
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => e.kind === "brainstorm_revision_requested" && i > lastAgentIdx);
+  if (newRevisions.length > 0) {
+    const last = newRevisions[newRevisions.length - 1]!.e;
+    return {
+      kind: "revision",
+      prompt: buildRevisionPrompt(typeof last["comment"] === "string" ? (last["comment"] as string) : ""),
+    };
+  }
+
+  const newAnswers = events
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => e.kind === "brainstorm_answer" && i > lastAgentIdx)
+    .map(({ e }) => e);
+  if (newAnswers.length > 0) {
+    return { kind: "answers", prompt: buildAnswersDeltaPrompt(newAnswers) };
+  }
+
+  // No initial event implies first dispatch; otherwise nothing new to feed
+  // the agent — let the run-loop sleep until the user produces an event.
+  if (lastAgentIdx === -1) return { kind: "initial" };
+  return { kind: "noop" };
+}
+
+function buildInitialPrompt(opts: {
+  taskId: string;
+  cwd: string;
+  title?: string;
+  description?: string;
+}): string {
+  const parts: string[] = [];
+  parts.push(`Begin brainstorming this task.`);
+  if (opts.title) parts.push(`Title: ${opts.title}`);
+  if (opts.description) parts.push(`Description: ${opts.description}`);
+  parts.push(`Worktree: ${opts.cwd}`);
+  parts.push(
+    `Artifacts to author: .harness/${opts.taskId}/design.md and .harness/${opts.taskId}/spec.md.`,
+  );
+  parts.push(
+    `Use submit_questions to ask the user everything you need before you start writing. After they answer, fill the artifacts and call mark_ready.`,
+  );
+  return parts.join("\n");
+}
+
+function buildAnswersDeltaPrompt(answers: JsonlEvent[]): string {
+  const lines: string[] = ["User answered:"];
+  for (const a of answers) {
+    const id = String(a["questionId"] ?? "?");
+    const optionId = a["optionId"];
+    const optionIds = a["optionIds"];
+    const freeText = a["freeText"];
+    if (Array.isArray(optionIds) && optionIds.length > 0) {
+      lines.push(`- ${id}: ${optionIds.join(", ")}`);
+    } else if (typeof optionId === "string") {
+      lines.push(`- ${id}: ${optionId}`);
+    } else if (typeof freeText === "string") {
+      lines.push(`- ${id}: ${freeText}`);
+    } else {
+      lines.push(`- ${id}: (no answer body)`);
+    }
+  }
+  lines.push("", "Continue.");
+  return lines.join("\n");
+}
+
+function buildRevisionPrompt(comment: string): string {
+  return `User requested revisions: ${comment}\n\nRe-examine the artifacts and ask any clarifying questions you need before revising.`;
+}
 
 function readJsonlEvents(cwd: string, taskId: string): JsonlEvent[] {
   const path = join(cwd, ".harness", taskId, "brainstorm.jsonl");
@@ -150,86 +340,27 @@ function readJsonlEvents(cwd: string, taskId: string): JsonlEvent[] {
     .filter((e): e is JsonlEvent => e !== null);
 }
 
-function collectAnswers(events: JsonlEvent[]): BrainstormAnswer[] {
-  return events
-    .filter((e) => e.kind === "brainstorm_answer")
-    .map((e) => ({
-      questionId: String(e.questionId ?? ""),
-      ...(typeof e.optionId === "string" ? { optionId: e.optionId } : {}),
-      ...(Array.isArray(e.optionIds) && e.optionIds.every((s) => typeof s === "string")
-        ? { optionIds: e.optionIds as string[] }
-        : {}),
-      ...(typeof e.freeText === "string" ? { freeText: e.freeText } : {}),
-    }));
+function hasReadyEvent(events: JsonlEvent[]): boolean {
+  return events.some(
+    (e) =>
+      e.kind === "brainstorm_system" &&
+      e["systemKind"] === "status_changed" &&
+      ((e["data"] as { status?: string } | undefined)?.status === "ready"),
+  );
 }
 
-function hasSystemEvent(events: JsonlEvent[], systemKind: string): boolean {
-  return events.some((e) => e.kind === "brainstorm_system" && e.systemKind === systemKind);
-}
-
-function hasQuestionEvent(events: JsonlEvent[], questionId: string): boolean {
-  return events.some((e) => e.kind === "brainstorm_question" && e.questionId === questionId);
-}
-
-// Given the answers seen so far, return the index in BRAINSTORM_SCRIPT to
-// resume from. We resume *at* the next un-fully-handled step, not after the
-// last answered question — this lets us re-walk an answered question to
-// apply its answer to the artifact body (idempotent thanks to our
-// hasQuestionEvent / hasSystemEvent guards on emission).
-//
-// Practically: we always start from 0. The handler short-circuits emission
-// for events already in the JSONL, so the cost of re-walking is just a few
-// reads and `applyAnswerToArtifact` calls.
-export function computeCursor(_answers: BrainstormAnswer[]): number {
-  return 0;
-}
-
-async function applyAnswerToArtifact(
-  opts: BrainstormOpts,
-  step: QuestionStep,
-  answer: BrainstormAnswer,
-): Promise<void> {
-  const cur = await opts.store.readArtifact(opts.cwd, opts.taskId, step.sectionTarget.artifact);
-  if (!cur) return;
-  const sectionLine = `## ${step.sectionTarget.section}`;
-  const newLine = step.answerToBody(answer);
-  // Idempotent: if the answer line is already in the body, no-op.
-  if (cur.body.includes(newLine)) return;
-  const body = cur.body.includes(sectionLine)
-    ? appendUnderSection(cur.body, sectionLine, newLine)
-    : `${cur.body.trim()}\n\n${sectionLine}\n\n${newLine}\n`;
-  const next: Artifact = {
-    fm: {
-      ...cur.fm,
-      last_updated: new Date().toISOString(),
-      last_updated_by: "brainstorm-agent",
-    },
-    body,
-  };
-  await opts.store.writeArtifact(opts.cwd, opts.taskId, next);
-}
-
-function appendUnderSection(body: string, sectionLine: string, line: string): string {
-  // Insert `line` immediately after the section heading. Stays simple — no
-  // attempt to deduplicate; multiple revisions accumulate.
-  const idx = body.indexOf(sectionLine);
-  const insertAt = idx + sectionLine.length;
-  return `${body.slice(0, insertAt)}\n\n${line}${body.slice(insertAt)}`;
-}
-
-async function markReady(opts: BrainstormOpts): Promise<void> {
-  for (const kind of ["design", "spec"] as const) {
-    const cur = await opts.store.readArtifact(opts.cwd, opts.taskId, kind);
-    if (!cur) continue;
-    if (cur.fm.status === "ready" || cur.fm.status === "approved") continue;
-    await opts.store.writeArtifact(opts.cwd, opts.taskId, {
-      fm: {
-        ...cur.fm,
-        status: "ready",
-        last_updated: new Date().toISOString(),
-        last_updated_by: "brainstorm-agent",
-      },
-      body: cur.body,
-    });
+function lastIndexWhere<T>(arr: T[], pred: (t: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    if (pred(arr[i]!)) return i;
   }
+  return -1;
+}
+
+function zeroUsage(partial: Partial<BrainstormResult> & { ok: boolean; ready: boolean }): BrainstormResult {
+  return {
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    ...partial,
+  };
 }

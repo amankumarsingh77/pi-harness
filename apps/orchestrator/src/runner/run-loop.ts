@@ -1,10 +1,11 @@
-import type { Phase, Run, Task } from "@pi-harness/shared";
+import { join } from "node:path";
+import { mergePhaseModels, type Phase, type Run, type Task } from "@pi-harness/shared";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { WorktreeManager } from "../adapters/worktree.js";
 import { transition } from "../domain/state-machine.js";
 import { phasesFor } from "../domain/phase-chain.js";
-import { runPhase, type PhaseDeps } from "./phase-prompts.js";
+import { runPhase, type PhaseDeps, type PhaseInput } from "./phase-prompts.js";
 import { scaffoldBrainstorm } from "./scaffold-brainstorm.js";
 
 export type RunLoopOpts = {
@@ -94,15 +95,28 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     run = await runs.createRun({ taskId: task.id, phase });
   }
 
+  // Brainstorm-only: compute the merged model config and per-task session
+  // path once per dispatch, persist the path on the Run row on first sight,
+  // and pass both into the phase. Other phases ignore these fields today.
+  let phaseInput: PhaseInput = {
+    taskId: task.id,
+    runId: run.id,
+    ticketTitle: task.title,
+    ticketDescription: task.description,
+    ...(task.branchName ? { branch: task.branchName } : {}),
+  };
+  if (phase === "brainstorm") {
+    const phaseModel = mergePhaseModels(task.phaseModels, "brainstorm");
+    const sessionPath = join(worktree.path, ".harness", task.id, "pi-session.jsonl");
+    if (run.piSessionPath !== sessionPath) {
+      run = await runs.updateRun(run.id, { piSessionPath: sessionPath });
+    }
+    phaseInput = { ...phaseInput, phaseModel, sessionPath };
+  }
+
   const result = await runPhase(
     phase,
-    {
-      taskId: task.id,
-      runId: run.id,
-      ticketTitle: task.title,
-      ticketDescription: task.description,
-      ...(task.branchName ? { branch: task.branchName } : {}),
-    },
+    phaseInput,
     { ...phaseDeps, cwd: worktree.path },
   );
 

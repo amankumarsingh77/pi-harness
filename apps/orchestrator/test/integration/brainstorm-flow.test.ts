@@ -1,34 +1,58 @@
 import "dotenv/config";
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
 import { createDb } from "@pi-harness/db";
+import {
+  createAgentSession,
+  __resetAuthCache,
+  type AgentSdkEvent,
+  type AgentSessionOptions,
+} from "@pi-harness/pi-bridge";
+import { createFakeAdapter, type FakeAgentSdkAdapter } from "@pi-harness/pi-bridge/_test/fake-sdk";
 import { RunStore } from "../../src/adapters/run-store.js";
 import { EventStore } from "../../src/adapters/event-store.js";
 import { WorktreeManager } from "../../src/adapters/worktree.js";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
 import { runLoop } from "../../src/runner/run-loop.js";
-import { runPhase } from "../../src/runner/phase-prompts.js";
 import { transition } from "../../src/domain/state-machine.js";
-import { SCRIPT_QUESTION_COUNT } from "../../src/agents/brainstorm-script.js";
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
 
-// End-to-end happy path: file a task, drive it through the full scripted
-// brainstorm Q&A, approve, observe the task land in `planning` with both
-// artifacts marked `approved`. Exercises run-loop, scripted mock subagent,
-// JSONL bus, ArtifactsStore, and state-machine — no browser, no real LLM.
+function assistantWithUsage(input: number, output: number, costTotal: number) {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: "ok" }],
+    usage: {
+      input,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: input + output,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
+    },
+  };
+}
+
+// End-to-end happy path against the real bridge driven by a fake SDK adapter.
+// The test scripts the agent's behavior turn-by-turn: the fake adapter is the
+// boundary between "the harness" and "the LLM". This proves the dashboard's
+// brainstorm event sequence is intact through the real run-loop + bridge.
 describe("brainstorm integration flow", () => {
   const { db, client } = createDb(url);
   const runs = new RunStore(db);
   const events = new EventStore(db);
   let scratch: string;
   let repo: string;
+  let envDir: string;
+  let prevCwd: string;
   let worktrees: WorktreeManager;
   let store: ArtifactsStore;
+  let queue: ((adapter: FakeAgentSdkAdapter) => Promise<void>)[];
 
   afterAll(async () => {
     await client.end();
@@ -48,20 +72,48 @@ describe("brainstorm integration flow", () => {
     await repoGit.commit("init");
     worktrees = new WorktreeManager({ repoRoot: repo, worktreesDir: join(scratch, "wts") });
     store = new ArtifactsStore({ runsDir: join(scratch, "runs") });
+
+    envDir = await mkdtemp(join(tmpdir(), "bs-int-env-"));
+    prevCwd = process.cwd();
+    process.chdir(envDir);
+    writeFileSync(join(envDir, ".env.harness"), "ANTHROPIC_API_KEY=test-key\n");
+    __resetAuthCache();
+    queue = [];
   });
 
   afterEach(async () => {
+    process.chdir(prevCwd);
     await rm(scratch, { recursive: true, force: true });
+    await rm(envDir, { recursive: true, force: true });
+    __resetAuthCache();
   });
+
+  // Wraps createAgentSession with a fake adapter and pulls the next scripted
+  // turn-driver off `queue` to play out tool calls + agent_end.
+  function makeCreateAgentSession() {
+    return async (opts: AgentSessionOptions) => {
+      const adapter = createFakeAdapter();
+      const session = await createAgentSession(opts, adapter);
+      const driver = queue.shift();
+      if (!driver) throw new Error("no scripted turn driver enqueued");
+      // Driver runs after prompt() registers the in-flight gate.
+      void Promise.resolve().then(() => driver(adapter));
+      return session;
+    };
+  }
 
   function phaseDeps() {
     return {
       cwd: "/will-be-overridden",
       onEvent: () => {},
-      createSession: (async () => { throw new Error("no real session in mock flow"); }) as any,
-      runSubagent: (async () => { throw new Error("no real subagent in mock flow"); }) as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createSession: (async () => { throw new Error("not used"); }) as any,
+      createAgentSession: makeCreateAgentSession(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      runSubagent: (async () => { throw new Error("not used"); }) as any,
       store,
       eventStore: events,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       exec: (async () => ({ ok: true, stdout: "", stderr: "" })) as any,
     };
   }
@@ -78,66 +130,113 @@ describe("brainstorm integration flow", () => {
     });
   }
 
-  // Find the earliest question in the JSONL that hasn't been answered yet.
-  // Batched script steps emit multiple questions per tick, so "the last
-  // question" isn't always the one to answer next — we want the oldest
-  // unanswered one.
-  function nextUnansweredQ(lines: any[]): any {
-    const answeredIds = new Set(
-      lines.filter((e) => e.kind === "brainstorm_answer").map((e) => e.questionId),
-    );
-    return lines.find(
-      (e) => e.kind === "brainstorm_question" && !answeredIds.has(e.questionId),
-    );
+  async function executeTool(adapter: FakeAgentSdkAdapter, name: string, params: unknown) {
+    const tools = (adapter.state.createOpts?.customTools ?? []) as Array<{
+      name: string;
+      execute: (
+        id: string,
+        params: unknown,
+        signal: AbortSignal | undefined,
+        onUpdate: undefined,
+        ctx: never,
+      ) => Promise<unknown>;
+    }>;
+    const tool = tools.find((t) => t.name === name);
+    if (!tool) throw new Error(`tool ${name} not registered`);
+    const result = await tool.execute("tc", params, undefined, undefined, undefined as never);
+    adapter.emit({ type: "tool_execution_start", toolName: name, args: params } as AgentSdkEvent);
+    adapter.emit({
+      type: "tool_execution_end",
+      toolName: name,
+      isError: false,
+      result,
+    } as AgentSdkEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(5, 3, 0.0001)],
+    } as AgentSdkEvent);
   }
 
-  async function appendAnswer(cwd: string, taskId: string, optionId: string) {
-    const path = join(cwd, ".harness", taskId, "brainstorm.jsonl");
-    const raw = await readFile(path, "utf8");
-    const lines = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any);
-    const q = nextUnansweredQ(lines);
-    if (!q) throw new Error("no unanswered question to answer");
-    const w = new JsonlWriter(path);
-    await w.append({
-      ts: new Date().toISOString(),
-      kind: "brainstorm_answer",
-      questionId: q.questionId,
-      optionId,
-    });
-  }
-
-  it("happy path: 5 questions answered → ready → approve → planning", async () => {
+  it("happy path: ask questions → answer → mark_ready → approve → planning", async () => {
     const t = await runs.createTask({ title: "integration" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
 
-    // First tick creates worktree, scaffolding commit, runs first runBrainstorm
-    // which emits probe + Q1.
+    // Turn 1: agent submits two questions, then halts.
+    queue.push(async (adapter) => {
+      await executeTool(adapter, "submit_questions", {
+        questions: [
+          {
+            questionId: "q-scope",
+            prompt: "What scope?",
+            options: [
+              { id: "narrow", label: "Narrow", recommended: true, evidence: [] },
+              { id: "wide", label: "Wide", recommended: false, evidence: [] },
+            ],
+            sectionTarget: { artifact: "design", section: "Goals" },
+          },
+          {
+            questionId: "q-auth",
+            prompt: "Auth flow?",
+            options: [
+              { id: "oauth", label: "OAuth", recommended: true, evidence: [] },
+              { id: "password", label: "Password", recommended: false, evidence: [] },
+            ],
+            sectionTarget: { artifact: "design", section: "Goals" },
+          },
+        ],
+      });
+    });
+
     await tickRunLoop(t.id);
     let task = await runs.getTask(t.id);
     expect(task.worktreePath).toBeTruthy();
     expect(task.branchName).toBe(`pi/${t.id}`);
 
-    // Answer all 5 questions. After each answer we tick the loop; the agent
-    // emits the next question (or finalizes).
-    const recommended: Record<string, string> = {
-      q_scope: "narrow",
-      q_constraint: "correctness",
-      q_alternative: "abstract",
-      q_verification: "unit_e2e",
-      q_acceptance: "functional",
-    };
-    for (let i = 0; i < SCRIPT_QUESTION_COUNT; i++) {
-      const path = join(task.worktreePath!, ".harness", t.id, "brainstorm.jsonl");
-      const raw = await readFile(path, "utf8");
-      const lines = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any);
-      const nextQ = nextUnansweredQ(lines);
-      const optionId = recommended[nextQ.questionId as string]!;
-      await appendAnswer(task.worktreePath!, t.id, optionId);
-      task = await tickRunLoop(t.id);
-    }
+    // Run row should now have the resumable session path persisted.
+    const runsForTask = await runs.listRuns(t.id);
+    expect(runsForTask).toHaveLength(1);
+    expect(runsForTask[0]!.piSessionPath).toBe(
+      join(task.worktreePath!, ".harness", t.id, "pi-session.jsonl"),
+    );
 
-    // After last answer + tick, both artifacts should be ready and the task
-    // should be sitting at awaitingApproval=true.
+    // User answers both questions.
+    const jsonlPath = join(task.worktreePath!, ".harness", t.id, "brainstorm.jsonl");
+    const w = new JsonlWriter(jsonlPath);
+    await w.append({
+      ts: new Date().toISOString(),
+      kind: "brainstorm_answer",
+      questionId: "q-scope",
+      optionId: "narrow",
+    });
+    await w.append({
+      ts: new Date().toISOString(),
+      kind: "brainstorm_answer",
+      questionId: "q-auth",
+      optionId: "oauth",
+    });
+
+    // Turn 2: agent fills both artifacts, then mark_ready.
+    queue.push(async (adapter) => {
+      // Pre-fill artifacts directly; the harness's write tool would normally
+      // do this, but we're driving the SDK boundary here.
+      const designArt = await store.readArtifact(task.worktreePath!, t.id, "design");
+      const specArt = await store.readArtifact(task.worktreePath!, t.id, "spec");
+      if (!designArt || !specArt) throw new Error("missing scaffolding");
+      await store.writeArtifact(task.worktreePath!, t.id, {
+        fm: designArt.fm,
+        body:
+          "## Goals\nnarrow login flow\n\n## Trade-offs\nlonger build time\n\n## Alternatives considered\nbuilt our own oauth\n",
+      });
+      await store.writeArtifact(task.worktreePath!, t.id, {
+        fm: specArt.fm,
+        body:
+          "## Verification scenarios\nuser logs in via oauth happy path\n\n## Acceptance criteria\nsession cookie present\n",
+      });
+      await executeTool(adapter, "mark_ready", {});
+    });
+
+    task = await tickRunLoop(t.id);
+
     const design = await store.readArtifact(task.worktreePath!, t.id, "design");
     const spec = await store.readArtifact(task.worktreePath!, t.id, "spec");
     expect(design?.fm.status).toBe("ready");
@@ -145,8 +244,7 @@ describe("brainstorm integration flow", () => {
     expect(task.status).toBe("brainstorming");
     expect(task.awaitingApproval).toBe(true);
 
-    // Approve via state-machine — and apply the artifact-status mutation the
-    // HTTP handler would normally do.
+    // Approve via the state-machine + artifact-status flip.
     const approved = transition(task, { type: "user_approve_brainstorm" });
     expect(approved.ok).toBe(true);
     if (approved.ok) {
@@ -160,61 +258,20 @@ describe("brainstorm integration flow", () => {
 
     expect(task.status).toBe("planning");
     expect(task.awaitingApproval).toBe(false);
-    const finalDesign = await store.readArtifact(task.worktreePath!, t.id, "design");
-    const finalSpec = await store.readArtifact(task.worktreePath!, t.id, "spec");
-    expect(finalDesign?.fm.status).toBe("approved");
-    expect(finalSpec?.fm.status).toBe("approved");
-  });
 
-  it("revision path: ready → request changes → resume → ready again", async () => {
-    const t = await runs.createTask({ title: "revision" });
-    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
-
-    await tickRunLoop(t.id);
-    let task = await runs.getTask(t.id);
-
-    const recommended: Record<string, string> = {
-      q_scope: "narrow",
-      q_constraint: "correctness",
-      q_alternative: "abstract",
-      q_verification: "unit_e2e",
-      q_acceptance: "functional",
-    };
-    for (let i = 0; i < SCRIPT_QUESTION_COUNT; i++) {
-      const path = join(task.worktreePath!, ".harness", t.id, "brainstorm.jsonl");
-      const raw = await readFile(path, "utf8");
-      const lastQ = [...raw.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any)]
-        .reverse()
-        .find((e) => e.kind === "brainstorm_question");
-      await appendAnswer(task.worktreePath!, t.id, recommended[lastQ.questionId as string]!);
-      task = await tickRunLoop(t.id);
-    }
-
-    expect(task.awaitingApproval).toBe(true);
-
-    // Request changes — append a revision_requested event and clear gate.
-    const path = join(task.worktreePath!, ".harness", t.id, "brainstorm.jsonl");
-    const linesBefore = (await readFile(path, "utf8")).split("\n").filter(Boolean).length;
-    const w = new JsonlWriter(path);
-    await w.append({
-      ts: new Date().toISOString(),
-      kind: "brainstorm_revision_requested",
-      comment: "please add a perf section to the design",
-    });
-    const result = transition(task, {
-      type: "user_request_brainstorm_changes",
-      comment: "please add a perf section to the design",
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      task = await runs.updateTask(t.id, {
-        awaitingApproval: result.task.awaitingApproval,
-      });
-    }
-    expect(task.awaitingApproval).toBe(false);
-
-    // The JSONL log preserves history (it's only ever appended).
-    const linesAfter = (await readFile(path, "utf8")).split("\n").filter(Boolean).length;
-    expect(linesAfter).toBeGreaterThan(linesBefore);
+    // Dashboard contract: the JSONL records the canonical event sequence.
+    const events = (await readFile(jsonlPath, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const kinds = events.map((e) => e.kind);
+    expect(kinds).toContain("brainstorm_question");
+    expect(kinds).toContain("brainstorm_answer");
+    const statusChanged = events.find(
+      (e) =>
+        e.kind === "brainstorm_system" &&
+        (e["data"] as { status?: string } | undefined)?.status === "ready",
+    );
+    expect(statusChanged).toBeDefined();
   });
 });

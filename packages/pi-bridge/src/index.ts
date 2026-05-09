@@ -4,6 +4,7 @@ export { runSubagent } from "./subagent.js";
 export {
   createAgentSession,
   AuthError,
+  __resetAuthCache,
   type AgentSession,
   type AgentSessionOptions,
   type AgentSdkAdapter,

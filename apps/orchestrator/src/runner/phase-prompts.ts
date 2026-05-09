@@ -1,6 +1,13 @@
 import { join } from "node:path";
-import type { Phase } from "@pi-harness/shared";
-import type { PiBridgeEvent, PiSession, PiSubagentSpec, PiSubagentResult } from "@pi-harness/pi-bridge";
+import type { Phase, PhaseModelConfig } from "@pi-harness/shared";
+import type {
+  AgentSession,
+  AgentSessionOptions,
+  PiBridgeEvent,
+  PiSession,
+  PiSubagentResult,
+  PiSubagentSpec,
+} from "@pi-harness/pi-bridge";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import { JsonlWriter } from "../adapters/jsonl-writer.js";
@@ -23,6 +30,9 @@ export type PhaseDeps = {
     systemPrompt?: string;
     onEvent: (e: PiBridgeEvent) => void;
   }) => Promise<PiSession>;
+  // Generic agent session (Phase 2 bridge). Brainstorm uses this; other
+  // phases still consume the legacy createSession until each gets migrated.
+  createAgentSession: (opts: AgentSessionOptions) => Promise<AgentSession>;
   runSubagent: (spec: PiSubagentSpec) => Promise<PiSubagentResult>;
   store: ArtifactsStore;
   eventStore: EventStore;
@@ -37,6 +47,10 @@ export type PhaseInput = {
   ticketTitle?: string;
   ticketDescription?: string;
   branch?: string; // for pr phase
+  // Brainstorm-only today. Computed once per dispatch by the run-loop and
+  // threaded down so the agent sees the merged per-phase model config.
+  phaseModel?: PhaseModelConfig;
+  sessionPath?: string;
 };
 
 export type PhaseOutput = {
@@ -58,6 +72,15 @@ export async function runPhase(
 ): Promise<PhaseOutput> {
   switch (phase) {
     case "brainstorm": {
+      if (!input.phaseModel || !input.sessionPath) {
+        return {
+          ok: false,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          error: "brainstorm phase requires phaseModel and sessionPath",
+        };
+      }
       const jsonl = new JsonlWriter(
         join(deps.cwd, ".harness", input.taskId, "brainstorm.jsonl"),
       );
@@ -72,6 +95,13 @@ export async function runPhase(
         cwd: deps.cwd,
         store: deps.store,
         bus,
+        phaseModel: input.phaseModel,
+        sessionPath: input.sessionPath,
+        createAgentSession: deps.createAgentSession,
+        ...(input.ticketTitle !== undefined ? { ticketTitle: input.ticketTitle } : {}),
+        ...(input.ticketDescription !== undefined
+          ? { ticketDescription: input.ticketDescription }
+          : {}),
       });
       return {
         ok: r.ok,

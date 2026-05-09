@@ -29,4 +29,8 @@ export type Run = {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  // Brainstorm-only today: absolute path to the pi-coding-agent session
+  // log this Run resumes from across orchestrator restarts. Null for runs
+  // that don't (yet) drive a resumable LLM session.
+  piSessionPath: string | null;
 };

@@ -6,7 +6,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./_test/fake-sdk": {
+      "types": "./dist/_test/fake-sdk.d.ts",
+      "default": "./dist/_test/fake-sdk.js"
+    }
   },
   "scripts": {
     "build": "tsc",

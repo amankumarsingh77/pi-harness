@@ -42,6 +42,7 @@ export const MOCK_RUNS: Run[] = [
     costUsd: 0.04,
     inputTokens: 3200,
     outputTokens: 820,
+    piSessionPath: null,
   },
   {
     id: "r_8f3a91c2",
@@ -54,6 +55,7 @@ export const MOCK_RUNS: Run[] = [
     costUsd: 0.06,
     inputTokens: 4800,
     outputTokens: 1240,
+    piSessionPath: null,
   },
   {
     id: "r_8f3a91c2",
@@ -66,6 +68,7 @@ export const MOCK_RUNS: Run[] = [
     costUsd: 0.41,
     inputTokens: 24800,
     outputTokens: 6920,
+    piSessionPath: null,
   },
 ];
 

@@ -1,19 +1,40 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  mkdir,
+  readFile,
+  appendFile,
+} from "node:fs/promises";
+import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
+import {
+  __resetAuthCache,
+  createAgentSession,
+  type AgentSdkEvent,
+} from "@pi-harness/pi-bridge";
+import { createFakeAdapter, type FakeAgentSdkAdapter } from "@pi-harness/pi-bridge/_test/fake-sdk";
+import type { PhaseModelConfig } from "@pi-harness/shared";
 import { runBrainstorm } from "../../src/agents/brainstorm.js";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
 import { BrainstormEventBus } from "../../src/agents/brainstorm-event-bus.js";
 import { scaffoldBrainstorm } from "../../src/runner/scaffold-brainstorm.js";
-import {
-  BRAINSTORM_SCRIPT,
-  SCRIPT_QUESTION_COUNT,
-} from "../../src/agents/brainstorm-script.js";
+
+const PHASE_MODEL: PhaseModelConfig = {
+  provider: "anthropic",
+  model: "claude-sonnet-4-6",
+  thinkingLevel: "medium",
+  maxTurns: 30,
+};
 
 let scratch: string;
+let envDir: string;
+let prevCwd: string;
+const TASK = "T-1";
 
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "bs-agent-"));
@@ -25,145 +46,549 @@ beforeEach(async () => {
   await writeFile(join(scratch, "README.md"), "init\n");
   await git.add("README.md");
   await git.commit("init");
-  await git.checkoutLocalBranch("pi/T-1");
+  await git.checkoutLocalBranch(`pi/${TASK}`);
+
+  envDir = await mkdtemp(join(tmpdir(), "bs-env-"));
+  prevCwd = process.cwd();
+  process.chdir(envDir);
+  writeFileSync(join(envDir, ".env.harness"), "ANTHROPIC_API_KEY=test-key\n");
+  __resetAuthCache();
+
+  await scaffoldBrainstorm({ cwd: scratch, taskId: TASK, branch: `pi/${TASK}` });
 });
 
 afterEach(async () => {
+  process.chdir(prevCwd);
   await rm(scratch, { recursive: true, force: true });
+  await rm(envDir, { recursive: true, force: true });
+  __resetAuthCache();
 });
 
 function makeFakes() {
-  const eventStoreAppends: any[] = [];
+  const eventStoreAppends: unknown[] = [];
   const eventStore = {
-    append: vi.fn(async (e: unknown) => { eventStoreAppends.push(e); }),
+    append: vi.fn(async (e: unknown) => {
+      eventStoreAppends.push(e);
+    }),
   };
   return { eventStore, eventStoreAppends };
 }
 
-function makeBus(cwd: string, taskId: string, eventStore: any) {
-  const jsonl = new JsonlWriter(join(cwd, ".harness", taskId, "brainstorm.jsonl"));
-  return { bus: new BrainstormEventBus({ eventStore: eventStore as never, jsonl, runId: "r1", taskId }), jsonl };
-}
-
-function nextUnansweredQ(lines: any[]): any {
-  const answeredIds = new Set(
-    lines.filter((e) => e.kind === "brainstorm_answer").map((e) => e.questionId),
-  );
-  return lines.find(
-    (e) => e.kind === "brainstorm_question" && !answeredIds.has(e.questionId),
-  );
-}
-
-async function answerLatest(cwd: string, taskId: string, optionId: string): Promise<void> {
-  // Append a brainstorm_answer for the earliest unanswered question. Batched
-  // script steps emit several questions at once; "earliest unanswered" works
-  // for both single and batched cases.
-  const path = join(cwd, ".harness", taskId, "brainstorm.jsonl");
-  const raw = await readFile(path, "utf8");
-  const lines = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any);
-  const q = nextUnansweredQ(lines);
-  if (!q) throw new Error("no unanswered question");
-  const answer = JSON.stringify({
-    ts: new Date().toISOString(),
-    kind: "brainstorm_answer",
-    questionId: q.questionId,
-    optionId,
+function makeBus(eventStore: { append: (e: unknown) => Promise<void> }) {
+  const jsonl = new JsonlWriter(join(scratch, ".harness", TASK, "brainstorm.jsonl"));
+  return new BrainstormEventBus({
+    eventStore: eventStore as never,
+    jsonl,
+    runId: "r1",
+    taskId: TASK,
   });
-  await writeFile(path, raw + answer + "\n");
 }
 
-describe("runBrainstorm (scripted mock)", () => {
-  it("first invocation emits probe + first question, halts", async () => {
-    await scaffoldBrainstorm({ cwd: scratch, taskId: "T-1", branch: "pi/T-1" });
+function sessionPath(): string {
+  return join(scratch, ".harness", TASK, "pi-session.jsonl");
+}
+
+// Wires the fake SDK adapter into a createAgentSession factory the brainstorm
+// agent can call. Returns the adapter so the test can drive the SDK event
+// stream directly.
+function wireAgentSession(adapter: FakeAgentSdkAdapter) {
+  return (opts: Parameters<typeof createAgentSession>[0]) =>
+    createAgentSession(opts, adapter);
+}
+
+function assistantWithUsage(input: number, output: number, costTotal: number) {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: "ok" }],
+    usage: {
+      input,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: input + output,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
+    },
+  };
+}
+
+// Drive the fake SDK end-to-end for a "submit_questions" turn: wait for the
+// orchestrator to call session.prompt(), invoke the customTool's execute fn
+// (so the bus gets the brainstorm_question events), then emit tool_call /
+// tool_result / agent_end so the bridge resolves the prompt promise.
+// Yield until the bridge has called sdkSession.prompt (i.e. promptCalls is
+// populated). The bridge's prompt() awaits sdkSession.prompt before returning
+// the in-flight promise, so this guarantees inFlight is registered when we
+// next emit agent_end.
+async function waitForPrompt(adapter: FakeAgentSdkAdapter): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    if (adapter.state.promptCalls.length > 0) return;
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  throw new Error("bridge never called sdkSession.prompt");
+}
+
+async function driveSubmitQuestions(
+  adapter: FakeAgentSdkAdapter,
+  questions: { questionId: string; prompt: string; options: { id: string; label: string; recommended: boolean; evidence: string[] }[]; sectionTarget: { artifact: "design" | "spec"; section: string } }[],
+): Promise<void> {
+  await waitForPrompt(adapter);
+  const tools = (adapter.state.createOpts?.customTools ?? []) as Array<{
+    name: string;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: AbortSignal | undefined,
+      onUpdate: undefined,
+      ctx: never,
+    ) => Promise<unknown>;
+  }>;
+  const submit = tools.find((t) => t.name === "submit_questions");
+  if (!submit) throw new Error("submit_questions tool not registered with adapter");
+  const result = await submit.execute(
+    "tc1",
+    { questions },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  adapter.emit({ type: "tool_execution_start", toolName: "submit_questions", args: { questions } } as AgentSdkEvent);
+  adapter.emit({
+    type: "tool_execution_end",
+    toolName: "submit_questions",
+    isError: false,
+    result,
+  } as AgentSdkEvent);
+  adapter.emit({
+    type: "agent_end",
+    messages: [assistantWithUsage(10, 5, 0.001)],
+  } as AgentSdkEvent);
+}
+
+async function driveMarkReady(adapter: FakeAgentSdkAdapter): Promise<void> {
+  await waitForPrompt(adapter);
+  const tools = (adapter.state.createOpts?.customTools ?? []) as Array<{
+    name: string;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: AbortSignal | undefined,
+      onUpdate: undefined,
+      ctx: never,
+    ) => Promise<unknown>;
+  }>;
+  const ready = tools.find((t) => t.name === "mark_ready");
+  if (!ready) throw new Error("mark_ready tool not registered");
+  const result = await ready.execute("tc2", {}, undefined, undefined, undefined as never);
+  adapter.emit({ type: "tool_execution_start", toolName: "mark_ready", args: {} } as AgentSdkEvent);
+  adapter.emit({
+    type: "tool_execution_end",
+    toolName: "mark_ready",
+    isError: false,
+    result,
+  } as AgentSdkEvent);
+  adapter.emit({
+    type: "agent_end",
+    messages: [assistantWithUsage(8, 3, 0.0005)],
+  } as AgentSdkEvent);
+}
+
+describe("runBrainstorm (real-bridge)", () => {
+  it("initial tick: empty JSONL → bridge prompted; questions published; halts", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
     const { eventStore } = makeFakes();
-    const { bus } = makeBus(scratch, "T-1", eventStore);
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
 
-    const r = await runBrainstorm({ taskId: "T-1", cwd: scratch, store, bus });
+    const promise = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+      ticketTitle: "Add login",
+      ticketDescription: "we need oauth",
+    });
+
+    await driveSubmitQuestions(adapter, [
+      {
+        questionId: "q-scope",
+        prompt: "Pick a scope",
+        options: [
+          { id: "narrow", label: "Narrow", recommended: true, evidence: [] },
+          { id: "wide", label: "Wide", recommended: false, evidence: [] },
+        ],
+        sectionTarget: { artifact: "design", section: "Goals" },
+      },
+    ]);
+
+    const r = await promise;
     expect(r.ok).toBe(true);
     expect(r.ready).toBe(false);
+    expect(r.costUsd).toBeCloseTo(0.001, 6);
 
-    const jsonl = await readFile(join(scratch, ".harness", "T-1", "brainstorm.jsonl"), "utf8");
-    const events = jsonl.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any);
-    // probe_complete + first question
-    expect(events.find((e) => e.systemKind === "probe_complete")).toBeDefined();
+    // Bridge was prompted with the initial prompt body.
+    expect(adapter.state.promptCalls).toHaveLength(1);
+    expect(adapter.state.promptCalls[0]!.text).toContain("Begin brainstorming");
+    expect(adapter.state.promptCalls[0]!.text).toContain("Title: Add login");
+    expect(adapter.state.promptCalls[0]!.text).toContain(`.harness/${TASK}/design.md`);
+
+    const jsonl = await readFile(
+      join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+      "utf8",
+    );
+    const events = jsonl.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(events.filter((e) => e.kind === "brainstorm_question")).toHaveLength(1);
   });
 
-  it("walking through all questions completes with ready=true", async () => {
-    await scaffoldBrainstorm({ cwd: scratch, taskId: "T-1", branch: "pi/T-1" });
+  it("answers delta: prompt contains every new answer", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
     const { eventStore } = makeFakes();
-    const { bus } = makeBus(scratch, "T-1", eventStore);
+    const bus = makeBus(eventStore);
 
-    // First call → probe + Q1
-    let r = await runBrainstorm({ taskId: "T-1", cwd: scratch, store, bus });
+    // Seed JSONL: a question batch followed by user answers.
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q-scope", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t2", kind: "brainstorm_question", questionId: "q-auth", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t3", kind: "brainstorm_answer", questionId: "q-scope", optionId: "narrow" },
+      { ts: "t4", kind: "brainstorm_answer", questionId: "q-auth", optionId: "oauth" },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    // Drive a turn that ends naturally (no tool call). The orchestrator will
+    // still resolve once agent_end fires.
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSdkEvent);
+
+    await promise;
+
+    const text = adapter.state.promptCalls[0]!.text;
+    expect(text).toContain("User answered");
+    expect(text).toContain("q-scope: narrow");
+    expect(text).toContain("q-auth: oauth");
+    expect(text).toContain("Continue.");
+  });
+
+  it("revision: prompt carries the revision comment", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q-scope", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t2", kind: "brainstorm_revision_requested", comment: "add a perf section" },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSdkEvent);
+    await promise;
+
+    expect(adapter.state.promptCalls[0]!.text).toContain("add a perf section");
+    expect(adapter.state.promptCalls[0]!.text).toContain("User requested revisions");
+  });
+
+  it("no-op: no new events since last agent activity → no bridge call", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q-scope", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const r = await runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    expect(r.ok).toBe(true);
     expect(r.ready).toBe(false);
+    expect(adapter.state.promptCalls).toHaveLength(0);
+    expect(adapter.state.createOpts).toBeNull();
+  });
 
-    // Answer each question in turn; each runBrainstorm tick should emit the
-    // next question until the last, after which ready=true.
-    const recommendedFor: Record<string, string> = {
-      q_scope: "narrow",
-      q_constraint: "correctness",
-      q_alternative: "abstract",
-      q_verification: "unit_e2e",
-      q_acceptance: "functional",
-    };
-    for (let i = 0; i < SCRIPT_QUESTION_COUNT; i++) {
-      const path = join(scratch, ".harness", "T-1", "brainstorm.jsonl");
-      const raw = await readFile(path, "utf8");
-      const events = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any);
-      const nextQ = nextUnansweredQ(events);
-      const optionId = recommendedFor[nextQ.questionId as string]!;
-      await answerLatest(scratch, "T-1", optionId);
-      r = await runBrainstorm({ taskId: "T-1", cwd: scratch, store, bus });
-    }
+  it("ready: mark_ready accepted → both artifacts ready, ready=true", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
 
+    // Pre-fill the artifacts so mark_ready's section check passes.
+    const designArt = await store.readArtifact(scratch, TASK, "design");
+    const specArt = await store.readArtifact(scratch, TASK, "spec");
+    if (!designArt || !specArt) throw new Error("scaffolding missing");
+    await store.writeArtifact(scratch, TASK, {
+      fm: designArt.fm,
+      body: "## Goals\nbuild login\n\n## Trade-offs\nslower release\n\n## Alternatives considered\nrolled own\n",
+    });
+    await store.writeArtifact(scratch, TASK, {
+      fm: specArt.fm,
+      body: "## Verification scenarios\nlog in via oauth\n\n## Acceptance criteria\nuser session set\n",
+    });
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    await driveMarkReady(adapter);
+
+    const r = await promise;
+    expect(r.ok).toBe(true);
     expect(r.ready).toBe(true);
 
-    // Both artifacts should now have status: ready
-    const design = await store.readArtifact(scratch, "T-1", "design");
-    const spec = await store.readArtifact(scratch, "T-1", "spec");
+    const design = await store.readArtifact(scratch, TASK, "design");
+    const spec = await store.readArtifact(scratch, TASK, "spec");
     expect(design?.fm.status).toBe("ready");
     expect(spec?.fm.status).toBe("ready");
-    // Body content should reflect answers (incremental writes)
-    expect(design!.body).toContain("narrow");
-    expect(spec!.body).toContain("end-to-end");
   });
 
-  it("does not duplicate already-emitted events on resume", async () => {
-    await scaffoldBrainstorm({ cwd: scratch, taskId: "T-1", branch: "pi/T-1" });
+  it("resume: same sessionPath threaded into the SDK across ticks", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
     const { eventStore } = makeFakes();
-    const { bus } = makeBus(scratch, "T-1", eventStore);
+    const bus = makeBus(eventStore);
 
-    // Two ticks without answering — second should be a no-op (still halted on Q1).
-    await runBrainstorm({ taskId: "T-1", cwd: scratch, store, bus });
-    await runBrainstorm({ taskId: "T-1", cwd: scratch, store, bus });
+    const adapter1 = createFakeAdapter();
+    const p1 = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter1),
+    });
+    await driveSubmitQuestions(adapter1, [
+      {
+        questionId: "q1",
+        prompt: "?",
+        options: [
+          { id: "a", label: "A", recommended: true, evidence: [] },
+          { id: "b", label: "B", recommended: false, evidence: [] },
+        ],
+        sectionTarget: { artifact: "design", section: "Goals" },
+      },
+    ]);
+    await p1;
+    expect(adapter1.state.createOpts?.sessionPath).toBe(sessionPath());
 
-    const jsonl = await readFile(join(scratch, ".harness", "T-1", "brainstorm.jsonl"), "utf8");
-    const events = jsonl.split("\n").filter(Boolean).map((l) => JSON.parse(l) as any);
-    expect(events.filter((e) => e.systemKind === "probe_complete")).toHaveLength(1);
-    expect(events.filter((e) => e.kind === "brainstorm_question")).toHaveLength(1);
+    // Simulate user answer + restart: next runBrainstorm gets a fresh adapter.
+    await appendFile(
+      join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+      JSON.stringify({ ts: "t-after", kind: "brainstorm_answer", questionId: "q1", optionId: "a" }) + "\n",
+    );
+
+    const adapter2 = createFakeAdapter();
+    const p2 = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter2),
+    });
+    await waitForPrompt(adapter2);
+    adapter2.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSdkEvent);
+    await p2;
+    expect(adapter2.state.createOpts?.sessionPath).toBe(sessionPath());
   });
-});
 
-describe("BRAINSTORM_SCRIPT integrity", () => {
-  it("contains question, self_critique, and ready steps in order", () => {
-    const kinds = BRAINSTORM_SCRIPT.map((s) => s.kind);
-    const lastQ = kinds.lastIndexOf("question");
-    const critique = kinds.indexOf("self_critique");
-    const ready = kinds.indexOf("ready");
-    expect(lastQ).toBeGreaterThanOrEqual(0);
-    expect(critique).toBeGreaterThan(lastQ);
-    expect(ready).toBeGreaterThan(critique);
+  it("maxTurns exceeded → ok:false with structured error", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: { ...PHASE_MODEL, maxTurns: 1 },
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    // Drive two turns: the second exceeds maxTurns=1 and the bridge aborts.
+    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
+    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
+
+    const r = await promise;
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("brainstorm: maxTurns exceeded");
   });
 
-  it("each question has exactly one (recommended) option", () => {
-    for (const step of BRAINSTORM_SCRIPT) {
-      if (step.kind !== "question") continue;
-      const recCount = step.options.filter((o) => o.recommended).length;
-      expect(recCount, `q ${step.id}`).toBe(1);
+  it("AuthError → ok:false with provider-tagged error and phase_blocked event", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    // Wipe the env so getApiKey throws AuthError on session creation.
+    writeFileSync(join(envDir, ".env.harness"), "");
+    __resetAuthCache();
+    const prevKey = process.env["ANTHROPIC_API_KEY"];
+    delete process.env["ANTHROPIC_API_KEY"];
+
+    try {
+      const adapter = createFakeAdapter();
+      const r = await runBrainstorm({
+        taskId: TASK,
+        cwd: scratch,
+        store,
+        bus,
+        phaseModel: PHASE_MODEL,
+        sessionPath: sessionPath(),
+        createAgentSession: wireAgentSession(adapter),
+      });
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("missing API key for anthropic");
+      expect(adapter.state.createOpts).toBeNull();
+
+      const jsonl = await readFile(
+        join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+        "utf8",
+      );
+      const events = jsonl
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      const blocked = events.find(
+        (e) =>
+          e.kind === "brainstorm_system" &&
+          (e["data"] as { status?: string } | undefined)?.status === "blocked",
+      );
+      expect(blocked).toBeDefined();
+    } finally {
+      if (prevKey !== undefined) process.env["ANTHROPIC_API_KEY"] = prevKey;
     }
   });
+
+  it("corrupted pi-session.jsonl → file deleted + retry without sessionPath succeeds", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    // Pre-create a non-empty session file the adapter will reject on first try.
+    await writeFile(sessionPath(), "{garbage\n");
+
+    let attempt = 0;
+    const adapter: FakeAgentSdkAdapter = createFakeAdapter();
+    const original = adapter.create;
+    adapter.create = async (createOpts) => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("SessionManager.open: invalid jsonl");
+      return original(createOpts);
+    };
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    // Wait for the failed-then-retried call to register createOpts.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSdkEvent);
+
+    const r = await promise;
+    expect(r.ok).toBe(true);
+    expect(attempt).toBe(2);
+    // Retry path passes no sessionPath so the bridge re-inits in-memory.
+    expect(adapter.state.createOpts?.sessionPath).toBeUndefined();
+    // Corrupted file was removed.
+    expect(existsSync(sessionPath())).toBe(false);
+
+    const jsonl = await readFile(
+      join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+      "utf8",
+    );
+    expect(jsonl).toContain("session_reset");
+  });
+
+  it("status_changed=ready short-circuits subsequent ticks", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({
+        ts: "t1",
+        kind: "brainstorm_system",
+        systemKind: "status_changed",
+        data: { status: "ready" },
+      }) + "\n",
+    );
+
+    const adapter = createFakeAdapter();
+    const r = await runBrainstorm({
+      taskId: TASK,
+      cwd: scratch,
+      store,
+      bus,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    expect(r.ok).toBe(true);
+    expect(r.ready).toBe(true);
+    expect(adapter.state.createOpts).toBeNull();
+  });
 });
+

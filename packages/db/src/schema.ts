@@ -41,6 +41,11 @@ export const runs = pgTable(
     costUsd: doublePrecision("cost_usd").notNull().default(0),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    // Absolute path to <worktree>/.harness/<taskId>/pi-session.jsonl. Set on
+    // the brainstorm Run row's first dispatch so subsequent ticks resume the
+    // pi-coding-agent SessionManager from the same file across orchestrator
+    // restarts. Null for runs that don't use a resumable agent session.
+    piSessionPath: text("pi_session_path"),
   },
   (t) => ({
     taskIdx: index("runs_task_idx").on(t.taskId),

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createAgentSession } from "@pi-harness/pi-bridge";
 import { createDb } from "@pi-harness/db";
 import { loadConfig } from "./config.js";
 import { RunStore } from "./adapters/run-store.js";
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
     createSession: async () => {
       throw new Error("createSession not wired: pi-bridge integration is mocked");
     },
+    createAgentSession,
     runSubagent: async () => {
       throw new Error("runSubagent not wired: pi-bridge integration is mocked");
     },
