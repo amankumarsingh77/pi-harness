@@ -1,6 +1,6 @@
 # Brainstorm — real pi-coding-agent integration
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-05-09
 **Supersedes (in part):** the "scripted mock" half of `2026-05-09-brainstorm-phase-design.md`. The dashboard contract, JSONL/EventStore dual-write, and approval gate are unchanged. What changes is the agent driver: the canned `BRAINSTORM_SCRIPT` in `apps/orchestrator/src/agents/brainstorm-script.ts` is replaced by a live `@earendil-works/pi-coding-agent` session.
 

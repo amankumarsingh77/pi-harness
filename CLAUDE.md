@@ -28,7 +28,7 @@ These are not aesthetic preferences — they're the rules for how work gets done
 
 - **Monorepo:** pnpm 9 + Turborepo. Node ≥ 22. TypeScript strict (`exactOptionalPropertyTypes: true`) — pass conditional spreads, not `T | undefined`, to optional props.
 - **Apps:** `apps/orchestrator` (Fastify 5 + SSE) and `apps/dashboard` (Next.js 15 App Router + React 19 + Tailwind v4 inline-theme + TanStack Query 5).
-- **Packages:** `@pi-harness/shared` (types + Zod schemas), `@pi-harness/db` (Drizzle ORM, Postgres 16), `@pi-harness/pi-bridge` (wraps `@earendil-works/pi-coding-agent`; **currently mocked** in `_mock.ts`).
+- **Packages:** `@pi-harness/shared` (types + Zod schemas), `@pi-harness/db` (Drizzle ORM, Postgres 16), `@pi-harness/pi-bridge` (wraps `@earendil-works/pi-coding-agent`). The generic `createAgentSession` (`packages/pi-bridge/src/agent-session.ts`) is real; brainstorm uses it. The legacy `createSession` / `runSubagent` paths in `_mock.ts` and `session.ts` still back plan/code/verify until each migrates.
 - **Subagents:** vendored prompts in `subagents/_vendored/` (13 files from rpiv-mono) and `subagents/ours/` (3 originals). Loader at `subagents/index.ts` validates `EXPECTED_OUR_AGENTS` at boot.
 - **Postgres** runs via **podman**, not docker (the user's machine has no docker CLI). The `docker-compose.yml` works under `podman compose`; bring it up with `podman compose up -d postgres` (port `5433`).
 
@@ -94,20 +94,26 @@ One answer per question — don't invent a second location.
 
 ## Brainstorm phase
 
-Implemented end-to-end against a scripted mock subagent. See:
+Implemented end-to-end against the real `@earendil-works/pi-coding-agent` SDK. See:
 
-- Design: `docs/superpowers/specs/2026-05-09-brainstorm-phase-design.md`
-- Plan: `docs/plans/brainstorm-phase/`
+- Design: `docs/superpowers/specs/2026-05-09-brainstorm-real-pi-design.md` (current); `docs/superpowers/specs/2026-05-09-brainstorm-phase-design.md` (superseded for the agent driver).
+- Plan: `docs/plans/brainstorm-real-pi/`
 - On task entry: branch `pi/T-NNN`, worktree at `.harness/worktrees/<taskId>/`, `chore(<taskId>): brainstorm scaffolding` commit lays down `design.md` + `spec.md` with `status: draft` frontmatter at `<worktree>/.harness/<taskId>/`.
-- Q&A: `apps/orchestrator/src/agents/brainstorm-script.ts` is the scripted source. `BrainstormEventBus` dual-writes every event to JSONL (`brainstorm.jsonl`) and EventStore (for live SSE).
+- Q&A: `apps/orchestrator/src/agents/brainstorm.ts` opens or resumes a real pi agent session per tick. The system prompt is `subagents/ours/brainstorm.md`; phase-specific custom tools `submit_questions` and `mark_ready` live in `apps/orchestrator/src/agents/brainstorm-tools.ts`. `BrainstormEventBus` dual-writes every event to JSONL (`brainstorm.jsonl`) and EventStore (for live SSE).
+- Resume: pi's session JSONL is persisted at `<worktree>/.harness/<taskId>/pi-session.jsonl`; each tick reopens it so orchestrator restarts don't lose context.
+- Per-phase model config: `effectiveConfig = { ...DEFAULT_PHASE_MODELS[phase], ...task.phaseModels[phase] }` (`packages/shared/src/config/phase-models.ts`). Defaults to anthropic / claude-sonnet for brainstorm.
 - Approval: `awaitingApproval=true` is the brainstorm sub-state — task sits in `brainstorming` until the user clicks Approve (advances to `planning`, marks both artifacts `approved`) or Request changes (appends revision event, agent re-walks).
-- Real `@earendil-works/pi-coding-agent` invocation is still deferred; the script is the canned mock.
+
+### Live exercises
+
+`PI_LIVE=1 pnpm --filter @pi-harness/orchestrator test brainstorm.live` runs `apps/orchestrator/test/agents/brainstorm.live.test.ts` against a real Anthropic key. Requires `.env.harness` at repo root with `ANTHROPIC_API_KEY=...` (see `.env.harness.example`). The file is excluded from default `pnpm test` via the `**/*.live.test.ts` exclude in `apps/orchestrator/vitest.config.ts`.
 
 ## Known gaps (intentionally deferred)
 
 These are documented and not bugs:
 
-- **`pi-bridge` is mocked.** Replace `packages/pi-bridge/src/_mock.ts` with a real `@earendil-works/pi-coding-agent` adapter when we move past mock runs. Brainstorm uses its own scripted mock at `apps/orchestrator/src/agents/brainstorm-script.ts`.
+- **Plan / code / verify still go through the legacy `createSession` mock** (`packages/pi-bridge/src/_mock.ts` + `session.ts`). Brainstorm migrated to the real generic `createAgentSession`; the other phases will follow one slice at a time.
+- **`@pi-harness/subagents` `resolveAgentPath` doesn't work in dist mode** — `.md` prompt files aren't copied into `dist/`. The brainstorm agent works around this by resolving its own prompt path from `import.meta.url` (`apps/orchestrator/src/agents/brainstorm.ts`). Fixing the loader to ship the markdown is its own slice.
 - **PR phase needs `gh auth login`** on the host.
 - **Visual scenarios need `npx playwright install chromium`.**
 - **Dashboard `/runs` and `/scenarios` routes don't exist** — the topbar nav references them as placeholders. Branch switcher in topbar is also visual-only.
