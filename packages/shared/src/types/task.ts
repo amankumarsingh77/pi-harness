@@ -15,6 +15,21 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+// Single source of truth: which phase the next dispatch should run, given
+// a task's current status. `null` means the task is terminal or gated on
+// human input — the run-loop must not auto-dispatch.
+export const STATUS_TO_PHASE: Record<TaskStatus, Phase | null> = {
+  backlog: null,
+  brainstorming: "brainstorm",
+  planning: null, // user must approve plan
+  executing: "code",
+  verifying: "verify",
+  verification_failed: null, // user must triage
+  ready_to_ship: "pr",
+  done: null,
+  cancelled: null,
+};
+
 export const WORKFLOWS = ["backend-feature"] as const;
 export type Workflow = (typeof WORKFLOWS)[number];
 

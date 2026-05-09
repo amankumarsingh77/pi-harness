@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mergePhaseModels, type Phase, type Run, type Task } from "@pi-harness/shared";
+import { mergePhaseModels, STATUS_TO_PHASE, type Run, type Task } from "@pi-harness/shared";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { WorktreeManager } from "../adapters/worktree.js";
@@ -20,23 +20,6 @@ export type RunLoopOpts = {
   retryCap: number;
 };
 
-// Map current task.status → which Phase the next dispatch should be.
-// Returns null when the task needs human input or is terminal.
-function phaseToRun(status: Task["status"]): Phase | null {
-  switch (status) {
-    case "brainstorming": return "brainstorm";
-    case "executing":     return "code";
-    case "verifying":     return "verify";
-    case "ready_to_ship": return "pr";
-    case "planning":      return null; // user must approve plan
-    case "verification_failed": return null; // user must triage
-    case "backlog":
-    case "done":
-    case "cancelled":
-      return null;
-  }
-}
-
 // Branch name convention. Per design doc Decision #2: `pi/T-NNN`.
 function branchNameFor(taskId: string): string {
   return `pi/${taskId}`;
@@ -54,7 +37,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
   // Touch phasesFor to validate the workflow has a chain (throws otherwise).
   phasesFor(task.workflow);
 
-  const phase = phaseToRun(task.status);
+  const phase = STATUS_TO_PHASE[task.status];
   if (!phase) return task;
 
   // Brainstorm approval gate: if artifacts are ready and we're waiting for

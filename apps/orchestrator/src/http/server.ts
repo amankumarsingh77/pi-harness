@@ -5,6 +5,7 @@ import type { EventStore } from "../adapters/event-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
+import { isHarnessError } from "../domain/errors.js";
 import { registerHealth } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerRunRoutes } from "./routes/runs.js";
@@ -28,6 +29,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: { level: "warn" } });
   // CORS so the Next.js dashboard (Plan 4) can call us in dev.
   void app.register(cors, { origin: true });
+
+  // Centralized error handling — every route's HarnessError throws map to
+  // the right status code + structured body. Default 500 for everything else.
+  app.setErrorHandler((err, _req, reply) => {
+    if (isHarnessError(err)) {
+      reply.code(err.status);
+      return reply.send({ error: err.code, message: err.message, details: err.details });
+    }
+    reply.code(500);
+    const message = err instanceof Error ? err.message : String(err);
+    return reply.send({ error: "internal", message });
+  });
+
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor({ runsDir: deps.runsDir });
   registerHealth(app);
   registerTaskRoutes(app, { runs: deps.runs, ...(deps.scheduler ? { scheduler: deps.scheduler } : {}) });

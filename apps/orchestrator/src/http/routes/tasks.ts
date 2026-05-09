@@ -5,7 +5,7 @@ import type { RunStore } from "../../adapters/run-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
 import { transition } from "../../domain/state-machine.js";
 import { CreateTaskSchema, TransitionSchema, UpdateTaskSchema } from "../schemas.js";
-import { isHarnessError, ValidationError } from "../../domain/errors.js";
+import { ValidationError } from "../../domain/errors.js";
 
 export function registerTaskRoutes(
   app: FastifyInstance,
@@ -112,15 +112,4 @@ export function registerTaskRoutes(
       return { task: updated };
     },
   );
-
-  // Centralized error handling — turns HarnessError into the right status.
-  app.setErrorHandler((err, _req, reply) => {
-    if (isHarnessError(err)) {
-      reply.code(err.status);
-      return reply.send({ error: err.code, message: err.message, details: err.details });
-    }
-    reply.code(500);
-    const message = err instanceof Error ? err.message : String(err);
-    return reply.send({ error: "internal", message });
-  });
 }
