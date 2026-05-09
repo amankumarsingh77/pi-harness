@@ -9,7 +9,7 @@ import { createDb } from "@pi-harness/db";
 import {
   createAgentSession,
   __resetAuthCache,
-  type AgentSdkEvent,
+  type AgentSessionEvent,
   type AgentSessionOptions,
 } from "@pi-harness/pi-bridge";
 import { createFakeAdapter, type FakeAgentSdkAdapter } from "@pi-harness/pi-bridge/_test/fake-sdk";
@@ -71,7 +71,7 @@ describe("brainstorm integration flow", () => {
     await repoGit.add("README.md");
     await repoGit.commit("init");
     worktrees = new WorktreeManager({ repoRoot: repo, worktreesDir: join(scratch, "wts") });
-    store = new ArtifactsStore({ runsDir: join(scratch, "runs") });
+    store = new ArtifactsStore();
 
     envDir = await mkdtemp(join(tmpdir(), "bs-int-env-"));
     prevCwd = process.cwd();
@@ -143,17 +143,17 @@ describe("brainstorm integration flow", () => {
     const tool = tools.find((t) => t.name === name);
     if (!tool) throw new Error(`tool ${name} not registered`);
     const result = await tool.execute("tc", params, undefined, undefined, undefined as never);
-    adapter.emit({ type: "tool_execution_start", toolName: name, args: params } as AgentSdkEvent);
+    adapter.emit({ type: "tool_execution_start", toolName: name, args: params } as AgentSessionEvent);
     adapter.emit({
       type: "tool_execution_end",
       toolName: name,
       isError: false,
       result,
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     adapter.emit({
       type: "agent_end",
       messages: [assistantWithUsage(5, 3, 0.0001)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
   }
 
   it("happy path: ask questions → answer → mark_ready → approve → planning", async () => {

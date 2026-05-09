@@ -2,7 +2,7 @@ import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { WorktreeManager } from "../adapters/worktree.js";
 import type { PhaseDeps } from "./phase-prompts.js";
-import { consoleLogger, type Logger } from "../domain/logger.js";
+import { silentLogger, type Logger } from "../domain/logger.js";
 import { mkEvent } from "../domain/events.js";
 import { runLoop } from "./run-loop.js";
 
@@ -37,7 +37,7 @@ export class TaskScheduler {
   private readonly log: Logger;
 
   constructor(private readonly deps: SchedulerDeps) {
-    this.log = deps.logger ?? consoleLogger;
+    this.log = deps.logger ?? silentLogger();
   }
 
   /**
@@ -73,16 +73,19 @@ export class TaskScheduler {
   }
 
   private async tick(taskId: string): Promise<void> {
+    const log = this.log.child({ taskId });
     let task;
     try {
       task = await this.deps.runs.getTask(taskId);
     } catch (e) {
       // Task vanished between enqueue and tick — nothing to do, no event to
       // append (we have no runId to anchor it).
-      this.log.warn(`[scheduler] tick skipped for ${taskId}: ${(e as Error).message}`);
+      log.warn({ err: e }, "tick skipped: task lookup failed");
       return;
     }
 
+    log.debug({ status: task.status }, "tick start");
+    const startedAt = Date.now();
     try {
       await runLoop({
         task,
@@ -92,9 +95,10 @@ export class TaskScheduler {
         worktrees: this.deps.worktrees,
         retryCap: this.deps.retryCap,
       });
+      log.debug({ durationMs: Date.now() - startedAt }, "tick complete");
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      this.log.error(`[scheduler] tick failed for ${taskId}`, e);
+      log.error({ err: e, durationMs: Date.now() - startedAt }, "tick failed");
       // Best-effort: surface the failure as a log event on the task. We can't
       // tie it to a run (the failure may have happened before runLoop created
       // one), so we synthesize a runId-less anchor by reusing the taskId.
