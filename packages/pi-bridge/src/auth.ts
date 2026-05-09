@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export class AuthError extends Error {
   constructor(message: string) {
@@ -51,9 +51,23 @@ function parseEnvFile(text: string): Record<string, string> {
   return out;
 }
 
+// Walk up from `start` looking for the monorepo root (marked by
+// pnpm-workspace.yaml). Returns the root dir, or `start` itself if no marker
+// is found — a non-monorepo caller still gets a deterministic location.
+function findMonorepoRoot(start: string): string {
+  let dir = start;
+  for (;;) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return start;
+    dir = parent;
+  }
+}
+
 function load(): Record<string, string> {
   if (cache) return cache;
-  const path = join(process.cwd(), ".env.harness");
+  const root = findMonorepoRoot(process.cwd());
+  const path = join(root, ".env.harness");
   let text = "";
   try {
     text = readFileSync(path, "utf8");

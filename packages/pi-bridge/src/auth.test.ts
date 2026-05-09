@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthError, __resetAuthCache, getApiKey } from "./auth.js";
@@ -40,5 +40,17 @@ describe("getApiKey provider env var resolution", () => {
     writeFileSync(join(dir, ".env.harness"), "");
     expect(() => getApiKey("opencode-go")).toThrowError(AuthError);
     expect(() => getApiKey("opencode-go")).toThrowError(/OPENCODE_API_KEY/);
+  });
+
+  it("finds .env.harness at the monorepo root, not the per-package cwd", () => {
+    // Simulate the orchestrator launch where pnpm sets cwd to apps/orchestrator.
+    // The .env.harness lives at the workspace root, marked by pnpm-workspace.yaml.
+    writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
+    writeFileSync(join(dir, ".env.harness"), "OPENCODE_API_KEY=root-key\n");
+    const sub = join(dir, "apps", "orchestrator");
+    mkdirSync(sub, { recursive: true });
+    process.chdir(sub);
+    __resetAuthCache();
+    expect(getApiKey("opencode-go")).toBe("root-key");
   });
 });
