@@ -29,6 +29,13 @@
       "when": 1778312238680,
       "tag": "0003_narrow_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778326578059,
+      "tag": "0004_curved_greymalkin",
+      "breakpoints": true
     }
   ]
 }

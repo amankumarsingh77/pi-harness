@@ -14,7 +14,7 @@ import simpleGit from "simple-git";
 import {
   __resetAuthCache,
   createAgentSession,
-  type AgentSdkEvent,
+  type AgentSessionEvent,
 } from "@pi-harness/pi-bridge";
 import { createFakeAdapter, type FakeAgentSdkAdapter } from "@pi-harness/pi-bridge/_test/fake-sdk";
 import type { PhaseModelConfig } from "@pi-harness/shared";
@@ -151,17 +151,17 @@ async function driveSubmitQuestions(
     undefined,
     undefined as never,
   );
-  adapter.emit({ type: "tool_execution_start", toolName: "submit_questions", args: { questions } } as AgentSdkEvent);
+  adapter.emit({ type: "tool_execution_start", toolName: "submit_questions", args: { questions } } as AgentSessionEvent);
   adapter.emit({
     type: "tool_execution_end",
     toolName: "submit_questions",
     isError: false,
     result,
-  } as AgentSdkEvent);
+  } as AgentSessionEvent);
   adapter.emit({
     type: "agent_end",
     messages: [assistantWithUsage(10, 5, 0.001)],
-  } as AgentSdkEvent);
+  } as AgentSessionEvent);
 }
 
 async function driveMarkReady(adapter: FakeAgentSdkAdapter): Promise<void> {
@@ -179,17 +179,17 @@ async function driveMarkReady(adapter: FakeAgentSdkAdapter): Promise<void> {
   const ready = tools.find((t) => t.name === "mark_ready");
   if (!ready) throw new Error("mark_ready tool not registered");
   const result = await ready.execute("tc2", {}, undefined, undefined, undefined as never);
-  adapter.emit({ type: "tool_execution_start", toolName: "mark_ready", args: {} } as AgentSdkEvent);
+  adapter.emit({ type: "tool_execution_start", toolName: "mark_ready", args: {} } as AgentSessionEvent);
   adapter.emit({
     type: "tool_execution_end",
     toolName: "mark_ready",
     isError: false,
     result,
-  } as AgentSdkEvent);
+  } as AgentSessionEvent);
   adapter.emit({
     type: "agent_end",
     messages: [assistantWithUsage(8, 3, 0.0005)],
-  } as AgentSdkEvent);
+  } as AgentSessionEvent);
 }
 
 describe("runBrainstorm (real-bridge)", () => {
@@ -201,9 +201,11 @@ describe("runBrainstorm (real-bridge)", () => {
 
     const promise = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -260,9 +262,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter = createFakeAdapter();
     const promise = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -274,7 +278,7 @@ describe("runBrainstorm (real-bridge)", () => {
     adapter.emit({
       type: "agent_end",
       messages: [assistantWithUsage(1, 1, 0)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
 
     await promise;
 
@@ -300,9 +304,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter = createFakeAdapter();
     const promise = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -311,7 +317,7 @@ describe("runBrainstorm (real-bridge)", () => {
     adapter.emit({
       type: "agent_end",
       messages: [assistantWithUsage(1, 1, 0)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     await promise;
 
     expect(adapter.state.promptCalls[0]!.text).toContain("add a perf section");
@@ -332,9 +338,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter = createFakeAdapter();
     const r = await runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -367,9 +375,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter = createFakeAdapter();
     const promise = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -395,9 +405,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter1 = createFakeAdapter();
     const p1 = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter1),
@@ -425,9 +437,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter2 = createFakeAdapter();
     const p2 = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter2),
@@ -436,7 +450,7 @@ describe("runBrainstorm (real-bridge)", () => {
     adapter2.emit({
       type: "agent_end",
       messages: [assistantWithUsage(1, 1, 0)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     await p2;
     expect(adapter2.state.createOpts?.sessionPath).toBe(sessionPath());
   });
@@ -449,17 +463,19 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter = createFakeAdapter();
     const promise = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: { ...PHASE_MODEL, maxTurns: 1 },
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
     });
     await waitForPrompt(adapter);
     // Drive two turns: the second exceeds maxTurns=1 and the bridge aborts.
-    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
-    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
+    adapter.emit({ type: "turn_start" } as AgentSessionEvent);
+    adapter.emit({ type: "turn_start" } as AgentSessionEvent);
 
     const r = await promise;
     expect(r.ok).toBe(false);
@@ -481,9 +497,11 @@ describe("runBrainstorm (real-bridge)", () => {
       const adapter = createFakeAdapter();
       const r = await runBrainstorm({
         taskId: TASK,
+        runId: "r1",
         cwd: scratch,
         store,
         bus,
+        eventStore: eventStore as never,
         phaseModel: PHASE_MODEL,
         sessionPath: sessionPath(),
         createAgentSession: wireAgentSession(adapter),
@@ -529,9 +547,11 @@ describe("runBrainstorm (real-bridge)", () => {
 
     const promise = runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -541,7 +561,7 @@ describe("runBrainstorm (real-bridge)", () => {
     adapter.emit({
       type: "agent_end",
       messages: [assistantWithUsage(1, 1, 0)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
 
     const r = await promise;
     expect(r.ok).toBe(true);
@@ -577,9 +597,11 @@ describe("runBrainstorm (real-bridge)", () => {
     const adapter = createFakeAdapter();
     const r = await runBrainstorm({
       taskId: TASK,
+      runId: "r1",
       cwd: scratch,
       store,
       bus,
+      eventStore: eventStore as never,
       phaseModel: PHASE_MODEL,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
@@ -588,6 +610,333 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(r.ok).toBe(true);
     expect(r.ready).toBe(true);
     expect(adapter.state.createOpts).toBeNull();
+  });
+
+  it("nudge: unconsumed nudge after answers folds into prompt and is marked consumed", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q-scope", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t2", kind: "brainstorm_answer", questionId: "q-scope", optionId: "narrow" },
+      { ts: "t3", kind: "brainstorm_user_nudge", nudgeId: "n1", comment: "ignore the auth angle, deprecated", consumed: false },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    const text = adapter.state.promptCalls[0]!.text;
+    expect(text).toContain("Recent user input");
+    expect(text).toContain("ignore the auth angle, deprecated");
+    expect(text).toContain("User answered");
+
+    // Nudge republished with consumed:true.
+    const jsonl = await readFile(jsonlPath, "utf8");
+    const events = jsonl.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    const consumedEvents = events.filter(
+      (e) => e.kind === "brainstorm_user_nudge" && e["nudgeId"] === "n1" && e["consumed"] === true,
+    );
+    expect(consumedEvents).toHaveLength(1);
+  });
+
+  it("nudge: alone in JSONL (no answer/revision) is sufficient to trigger a turn", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q-scope", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t2", kind: "brainstorm_user_nudge", nudgeId: "n1", comment: "focus on backend only", consumed: false },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    const text = adapter.state.promptCalls[0]!.text;
+    expect(text).toContain("Recent user input");
+    expect(text).toContain("focus on backend only");
+  });
+
+  it("nudge: already-consumed nudge is not re-folded", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    // The same nudgeId appears twice: first unconsumed, then a consumed
+    // replacement. The latest event for the id wins.
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q1", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t2", kind: "brainstorm_user_nudge", nudgeId: "n1", comment: "first nudge", consumed: false },
+      { ts: "t3", kind: "brainstorm_user_nudge", nudgeId: "n1", comment: "first nudge", consumed: true },
+      { ts: "t4", kind: "brainstorm_answer", questionId: "q1", optionId: "a" },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    const text = adapter.state.promptCalls[0]!.text;
+    expect(text).not.toContain("Recent user input");
+    expect(text).not.toContain("first nudge");
+    expect(text).toContain("User answered");
+  });
+
+  it("usage: emits brainstorm_usage with cumulative arithmetic across ticks", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+
+    // Tick 1: empty JSONL → initial. Drive a submit_questions turn that
+    // reports usage of (10 in, 5 out, $0.001).
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+      ticketTitle: "x",
+      ticketDescription: "y",
+    });
+    await driveSubmitQuestions(adapter, [
+      {
+        questionId: "q1",
+        prompt: "?",
+        options: [
+          { id: "a", label: "A", recommended: true, evidence: [] },
+          { id: "b", label: "B", recommended: false, evidence: [] },
+        ],
+        sectionTarget: { artifact: "design", section: "Goals" },
+      },
+    ]);
+    await promise;
+
+    const events1 = (await readFile(
+      join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+      "utf8",
+    ))
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const usage1 = events1.filter((e) => e.kind === "brainstorm_usage");
+    expect(usage1).toHaveLength(1);
+    expect(usage1[0]).toMatchObject({
+      tickIndex: 0,
+      inputTokens: 10,
+      outputTokens: 5,
+      cumulativeInputTokens: 10,
+      cumulativeOutputTokens: 5,
+    });
+    expect(usage1[0]!["costUsd"]).toBeCloseTo(0.001, 6);
+    expect(usage1[0]!["cumulativeCostUsd"]).toBeCloseTo(0.001, 6);
+
+    // Tick 2: append an answer + drive another turn with usage (3, 2, 0.0005).
+    // Cumulative should be (13, 7, 0.0015).
+    await appendFile(
+      join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+      JSON.stringify({ ts: "t-after", kind: "brainstorm_answer", questionId: "q1", optionId: "a" }) + "\n",
+    );
+    const adapter2 = createFakeAdapter();
+    const p2 = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter2),
+    });
+    await waitForPrompt(adapter2);
+    adapter2.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(3, 2, 0.0005)],
+    } as AgentSessionEvent);
+    await p2;
+
+    const events2 = (await readFile(
+      join(scratch, ".harness", TASK, "brainstorm.jsonl"),
+      "utf8",
+    ))
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const usage2 = events2.filter((e) => e.kind === "brainstorm_usage");
+    expect(usage2).toHaveLength(2);
+    expect(usage2[1]).toMatchObject({
+      tickIndex: 1,
+      inputTokens: 3,
+      outputTokens: 2,
+      cumulativeInputTokens: 13,
+      cumulativeOutputTokens: 7,
+    });
+    expect(usage2[1]!["cumulativeCostUsd"]).toBeCloseTo(0.0015, 6);
+  });
+
+  it("usage: zero-cost ticks do not emit a usage event", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    // Seed JSONL with a question already → decide() returns no-op when no
+    // new answer/revision/nudge follows; runBrainstorm short-circuits before
+    // calling the SDK, so no usage event.
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({ ts: "t1", kind: "brainstorm_question", questionId: "q1", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } }) + "\n",
+    );
+
+    const adapter = createFakeAdapter();
+    await runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    const events = (await readFile(jsonlPath, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(events.filter((e) => e.kind === "brainstorm_usage")).toHaveLength(0);
+  });
+
+  it("nudge: multiple unconsumed nudges fold in arrival order", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      { ts: "t1", kind: "brainstorm_question", questionId: "q1", prompt: "?", options: [], sectionTarget: { artifact: "design", section: "Goals" } },
+      { ts: "t2", kind: "brainstorm_user_nudge", nudgeId: "n1", comment: "first thing", consumed: false },
+      { ts: "t3", kind: "brainstorm_user_nudge", nudgeId: "n2", comment: "second thing", consumed: false },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    const text = adapter.state.promptCalls[0]!.text;
+    const firstIdx = text.indexOf("first thing");
+    const secondIdx = text.indexOf("second thing");
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(firstIdx);
+  });
+
+  it("signal aborted mid-prompt: returns cancelled, forwards abort to SDK", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+    const controller = new AbortController();
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+      ticketTitle: "x",
+      ticketDescription: "y",
+      signal: controller.signal,
+    });
+
+    // Wait until prompt() registers, then abort. The bridge's abort path
+    // rejects the in-flight prompt with "aborted"; the driver translates
+    // that into a cancelled BrainstormResult.
+    await new Promise((r) => setTimeout(r, 0));
+    controller.abort();
+
+    const r = await promise;
+    expect(r.cancelled).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(adapter.state.abortCalls).toBeGreaterThanOrEqual(1);
   });
 });
 

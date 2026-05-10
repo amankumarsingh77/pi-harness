@@ -24,7 +24,6 @@ export const MOCK_TASK: Task = {
   worktreePath: ".harness/runs/r_8f3a/",
   branchName: "pi/T-093",
   retryCount: 2,
-  awaitingApproval: false,
   phaseModels: {},
   createdAt: fromMinutesAgo(21, 2),
   updatedAt: fromMinutesAgo(0, 18),
@@ -265,7 +264,7 @@ export const MOCK_TASK_DETAIL = {
 import type { BrainstormBundle } from "@/lib/api";
 
 export const MOCK_BRAINSTORM_BUNDLE: BrainstormBundle = {
-  awaitingApproval: false,
+  gate: "running",
   status: "brainstorming",
   design: {
     fm: {
@@ -308,6 +307,7 @@ export const MOCK_BRAINSTORM_BUNDLE: BrainstormBundle = {
         { id: "spike", label: "Spike to learn the shape, then split", recommended: false, evidence: [] },
       ],
       sectionTarget: { artifact: "design", section: "Goals" },
+      batchId: "b_mock_1",
     },
   ],
 };

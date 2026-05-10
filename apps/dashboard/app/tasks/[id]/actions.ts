@@ -29,11 +29,21 @@ export async function transitionTask(
 // don't take FormData because they're called from React event handlers, not
 // <form action={...}> bindings.
 
-export async function submitBrainstormAnswerAction(
+// Submit every answer in a question batch atomically. The dashboard's
+// QuestionBatch component disables Submit until each question has a
+// selection, so partial submission can't happen — but the orchestrator
+// would still accept any non-empty array, so the constraint is purely
+// client-side UX.
+export async function submitBrainstormAnswersAction(
   taskId: string,
-  payload: { questionId: string; optionId?: string; optionIds?: string[]; freeText?: string },
+  answers: {
+    questionId: string;
+    optionId?: string;
+    optionIds?: string[];
+    freeText?: string;
+  }[],
 ): Promise<void> {
-  await orchestrator.submitBrainstormAnswer(taskId, payload);
+  await orchestrator.submitBrainstormAnswers(taskId, { answers });
   revalidatePath(`/tasks/${taskId}/brainstorm`);
 }
 
@@ -56,5 +66,43 @@ export async function requestBrainstormChangesAction(
     type: "user_request_brainstorm_changes",
     comment,
   });
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+}
+
+// Inject a free-form nudge into the agent. The orchestrator appends a
+// brainstorm_user_nudge to JSONL; the next agent tick folds it into the
+// prompt.
+export async function submitBrainstormNudgeAction(
+  taskId: string,
+  comment: string,
+): Promise<void> {
+  await orchestrator.submitBrainstormNudge(taskId, { comment });
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+}
+
+// Replace an artifact's body with a user-authored version. The orchestrator
+// commits the edit on the task branch and emits brainstorm_artifact_edited.
+export async function submitArtifactEditAction(
+  taskId: string,
+  kind: "design" | "spec",
+  body: string,
+): Promise<void> {
+  await orchestrator.submitArtifactEdit(taskId, { kind, body });
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+}
+
+// Discard the current brainstorm run and start fresh. Old artifacts archive
+// under runs/<oldRunId>/ on the same task branch; an optional `note` is
+// seeded as the first nudge in the new run.
+export async function restartBrainstormAction(
+  taskId: string,
+  note: string | undefined,
+): Promise<void> {
+  const trimmed = note?.trim();
+  await orchestrator.restartBrainstorm(taskId, {
+    ...(trimmed && trimmed.length > 0 ? { note: trimmed } : {}),
+  });
+  revalidatePath("/");
+  revalidatePath(`/tasks/${taskId}`);
   revalidatePath(`/tasks/${taskId}/brainstorm`);
 }

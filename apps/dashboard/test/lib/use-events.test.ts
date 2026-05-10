@@ -42,6 +42,6 @@ describe("useEvents", () => {
   it("opens correct URL", () => {
     renderHook(() => useEvents("run-2"));
     const es = MockEventSource.instances[0]!;
-    expect(es.url).toBe("/api/proxy/runs/run-2/events/stream");
+    expect(es.url).toBe("/api/sse/run-2");
   });
 });

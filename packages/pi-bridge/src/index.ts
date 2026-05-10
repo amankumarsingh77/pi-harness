@@ -1,17 +1,16 @@
-export * from "./types.js";
-export { createSession } from "./session.js";
-export { runSubagent } from "./subagent.js";
+export type { PiBridgeEvent } from "./types.js";
+export { __resetAuthCache } from "./auth.js";
 export {
   createAgentSession,
   AuthError,
-  __resetAuthCache,
   type AgentSession,
   type AgentSessionOptions,
-  type AgentSdkAdapter,
-  type AgentSdkSession,
-  type AgentSdkEvent,
-  type AgentSdkCreateOptions,
   type PromptUsage,
   type ThinkingLevel,
-  type ToolDefinitionLike,
+  type ToolDefinition,
+  type SdkBoundary,
+  type SdkBoundaryCreateOptions,
 } from "./agent-session.js";
+// Re-exported so callers don't need a direct dep on @earendil-works/pi-coding-agent
+// just to type the event stream. The bridge owns the integration seam.
+export type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";

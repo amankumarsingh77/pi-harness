@@ -42,6 +42,8 @@ function buildDeps(overrides: Partial<SchedulerDeps> = {}): SchedulerDeps {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     worktrees: {} as any,
     retryCap: 2,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cancellation: { register: () => new AbortController(), release: () => {}, abort: () => {} } as any,
     ...overrides,
   };
 }
@@ -152,6 +154,86 @@ describe("TaskScheduler", () => {
     await scheduler.drain();
 
     expect(runLoop).not.toHaveBeenCalled();
+    expect(scheduler.inFlightCount()).toBe(0);
+  });
+
+  it("cancelAndDrain calls cancellation.abort and waits for the in-flight tick", async () => {
+    const aborts: string[] = [];
+    const cancellation = {
+      register: () => new AbortController(),
+      release: () => {},
+      abort: (id: string) => {
+        aborts.push(id);
+      },
+    };
+    let release: () => void = () => {};
+    const blocker = new Promise<void>((r) => {
+      release = r;
+    });
+    vi.mocked(runLoop).mockImplementation(async () => {
+      await blocker;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return {} as any;
+    });
+
+    const scheduler = new TaskScheduler(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      buildDeps({ cancellation: cancellation as any }),
+    );
+    scheduler.enqueue("t1");
+    expect(scheduler.inFlightCount()).toBe(1);
+
+    // cancelAndDrain should have signaled abort and now be waiting on the
+    // in-flight tick. We complete the tick (simulating the driver honoring
+    // the abort) and confirm cancelAndDrain resolves.
+    const drainPromise = scheduler.cancelAndDrain("t1");
+    expect(aborts).toEqual(["t1"]);
+    release();
+    await drainPromise;
+
+    expect(scheduler.inFlightCount()).toBe(0);
+  });
+
+  it("cancelAndDrain drops queued re-tick (no follow-up tick after drain)", async () => {
+    let release: () => void = () => {};
+    const blocker = new Promise<void>((r) => {
+      release = r;
+    });
+    vi.mocked(runLoop).mockImplementation(async () => {
+      await blocker;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return {} as any;
+    });
+
+    const scheduler = new TaskScheduler(buildDeps());
+    scheduler.enqueue("t1"); // tick 1 — blocks on `blocker`
+    scheduler.enqueue("t1"); // would queue a re-tick after tick 1
+
+    const drainPromise = scheduler.cancelAndDrain("t1");
+    release();
+    await drainPromise;
+
+    // Only the first tick ran; the queued re-tick was dropped by cancelAndDrain.
+    expect(runLoop).toHaveBeenCalledTimes(1);
+    expect(scheduler.inFlightCount()).toBe(0);
+  });
+
+  it("cancelAndDrain on a quiet task is a no-op", async () => {
+    const aborts: string[] = [];
+    const cancellation = {
+      register: () => new AbortController(),
+      release: () => {},
+      abort: (id: string) => {
+        aborts.push(id);
+      },
+    };
+    const scheduler = new TaskScheduler(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      buildDeps({ cancellation: cancellation as any }),
+    );
+    await scheduler.cancelAndDrain("idle-task");
+    // Still calls abort (cheap; cancellation registry handles missing tasks).
+    expect(aborts).toEqual(["idle-task"]);
     expect(scheduler.inFlightCount()).toBe(0);
   });
 

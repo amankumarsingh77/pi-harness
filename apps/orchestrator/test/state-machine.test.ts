@@ -12,7 +12,6 @@ function mkTask(status: Task["status"], overrides: Partial<Task> = {}): Task {
     worktreePath: null,
     branchName: null,
     retryCount: 0,
-    awaitingApproval: false,
     phaseModels: {},
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -37,54 +36,44 @@ describe("transition", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("agent_phase_succeeded: brainstorming stays in brainstorming with awaitingApproval", () => {
+  it("agent_phase_succeeded: brainstorming stays in brainstorming (gate is derived elsewhere)", () => {
     const t = mkTask("brainstorming", { workflow: "backend-feature" });
     const r = transition(t, { type: "agent_phase_succeeded", phase: "brainstorm" });
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.task.status).toBe("brainstorming");
-      expect(r.task.awaitingApproval).toBe(true);
-    }
+    if (r.ok) expect(r.task.status).toBe("brainstorming");
   });
 
-  it("agent_brainstorm_ready: brainstorming → brainstorming + awaitingApproval", () => {
+  it("agent_brainstorm_ready: brainstorming stays in brainstorming", () => {
     const t = mkTask("brainstorming", { workflow: "backend-feature" });
     const r = transition(t, { type: "agent_brainstorm_ready" });
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.task.status).toBe("brainstorming");
-      expect(r.task.awaitingApproval).toBe(true);
-    }
+    if (r.ok) expect(r.task.status).toBe("brainstorming");
   });
 
-  it("user_approve_brainstorm: brainstorming + awaitingApproval → planning", () => {
-    const t = mkTask("brainstorming", { workflow: "backend-feature", awaitingApproval: true });
+  it("user_approve_brainstorm: brainstorming → planning", () => {
+    // Gate enforcement now lives in the HTTP route (deriveBrainstormGate).
+    // The state machine accepts the action whenever the task is in brainstorming.
+    const t = mkTask("brainstorming", { workflow: "backend-feature" });
     const r = transition(t, { type: "user_approve_brainstorm" });
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.task.status).toBe("planning");
-      expect(r.task.awaitingApproval).toBe(false);
-    }
+    if (r.ok) expect(r.task.status).toBe("planning");
   });
 
-  it("user_approve_brainstorm rejected when not awaiting approval", () => {
-    const t = mkTask("brainstorming", { workflow: "backend-feature", awaitingApproval: false });
+  it("user_approve_brainstorm rejected from non-brainstorming status", () => {
+    const t = mkTask("planning", { workflow: "backend-feature" });
     const r = transition(t, { type: "user_approve_brainstorm" });
     expect(r.ok).toBe(false);
   });
 
-  it("user_request_brainstorm_changes: stays in brainstorming, clears gate", () => {
-    const t = mkTask("brainstorming", { workflow: "backend-feature", awaitingApproval: true });
+  it("user_request_brainstorm_changes: stays in brainstorming", () => {
+    const t = mkTask("brainstorming", { workflow: "backend-feature" });
     const r = transition(t, { type: "user_request_brainstorm_changes", comment: "more detail" });
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.task.status).toBe("brainstorming");
-      expect(r.task.awaitingApproval).toBe(false);
-    }
+    if (r.ok) expect(r.task.status).toBe("brainstorming");
   });
 
-  it("user_request_brainstorm_changes rejected when not awaiting approval", () => {
-    const t = mkTask("brainstorming", { workflow: "backend-feature", awaitingApproval: false });
+  it("user_request_brainstorm_changes rejected from non-brainstorming status", () => {
+    const t = mkTask("planning", { workflow: "backend-feature" });
     const r = transition(t, { type: "user_request_brainstorm_changes", comment: "x" });
     expect(r.ok).toBe(false);
   });
@@ -118,6 +107,46 @@ describe("transition", () => {
     const r = transition(t, { type: "agent_phase_failed", phase: "verify", retryCap: 2 });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.task.status).toBe("verification_failed");
+  });
+
+  it("agent_phase_failed for non-verify phases → matching <phase>_failed status", () => {
+    const cases = [
+      { phase: "brainstorm", from: "brainstorming", to: "brainstorm_failed" },
+      { phase: "plan", from: "planning", to: "plan_failed" },
+      { phase: "code", from: "executing", to: "code_failed" },
+      { phase: "pr", from: "ready_to_ship", to: "pr_failed" },
+    ] as const;
+    for (const c of cases) {
+      const t = mkTask(c.from, { workflow: "backend-feature" });
+      const r = transition(t, { type: "agent_phase_failed", phase: c.phase, retryCap: 2 });
+      expect(r.ok, `${c.phase}`).toBe(true);
+      if (r.ok) expect(r.task.status).toBe(c.to);
+    }
+  });
+
+  it("user_retry_failed from each <phase>_failed → original phase status with retryCount=0", () => {
+    const cases = [
+      { from: "verification_failed", to: "executing" },
+      { from: "brainstorm_failed", to: "brainstorming" },
+      { from: "plan_failed", to: "planning" },
+      { from: "code_failed", to: "executing" },
+      { from: "pr_failed", to: "ready_to_ship" },
+    ] as const;
+    for (const c of cases) {
+      const t = mkTask(c.from, { workflow: "backend-feature", retryCount: 2 });
+      const r = transition(t, { type: "user_retry_failed" });
+      expect(r.ok, `${c.from}`).toBe(true);
+      if (r.ok) {
+        expect(r.task.status).toBe(c.to);
+        expect(r.task.retryCount).toBe(0);
+      }
+    }
+  });
+
+  it("user_retry_failed from a non-failed status is rejected", () => {
+    const t = mkTask("brainstorming", { workflow: "backend-feature" });
+    const r = transition(t, { type: "user_retry_failed" });
+    expect(r.ok).toBe(false);
   });
 
   it("user_cancel: any non-terminal → cancelled", () => {

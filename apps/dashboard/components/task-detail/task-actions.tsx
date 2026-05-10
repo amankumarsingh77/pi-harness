@@ -75,6 +75,10 @@ function actionsFor(task: Task): ButtonSpec[] {
         { label: "Cancel", variant: "danger", action: { type: "user_cancel" } },
       ];
     case "verification_failed":
+    case "brainstorm_failed":
+    case "plan_failed":
+    case "code_failed":
+    case "pr_failed":
       return [
         { label: "Retry", variant: "review", action: { type: "user_retry_failed" } },
         { label: "Cancel", variant: "danger", action: { type: "user_cancel" } },

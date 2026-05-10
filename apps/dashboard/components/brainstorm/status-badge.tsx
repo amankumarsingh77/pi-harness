@@ -8,7 +8,12 @@ export function StatusBadge({ status }: { status: Artifact["fm"]["status"] }) {
     draft: "text-fg-mute",
     ready: "text-st-progress",
     approved: "text-st-done",
+    human_edited: "text-st-review",
   }[status];
+  // Renders human_edited as "edited" for compactness; readers know the
+  // edit was theirs, not the agent's, by context (the artifact sits next
+  // to "updated by · human" in the header).
+  const label = status === "human_edited" ? "edited" : status;
   return (
     <span
       className={clsx(
@@ -16,7 +21,7 @@ export function StatusBadge({ status }: { status: Artifact["fm"]["status"] }) {
         cls,
       )}
     >
-      {status}
+      {label}
     </span>
   );
 }

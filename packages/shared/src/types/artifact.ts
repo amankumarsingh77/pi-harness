@@ -7,7 +7,11 @@ import { z } from "zod";
 export const ArtifactKindSchema = z.enum(["design", "spec"]);
 export type ArtifactKind = z.infer<typeof ArtifactKindSchema>;
 
-export const ArtifactStatusSchema = z.enum(["draft", "ready", "approved"]);
+// `human_edited` marks artifacts the user touched directly via the dashboard
+// edit-in-place affordance. Treated by the approval gate as a synonym for
+// `ready` (both states unblock approval); rendered with a distinct status
+// badge so the user can tell which artifact carries their hand edits.
+export const ArtifactStatusSchema = z.enum(["draft", "ready", "approved", "human_edited"]);
 export type ArtifactStatus = z.infer<typeof ArtifactStatusSchema>;
 
 export const FrontmatterSchema = z.object({

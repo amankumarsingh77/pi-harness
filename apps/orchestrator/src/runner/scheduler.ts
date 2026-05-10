@@ -2,6 +2,7 @@ import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { WorktreeManager } from "../adapters/worktree.js";
 import type { PhaseDeps } from "./phase-prompts.js";
+import type { CancellationRegistry } from "./cancellation.js";
 import { silentLogger, type Logger } from "../domain/logger.js";
 import { mkEvent } from "../domain/events.js";
 import { runLoop } from "./run-loop.js";
@@ -12,6 +13,7 @@ export type SchedulerDeps = {
   phaseDeps: PhaseDeps;
   worktrees: WorktreeManager;
   retryCap: number;
+  cancellation: CancellationRegistry;
   logger?: Logger;
 };
 
@@ -72,6 +74,23 @@ export class TaskScheduler {
     return this.inFlight.size;
   }
 
+  /**
+   * Abort the task's active controller (if any) and wait for any in-flight
+   * tick to settle. Drops queued re-ticks for the task — after the drain,
+   * the scheduler is fully quiet for this taskId. Used by the brainstorm
+   * restart endpoint, where a follow-up archive operation must not race
+   * a still-running tick that might write to the about-to-be-archived JSONL.
+   */
+  async cancelAndDrain(taskId: string): Promise<void> {
+    this.deps.cancellation.abort(taskId);
+    // Drop any queued re-tick: we're discarding the run, not resuming it.
+    this.queued.delete(taskId);
+    const inFlight = this.inFlight.get(taskId);
+    if (inFlight) {
+      await inFlight.catch(() => {});
+    }
+  }
+
   private async tick(taskId: string): Promise<void> {
     const log = this.log.child({ taskId });
     let task;
@@ -94,6 +113,7 @@ export class TaskScheduler {
         phaseDeps: this.deps.phaseDeps,
         worktrees: this.deps.worktrees,
         retryCap: this.deps.retryCap,
+        cancellation: this.deps.cancellation,
       });
       log.debug({ durationMs: Date.now() - startedAt }, "tick complete");
     } catch (e) {

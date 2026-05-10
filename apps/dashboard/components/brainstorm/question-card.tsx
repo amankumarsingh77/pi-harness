@@ -2,38 +2,173 @@
 import { useState, useTransition } from "react";
 import { clsx } from "clsx";
 import type { BrainstormJsonlEvent } from "@/lib/api";
-import { submitBrainstormAnswerAction } from "@/app/tasks/[id]/actions";
+import { submitBrainstormAnswersAction } from "@/app/tasks/[id]/actions";
 import { EvidencePill } from "./evidence-pill";
 
 type QuestionEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>;
+type AnsweredMap = Map<
+  string,
+  { optionId?: string; optionIds?: string[]; freeText?: string }
+>;
 
-// rpiv-style structured selector. The user picks an option (or several, if
-// the question is multi-select), or types a custom answer in the inline
-// "Type something…" row, then clicks Submit. Nothing fires until Submit —
-// click → select isn't an irrevocable commit.
-//
-// Once an answer event lands in the bundle/SSE, the card flips to the
-// answered state: picked options keep their green border; if the answer
-// was free-text, the typed text shows in a small block.
-export function QuestionCard({
+// Per-question local selection state. `selected` holds picked option ids;
+// `freeText` is the typed answer when the user clicked the "Type your own"
+// row. A question is "complete" when the user has either picked at least
+// one option OR typed at least one non-whitespace character.
+type Draft = {
+  selected: Set<string>;
+  otherActive: boolean;
+  freeText: string;
+};
+function emptyDraft(): Draft {
+  return { selected: new Set(), otherActive: false, freeText: "" };
+}
+function draftComplete(d: Draft): boolean {
+  if (d.otherActive) return d.freeText.trim().length > 0;
+  return d.selected.size > 0;
+}
+function draftPayload(
+  q: QuestionEvent,
+  d: Draft,
+): { questionId: string; optionId?: string; optionIds?: string[]; freeText?: string } {
+  if (d.otherActive) {
+    return { questionId: q.questionId, freeText: d.freeText.trim() };
+  }
+  if (q.multiSelect === true) {
+    return { questionId: q.questionId, optionIds: [...d.selected] };
+  }
+  return { questionId: q.questionId, optionId: [...d.selected][0]! };
+}
+
+// Renders every question in a single submit_questions batch as one composite
+// card with one Submit button. The agent always asks several questions at
+// once; submitting individually used to wake the agent on the first answer
+// and let it mark ready off partial input. With a per-batch submit, the
+// agent only sees a complete set of answers.
+export function QuestionBatch({
   taskId,
-  question,
+  questions,
   answered,
 }: {
   taskId: string;
+  questions: QuestionEvent[];
+  answered: AnsweredMap;
+}) {
+  const allAnswered = questions.every((q) => answered.has(q.questionId));
+  const [drafts, setDrafts] = useState<Map<string, Draft>>(
+    () => new Map(questions.map((q) => [q.questionId, emptyDraft()])),
+  );
+  const [pending, start] = useTransition();
+
+  const updateDraft = (questionId: string, fn: (d: Draft) => Draft) => {
+    setDrafts((curr) => {
+      const next = new Map(curr);
+      next.set(questionId, fn(curr.get(questionId) ?? emptyDraft()));
+      return next;
+    });
+  };
+
+  const allComplete = questions.every((q) => {
+    if (answered.has(q.questionId)) return true;
+    const d = drafts.get(q.questionId) ?? emptyDraft();
+    return draftComplete(d);
+  });
+  const canSubmit = !pending && !allAnswered && allComplete;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const payloads = questions
+      .filter((q) => !answered.has(q.questionId))
+      .map((q) => draftPayload(q, drafts.get(q.questionId) ?? emptyDraft()));
+    start(async () => {
+      await submitBrainstormAnswersAction(taskId, payloads);
+    });
+  };
+
+  const onCmdEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canSubmit) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  const incompleteCount = questions.filter((q) => {
+    if (answered.has(q.questionId)) return false;
+    const d = drafts.get(q.questionId) ?? emptyDraft();
+    return !draftComplete(d);
+  }).length;
+  const remainingLabel =
+    incompleteCount === 0
+      ? "All set"
+      : `${incompleteCount} of ${questions.length} still need an answer`;
+
+  return (
+    <div
+      className="rounded-md border border-line bg-card p-3.5"
+      data-testid="question-batch"
+      data-batch-id={questions[0]?.batchId ?? ""}
+      onKeyDown={onCmdEnter}
+    >
+      <div className="mb-2.5 flex items-baseline gap-2 border-b border-line pb-2.5">
+        <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-fg-mute">
+          {questions.length === 1
+            ? "1 question"
+            : `${questions.length} questions · answer all to submit`}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-3.5">
+        {questions.map((q) => {
+          const ans = answered.get(q.questionId);
+          const draft = drafts.get(q.questionId) ?? emptyDraft();
+          return (
+            <QuestionItem
+              key={q.questionId}
+              question={q}
+              answered={ans}
+              draft={draft}
+              pending={pending}
+              onChange={(fn) => updateDraft(q.questionId, fn)}
+            />
+          );
+        })}
+      </div>
+
+      {!allAnswered && (
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-line pt-3">
+          <span className="font-mono text-[11px] text-fg-subtle">{remainingLabel}</span>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            className="rounded bg-st-progress px-3 py-1 text-[12px] font-medium text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-fg-faint disabled:hover:brightness-100"
+          >
+            {pending
+              ? "Submitting…"
+              : questions.length === 1
+                ? "Submit answer"
+                : "Submit all answers"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuestionItem({
+  question,
+  answered,
+  draft,
+  pending,
+  onChange,
+}: {
   question: QuestionEvent;
   answered: { optionId?: string; optionIds?: string[]; freeText?: string } | undefined;
+  draft: Draft;
+  pending: boolean;
+  onChange: (fn: (d: Draft) => Draft) => void;
 }) {
   const isMulti = question.multiSelect === true;
-  const [pending, start] = useTransition();
-  // selection: the set of optionIds currently selected (pre-submit).
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  // otherActive: true once the user clicks the "Type something…" row.
-  const [otherActive, setOtherActive] = useState(false);
-  const [freeText, setFreeText] = useState("");
-
-  // The picked optionIds reflected in the answer (post-submit). Used to
-  // render the green border on already-answered cards.
   const pickedAfterAnswer: ReadonlySet<string> = answered
     ? new Set([
         ...(answered.optionId ? [answered.optionId] : []),
@@ -42,52 +177,27 @@ export function QuestionCard({
     : new Set();
 
   const toggle = (id: string) => {
-    if (otherActive) {
-      // Switching back to options — drop the inline-input mode.
-      setOtherActive(false);
-    }
-    if (isMulti) {
-      setSelected((curr) => {
-        const next = new Set(curr);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    } else {
-      setSelected(new Set([id]));
-    }
-  };
-
-  const activateOther = () => {
-    setOtherActive(true);
-    setSelected(new Set());
-  };
-
-  const canSubmit =
-    !pending &&
-    !answered &&
-    ((otherActive && freeText.trim().length > 0) || (!otherActive && selected.size > 0));
-
-  const submit = () => {
-    if (!canSubmit) return;
-    const payload = otherActive
-      ? { freeText: freeText.trim() }
-      : isMulti
-        ? { optionIds: [...selected] }
-        : { optionId: [...selected][0]! };
-    start(async () => {
-      await submitBrainstormAnswerAction(taskId, {
-        questionId: question.questionId,
-        ...payload,
-      });
-      // Don't reset state — once the answer event lands the card flips to
-      // answered mode and the controls disappear.
+    onChange((d) => {
+      const otherActive = false;
+      let selected: Set<string>;
+      if (isMulti) {
+        selected = new Set(d.selected);
+        if (selected.has(id)) selected.delete(id);
+        else selected.add(id);
+      } else {
+        selected = new Set([id]);
+      }
+      return { ...d, selected, otherActive };
     });
   };
 
+  const activateOther = () => {
+    onChange((d) => ({ ...d, otherActive: true, selected: new Set() }));
+  };
+
   return (
-    <div className="rounded-md border border-line bg-card p-3.5">
-      <div className="mb-2.5 flex items-baseline gap-2">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-baseline gap-2">
         <span className="font-mono text-[11px] text-fg-mute">{question.questionId}</span>
         <span className="text-[13.5px] tracking-[-0.005em] text-fg">{question.prompt}</span>
         {isMulti && !answered && (
@@ -99,7 +209,9 @@ export function QuestionCard({
 
       <div className="flex flex-col gap-1.5">
         {question.options.map((opt) => {
-          const isSelected = answered ? pickedAfterAnswer.has(opt.id) : selected.has(opt.id);
+          const isSelected = answered
+            ? pickedAfterAnswer.has(opt.id)
+            : draft.selected.has(opt.id);
           return (
             <button
               key={opt.id}
@@ -142,34 +254,29 @@ export function QuestionCard({
           );
         })}
 
-        {/* Other / free-text inline row. Mirrors rpiv's "Type something." row. */}
         {!answered && (
           <button
             type="button"
             role="radio"
-            aria-checked={otherActive}
+            aria-checked={draft.otherActive}
             disabled={pending}
-            onClick={() => (otherActive ? null : activateOther())}
+            onClick={() => (draft.otherActive ? null : activateOther())}
             className={clsx(
               "flex items-start gap-2 rounded border px-3 py-2 text-left transition-colors",
-              otherActive
+              draft.otherActive
                 ? "border-st-progress bg-white/[0.04]"
                 : "border-line border-dashed text-fg-mute hover:border-line-hover hover:text-fg-body",
               pending && "cursor-not-allowed opacity-60",
             )}
           >
-            <Marker selected={otherActive} multi={false} />
-            {otherActive ? (
+            <Marker selected={draft.otherActive} multi={false} />
+            {draft.otherActive ? (
               <textarea
                 autoFocus
-                value={freeText}
-                onChange={(e) => setFreeText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    submit();
-                  }
-                }}
+                value={draft.freeText}
+                onChange={(e) =>
+                  onChange((d) => ({ ...d, freeText: e.target.value }))
+                }
                 disabled={pending}
                 placeholder="Type your own answer…"
                 className="min-h-7 flex-1 resize-none border-0 bg-transparent p-0 text-[13px] leading-[1.5] text-fg outline-none placeholder:text-fg-faint"
@@ -181,32 +288,8 @@ export function QuestionCard({
         )}
       </div>
 
-      {!answered && (
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <span className="font-mono text-[11px] text-fg-subtle">
-            {otherActive
-              ? "⌘↵ to submit"
-              : isMulti
-                ? selected.size === 0
-                  ? "Pick one or more options"
-                  : `${selected.size} selected`
-                : selected.size === 0
-                  ? "Pick one option"
-                  : "1 selected"}
-          </span>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSubmit}
-            className="rounded bg-st-progress px-3 py-1 text-[12px] font-medium text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-fg-faint disabled:hover:brightness-100"
-          >
-            {pending ? "Submitting…" : "Submit answer"}
-          </button>
-        </div>
-      )}
-
       {answered?.freeText && (
-        <div className="mt-2 rounded border border-st-done bg-white/[0.04] px-3 py-2 text-[13px] text-fg">
+        <div className="rounded border border-st-done bg-white/[0.04] px-3 py-2 text-[13px] text-fg">
           <span className="mr-2 font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg-mute">
             your answer
           </span>

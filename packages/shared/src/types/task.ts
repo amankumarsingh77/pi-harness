@@ -4,11 +4,15 @@ import type { PhaseModelConfig } from "../config/phase-models.js";
 export const TASK_STATUSES = [
   "backlog",
   "brainstorming",
+  "brainstorm_failed",
   "planning",
+  "plan_failed",
   "executing",
+  "code_failed",
   "verifying",
   "verification_failed",
   "ready_to_ship",
+  "pr_failed",
   "done",
   "cancelled",
 ] as const;
@@ -21,11 +25,15 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export const STATUS_TO_PHASE: Record<TaskStatus, Phase | null> = {
   backlog: null,
   brainstorming: "brainstorm",
+  brainstorm_failed: null, // user must triage / restart
   planning: null, // user must approve plan
+  plan_failed: null, // user must triage / restart
   executing: "code",
+  code_failed: null, // user must triage / restart
   verifying: "verify",
   verification_failed: null, // user must triage
   ready_to_ship: "pr",
+  pr_failed: null, // user must triage / restart
   done: null,
   cancelled: null,
 };
@@ -42,9 +50,6 @@ export type Task = {
   worktreePath: string | null;
   branchName: string | null;
   retryCount: number;
-  // True only during brainstorm phase between artifact `status: ready` and
-  // user approval. Sub-state of brainstorming, not its own status enum.
-  awaitingApproval: boolean;
   // Per-phase model overrides. Empty object = use DEFAULT_PHASE_MODELS for
   // every phase. Phase keys are optional; per-phase fields are also optional
   // so partial overrides merge with defaults via mergePhaseModels.
