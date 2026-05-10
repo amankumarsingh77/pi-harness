@@ -23,6 +23,10 @@ export type RunLoopOpts = {
   worktrees: WorktreeManager;
   retryCap: number;
   cancellation: CancellationRegistry;
+  // Optional: re-enqueue this task on the scheduler. Plan uses it to chain
+  // preflight → planner across two ticks without waiting on a user action,
+  // since the scheduler is otherwise event-driven (it only ticks on enqueue).
+  enqueue?: (taskId: string) => void;
 };
 
 // Branch name convention. Per design doc Decision #2: `pi/T-NNN`.
@@ -78,7 +82,10 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     return dispatchBrainstorm({ task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation });
   }
   if (phase === "plan") {
-    return dispatchPlan({ task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation });
+    return dispatchPlan({
+      task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation,
+      ...(opts.enqueue ? { enqueue: opts.enqueue } : {}),
+    });
   }
   return dispatchGenericPhase({ task, phase, worktree, runs, events, phaseDeps, retryCap, cancellation });
 }
@@ -186,7 +193,7 @@ async function dispatchBrainstorm(
 // session JSONL is namespaced (pi-session-plan.jsonl) so a future code phase
 // can claim its own pi-session-code.jsonl without colliding.
 async function dispatchPlan(
-  opts: DispatchOpts & { branch: string },
+  opts: DispatchOpts & { branch: string; enqueue?: (taskId: string) => void },
 ): Promise<Task> {
   const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
   let task = opts.task;
@@ -242,7 +249,23 @@ async function dispatchPlan(
     costUsd: run.costUsd + result.costUsd,
   });
 
-  if (result.ok) return task;
+  if (result.ok) {
+    // Plan is multi-tick (preflight, then planner, then optional revisions).
+    // The scheduler is event-driven — without an enqueue, a successful tick
+    // that hasn't yet flipped artifacts to ready would just stall waiting for
+    // a user action that isn't required. Re-enqueue so the next tick fires.
+    // Skipped when artifacts are already ready (the gate check at the top of
+    // runLoop will short-circuit on the next tick anyway, so it's harmless,
+    // but no point burning a tick).
+    const [plan, scenarios] = await Promise.all([
+      phaseDeps.store.readArtifact(worktree.path, task.id, "plan"),
+      phaseDeps.store.readArtifact(worktree.path, task.id, "scenarios"),
+    ]);
+    const ready =
+      plan?.fm.status === "ready" && scenarios?.fm.status === "ready";
+    if (!ready && opts.enqueue) opts.enqueue(task.id);
+    return task;
+  }
 
   await events.append({
     id: crypto.randomUUID(),
