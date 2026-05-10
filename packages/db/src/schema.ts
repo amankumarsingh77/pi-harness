@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, jsonb, doublePrecision, uuid, index, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, jsonb, doublePrecision, uuid, index } from "drizzle-orm/pg-core";
 
 export const tasks = pgTable(
   "tasks",
@@ -11,10 +11,6 @@ export const tasks = pgTable(
     worktreePath: text("worktree_path"),
     branchName: text("branch_name"),
     retryCount: integer("retry_count").notNull().default(0),
-    // True only while in brainstorming and waiting for user approval of the
-    // design+spec bundle. Cleared on approve, request-changes, or any other
-    // exit from the gate.
-    awaitingApproval: boolean("awaiting_approval").notNull().default(false),
     // Per-phase model overrides. Empty {} means "use DEFAULT_PHASE_MODELS".
     // Frozen after the first run row exists for this task (enforced at API).
     phaseModels: jsonb("phase_models").notNull().default({}),

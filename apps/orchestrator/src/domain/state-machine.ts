@@ -38,22 +38,27 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
       return advance("brainstorming", { workflow: action.workflow });
 
     case "agent_brainstorm_ready":
-      // Subagent produced design+spec with status: ready. Stop the run-loop
-      // here — task stays in brainstorming until the user approves.
+      // Subagent produced design+spec with status: ready. The gate is now
+      // derived from artifact frontmatter + JSONL events (see
+      // deriveBrainstormGate); the state machine no longer stores a flag.
+      // Task stays in brainstorming until the user approves.
       if (task.status !== "brainstorming") return reject("must be in brainstorming");
-      return advance("brainstorming", { awaitingApproval: true });
+      return advance("brainstorming");
 
     case "user_approve_brainstorm":
+      // The route validates the gate is open (deriveBrainstormGate ===
+      // "awaiting_user") before dispatching this transition. The state
+      // machine only sees structurally-valid actions.
       if (task.status !== "brainstorming") return reject("must be in brainstorming");
-      if (!task.awaitingApproval) return reject("artifacts not ready for approval");
-      return advance("planning", { awaitingApproval: false });
+      return advance("planning");
 
     case "user_request_brainstorm_changes":
+      // Same contract as approve — the route enforces the gate. We stay in
+      // brainstorming; the route also writes a brainstorm_revision_requested
+      // event and resets artifact frontmatter to draft, both of which flip
+      // the derived gate back to "running" on the next read.
       if (task.status !== "brainstorming") return reject("must be in brainstorming");
-      if (!task.awaitingApproval) return reject("not awaiting approval");
-      // Stay in brainstorming; clear gate flag so the run-loop re-dispatches
-      // and the agent resumes from JSONL cursor.
-      return advance("brainstorming", { awaitingApproval: false });
+      return advance("brainstorming");
 
     case "user_approve_plan":
       // Brainstorm → Planning happens when brainstorm phase succeeds.
@@ -73,10 +78,21 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
       }
       return advance("cancelled");
 
-    case "user_retry_failed":
-      if (task.status !== "verification_failed") return reject("not failed");
-      // Reset retry counter — user has triaged.
-      return advance("executing", { retryCount: 0 });
+    case "user_retry_failed": {
+      // Each failed sub-status retries back into its original phase. Reset
+      // retryCount — the user has triaged, the previous count is no longer
+      // meaningful for the new attempt.
+      const retryTarget: Partial<Record<TaskStatus, TaskStatus>> = {
+        verification_failed: "executing",
+        brainstorm_failed: "brainstorming",
+        plan_failed: "planning",
+        code_failed: "executing",
+        pr_failed: "ready_to_ship",
+      };
+      const next = retryTarget[task.status];
+      if (!next) return reject("not failed");
+      return advance(next, { retryCount: 0 });
+    }
 
     case "agent_phase_succeeded": {
       // Brainstorm has its own gate — it never auto-advances. The run-loop
@@ -85,7 +101,7 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
       // legacy callers (and tests) don't break, but it does NOT advance.
       if (action.phase === "brainstorm") {
         if (task.status !== "brainstorming") return reject("expected brainstorming");
-        return advance("brainstorming", { awaitingApproval: true });
+        return advance("brainstorming");
       }
       const map: Partial<Record<Phase, { from: TaskStatus; to: TaskStatus }>> = {
         plan: { from: "planning", to: "planning" }, // wait for user approval
@@ -107,9 +123,20 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
         }
         return advance("verification_failed");
       }
-      // Any other phase failing puts the task in verification_failed for triage.
-      // (No silent retries on brainstorm/plan/code/pr.)
-      return advance("verification_failed");
+      // Phase-scoped failure: the task stays under its phase's UI surface
+      // (kanban column, detail page) with a red-border alert, instead of
+      // jumping to the catch-all verification_failed column. The user
+      // triages by clicking Restart, which fires user_retry_failed.
+      switch (action.phase) {
+        case "brainstorm":
+          return advance("brainstorm_failed");
+        case "plan":
+          return advance("plan_failed");
+        case "code":
+          return advance("code_failed");
+        case "pr":
+          return advance("pr_failed");
+      }
   }
 }
 
