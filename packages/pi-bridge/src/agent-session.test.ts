@@ -1,16 +1,25 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentSession, AuthError, __resetAuthCache } from "./agent-session.js";
+import { createAgentSession, AuthError } from "./agent-session.js";
+import { __resetAuthCache } from "./auth.js";
 import { createFakeAdapter } from "./_test/fake-sdk.js";
 import type { PiBridgeEvent } from "./types.js";
-import type { AgentSdkEvent } from "./agent-session.js";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+
+// The fake-sdk adapter satisfies SdkBoundary structurally and lets each test
+// drive the SDK event stream directly. We assert observable outcomes only:
+// PiBridgeEvent emissions, the resolved PromptUsage, and AuthError on missing
+// credentials. No assertions on internal helpers.
 
 function assistantWithUsage(input: number, output: number, costTotal: number) {
   return {
-    role: "assistant",
-    content: [{ type: "text", text: "ok" }],
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text: "ok" }],
+    api: "anthropic-messages" as never,
+    provider: "anthropic" as never,
+    model: "claude-opus-4-5",
     usage: {
       input,
       output,
@@ -19,6 +28,8 @@ function assistantWithUsage(input: number, output: number, costTotal: number) {
       totalTokens: input + output,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
     },
+    stopReason: "stop" as const,
+    timestamp: 0,
   };
 }
 
@@ -39,6 +50,8 @@ afterEach(() => {
   process.chdir(prevCwd);
   rmSync(envDir, { recursive: true, force: true });
   __resetAuthCache();
+  delete process.env["ANTHROPIC_API_KEY"];
+  delete process.env["OPENAI_API_KEY"];
 });
 
 describe("createAgentSession", () => {
@@ -54,13 +67,18 @@ describe("createAgentSession", () => {
 
     adapter.emit({
       type: "message_update",
-      message: { role: "assistant" },
-      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hello", partial: {} },
-    } as AgentSdkEvent);
+      message: { role: "assistant" } as never,
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "hello",
+        partial: {} as never,
+      },
+    } as AgentSessionEvent);
     adapter.emit({
       type: "agent_end",
       messages: [assistantWithUsage(12, 7, 0.0005)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
 
     const usage = await promise;
     expect(usage).toEqual({ inputTokens: 12, outputTokens: 7, costUsd: 0.0005 });
@@ -84,15 +102,18 @@ describe("createAgentSession", () => {
       toolCallId: "t1",
       toolName: "foo",
       args: { x: 1 },
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     adapter.emit({
       type: "tool_execution_end",
       toolCallId: "t1",
       toolName: "foo",
       result: { y: 2 },
       isError: false,
-    } as AgentSdkEvent);
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(1, 1, 0)] } as AgentSdkEvent);
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
     await p;
 
     const call = events.find((e) => e.kind === "tool_call");
@@ -114,15 +135,18 @@ describe("createAgentSession", () => {
       toolCallId: "t1",
       toolName: "foo",
       args: {},
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     adapter.emit({
       type: "tool_execution_end",
       toolCallId: "t1",
       toolName: "foo",
       result: { message: "boom" },
       isError: true,
-    } as AgentSdkEvent);
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(0, 0, 0)] } as AgentSdkEvent);
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(0, 0, 0)],
+    } as AgentSessionEvent);
     await p;
     const result = events.find((e) => e.kind === "tool_result");
     expect(result).toEqual({
@@ -134,8 +158,6 @@ describe("createAgentSession", () => {
   });
 
   it("terminate-from-tool: agent_end after a terminating tool resolves the prompt", async () => {
-    // The SDK fires agent_end after a tool batch with terminate:true. Bridge does not see
-    // the terminate flag itself; it only knows the turn ended via agent_end.
     const adapter = createFakeAdapter();
     const events: PiBridgeEvent[] = [];
     const session = await createAgentSession(
@@ -143,21 +165,24 @@ describe("createAgentSession", () => {
       adapter,
     );
     const p = session.prompt("stop");
-    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
+    adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     adapter.emit({
       type: "tool_execution_start",
       toolCallId: "t1",
       toolName: "submit",
       args: { questions: [] },
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     adapter.emit({
       type: "tool_execution_end",
       toolCallId: "t1",
       toolName: "submit",
       result: { ok: true },
       isError: false,
-    } as AgentSdkEvent);
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(3, 4, 0.001)] } as AgentSdkEvent);
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(3, 4, 0.001)],
+    } as AgentSessionEvent);
     const usage = await p;
     expect(usage.costUsd).toBe(0.001);
   });
@@ -170,16 +195,22 @@ describe("createAgentSession", () => {
       adapter,
     );
     const p = session.prompt("loop");
-    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
-    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
-    adapter.emit({ type: "turn_start" } as AgentSdkEvent);
+    adapter.emit({ type: "turn_start" } as AgentSessionEvent);
+    adapter.emit({ type: "turn_start" } as AgentSessionEvent);
+    adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     await expect(p).rejects.toThrow(/maxTurns exceeded/);
     expect(adapter.state.abortCalls).toBeGreaterThanOrEqual(1);
-    expect(events.some((e) => e.kind === "log" || (e as { kind: string }).kind === "error")).toBe(true);
+    expect(events.some((e) => e.kind === "error")).toBe(true);
   });
 
-  it("auth missing: throws AuthError when provider has no key", async () => {
+  it("auth missing: throws AuthError when SDK rejects on missing credential", async () => {
+    delete process.env["OPENAI_API_KEY"];
     const adapter = createFakeAdapter();
+    // Stub the boundary so create() rejects with an auth-shaped message — same
+    // signal the real SDK emits when no API key is configured.
+    adapter.create = async () => {
+      throw new Error("No API key configured for openai");
+    };
     await expect(
       createAgentSession(
         { cwd: "/tmp", model: { provider: "openai", model: "gpt-4" }, onEvent: () => {} },
@@ -196,7 +227,10 @@ describe("createAgentSession", () => {
     );
     const first = session.prompt("a");
     await expect(session.prompt("b")).rejects.toThrow(/in flight/);
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(0, 0, 0)] } as AgentSdkEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(0, 0, 0)],
+    } as AgentSessionEvent);
     await first;
   });
 
@@ -214,27 +248,16 @@ describe("createAgentSession", () => {
       maxAttempts: 5,
       delayMs: 1000,
       errorMessage: "overloaded",
-    } as AgentSdkEvent);
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(0, 0, 0)] } as AgentSdkEvent);
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(0, 0, 0)],
+    } as AgentSessionEvent);
     await p;
     const log = events.find((e) => e.kind === "log");
     expect(log).toBeDefined();
     expect(log && "text" in log && log.text).toContain("auto_retry");
     expect(log && "text" in log && log.text).toContain("overloaded");
-  });
-
-  it("resume: passes sessionPath through to the adapter create() call", async () => {
-    const adapter = createFakeAdapter();
-    await createAgentSession(
-      {
-        cwd: "/tmp",
-        model: baseModel,
-        sessionPath: "/tmp/abc/pi-session.jsonl",
-        onEvent: () => {},
-      },
-      adapter,
-    );
-    expect(adapter.state.createOpts?.sessionPath).toBe("/tmp/abc/pi-session.jsonl");
   });
 
   it("aggregates usage across multiple assistant messages in agent_end", async () => {
@@ -247,7 +270,7 @@ describe("createAgentSession", () => {
     adapter.emit({
       type: "agent_end",
       messages: [assistantWithUsage(10, 5, 0.002), assistantWithUsage(3, 2, 0.0005)],
-    } as AgentSdkEvent);
+    } as AgentSessionEvent);
     const usage = await p;
     expect(usage).toEqual({ inputTokens: 13, outputTokens: 7, costUsd: 0.0025 });
   });
@@ -269,28 +292,31 @@ describe("createAgentSession", () => {
       adapter,
     );
     const p1 = session.prompt("one");
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(10, 1, 0.001)] } as AgentSdkEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(10, 1, 0.001)],
+    } as AgentSessionEvent);
     const u1 = await p1;
     expect(u1.inputTokens).toBe(10);
 
     const p2 = session.prompt("two");
-    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(4, 2, 0.0002)] } as AgentSdkEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(4, 2, 0.0002)],
+    } as AgentSessionEvent);
     const u2 = await p2;
     expect(u2).toEqual({ inputTokens: 4, outputTokens: 2, costUsd: 0.0002 });
   });
-});
 
-describe("auth", () => {
-  it("getApiKey: reads PROVIDER_API_KEY style entries from .env.harness", async () => {
-    // covered indirectly by the other tests; ensure non-anthropic provider key works too
-    writeFileSync(join(envDir, ".env.harness"), "OPENAI_API_KEY=k1\nANTHROPIC_API_KEY=k2\n");
-    __resetAuthCache();
+  it("abort: rejects pending prompt with 'aborted' and forwards to sdk", async () => {
     const adapter = createFakeAdapter();
-    await expect(
-      createAgentSession(
-        { cwd: "/tmp", model: { provider: "openai", model: "gpt-4" }, onEvent: () => {} },
-        adapter,
-      ),
-    ).resolves.toBeDefined();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: () => {} },
+      adapter,
+    );
+    const p = session.prompt("hi");
+    await session.abort();
+    await expect(p).rejects.toThrow("aborted");
+    expect(adapter.state.abortCalls).toBe(1);
   });
 });

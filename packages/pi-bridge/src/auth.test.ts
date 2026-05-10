@@ -2,11 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthError, __resetAuthCache, getApiKey } from "./auth.js";
+import { __resetAuthCache, loadEnvHarness } from "./auth.js";
 
-// Keys whose presence/absence we manipulate in this suite. Each test starts
-// with all of them cleared from process.env so dotenv doesn't fall through
-// to a leaked value from a prior test.
 const TOUCHED_KEYS = ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY"];
 
 let dir: string;
@@ -27,37 +24,37 @@ afterEach(() => {
   __resetAuthCache();
 });
 
-describe("getApiKey provider env var resolution", () => {
-  it("opencode-go resolves to OPENCODE_API_KEY (matches pi's provider table)", () => {
-    writeFileSync(join(dir, ".env.harness"), "OPENCODE_API_KEY=zen-key\n");
-    expect(getApiKey("opencode-go")).toBe("zen-key");
-  });
-
-  it("opencode resolves to OPENCODE_API_KEY (same key as opencode-go)", () => {
-    writeFileSync(join(dir, ".env.harness"), "OPENCODE_API_KEY=zen-key\n");
-    expect(getApiKey("opencode")).toBe("zen-key");
-  });
-
-  it("anthropic resolves to ANTHROPIC_API_KEY", () => {
+describe("loadEnvHarness", () => {
+  it("primes process.env from .env.harness in the current directory", () => {
     writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=ant-key\n");
-    expect(getApiKey("anthropic")).toBe("ant-key");
+    loadEnvHarness();
+    expect(process.env["ANTHROPIC_API_KEY"]).toBe("ant-key");
   });
 
-  it("missing key raises AuthError naming the env var pi expects", () => {
-    writeFileSync(join(dir, ".env.harness"), "");
-    expect(() => getApiKey("opencode-go")).toThrowError(AuthError);
-    expect(() => getApiKey("opencode-go")).toThrowError(/OPENCODE_API_KEY/);
-  });
-
-  it("finds .env.harness at the monorepo root, not the per-package cwd", () => {
-    // Simulate the orchestrator launch where pnpm sets cwd to apps/orchestrator.
-    // The .env.harness lives at the workspace root, marked by pnpm-workspace.yaml.
+  it("walks up to the monorepo root (marked by pnpm-workspace.yaml)", () => {
     writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
     writeFileSync(join(dir, ".env.harness"), "OPENCODE_API_KEY=root-key\n");
     const sub = join(dir, "apps", "orchestrator");
     mkdirSync(sub, { recursive: true });
     process.chdir(sub);
     __resetAuthCache();
-    expect(getApiKey("opencode-go")).toBe("root-key");
+    loadEnvHarness();
+    expect(process.env["OPENCODE_API_KEY"]).toBe("root-key");
+  });
+
+  it("does not overwrite an env var already set in the shell", () => {
+    process.env["ANTHROPIC_API_KEY"] = "shell-key";
+    writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=file-key\n");
+    loadEnvHarness();
+    expect(process.env["ANTHROPIC_API_KEY"]).toBe("shell-key");
+  });
+
+  it("is idempotent within a single process (cache guard)", () => {
+    writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=first\n");
+    loadEnvHarness();
+    delete process.env["ANTHROPIC_API_KEY"];
+    writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=second\n");
+    loadEnvHarness();
+    expect(process.env["ANTHROPIC_API_KEY"]).toBeUndefined();
   });
 });
