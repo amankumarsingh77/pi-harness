@@ -2,6 +2,8 @@ import {
   createAgentSession as sdkCreateAgentSession,
   SessionManager,
   DefaultResourceLoader,
+  AuthStorage,
+  ModelRegistry,
   getAgentDir,
   type AgentSession as SdkAgentSession,
   type AgentSessionEvent,
@@ -12,6 +14,11 @@ import { findEnvKeys, getEnvApiKey, getModel } from "@earendil-works/pi-ai";
 import type { AssistantMessage, KnownProvider, Usage } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AuthError, loadEnvHarness } from "./auth.js";
+import {
+  CROFAI_API_KEY_ENV,
+  CROFAI_PROVIDER_CONFIG,
+  CROFAI_PROVIDER_NAME,
+} from "./providers/crofai.js";
 
 export { AuthError };
 export type { ThinkingLevel, ToolDefinition };
@@ -70,15 +77,52 @@ export type SdkBoundary = {
   create: (opts: SdkBoundaryCreateOptions) => Promise<{ session: SdkAgentSession }>;
 };
 
+// Providers we register with the SDK at runtime (not in pi-ai's static MODELS).
+// Maps provider name -> env var that holds the API key. assertCredential and
+// the registry builder both read this so the auth surface stays uniform.
+const CUSTOM_PROVIDER_ENV: Record<string, string> = {
+  [CROFAI_PROVIDER_NAME]: CROFAI_API_KEY_ENV,
+};
+
+// Lazy per-process registry. Built once on first session creation; reused for
+// every subsequent session so the orchestrator doesn't re-register providers
+// each phase tick. The registry resolves credentials via setRuntimeApiKey
+// (populated from .env.harness) — that's why loadEnvHarness must run first.
+let registryPromise: Promise<ModelRegistry> | null = null;
+
+function buildCustomRegistry(): ModelRegistry {
+  // Each provider's ProviderConfigInput declares its own apiKey as an env-var
+  // name; the SDK resolves it from process.env at request time. AuthStorage
+  // is just a placeholder here — we don't persist credentials.
+  const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+  registry.registerProvider(CROFAI_PROVIDER_NAME, CROFAI_PROVIDER_CONFIG);
+  return registry;
+}
+
+async function getRegistry(): Promise<ModelRegistry> {
+  if (!registryPromise) {
+    registryPromise = Promise.resolve(buildCustomRegistry());
+  }
+  return registryPromise;
+}
+
+// Test-only: clear the cached registry between tests so .env.harness changes
+// take effect. Mirrors __resetAuthCache from auth.ts.
+export function __resetRegistryCache(): void {
+  registryPromise = null;
+}
+
 const defaultBoundary: SdkBoundary = {
   create: async (opts) => {
-    const model = resolveModel(opts.model);
+    const registry = await getRegistry();
+    const model = resolveModel(opts.model, registry);
     const sessionManager = opts.sessionPath
       ? SessionManager.open(opts.sessionPath)
       : SessionManager.inMemory(opts.cwd);
     const sdkOpts: CreateAgentSessionOptions = {
       cwd: opts.cwd,
       model,
+      modelRegistry: registry,
       sessionManager,
       customTools: opts.customTools ?? [],
       ...(opts.thinkingLevel !== undefined ? { thinkingLevel: opts.thinkingLevel } : {}),
@@ -198,7 +242,19 @@ export async function createAgentSession(
   };
 }
 
-function resolveModel(spec: { provider: string; model: string }) {
+function resolveModel(spec: { provider: string; model: string }, registry: ModelRegistry) {
+  // Custom providers (registered at runtime via ModelRegistry) aren't in
+  // pi-ai's static MODELS, so getModel would throw. Consult the registry
+  // first; fall back to pi-ai for built-in providers.
+  if (spec.provider in CUSTOM_PROVIDER_ENV) {
+    const found = registry.find(spec.provider, spec.model);
+    if (!found) {
+      throw new AuthError(
+        `unknown model ${spec.provider}/${spec.model}: not registered in custom provider registry`,
+      );
+    }
+    return found;
+  }
   // The SDK's `getModel` is generic over the literal provider/model union and
   // refuses bare strings at the type level. We accept arbitrary provider/model
   // strings at our boundary (orchestrator config is dynamic) and let the SDK
@@ -251,6 +307,12 @@ async function openSession(
 // brainstorm.ts can route the failure into a phase_blocked state without
 // spinning up a session.
 function assertCredential(provider: string): void {
+  // Custom providers aren't in pi-ai's env-key registry; check our own map first.
+  const customEnv = CUSTOM_PROVIDER_ENV[provider];
+  if (customEnv !== undefined) {
+    if (process.env[customEnv]) return;
+    throw new AuthError(`missing API key for ${provider} (expected ${customEnv} in .env.harness)`);
+  }
   if (getEnvApiKey(provider)) return;
   const envVars = findEnvKeys(provider);
   const expected = envVars && envVars.length > 0 ? envVars.join(" or ") : "<unknown>";
