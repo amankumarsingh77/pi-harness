@@ -194,16 +194,14 @@ function lastIndexWhere<T>(arr: T[], pred: (e: T) => boolean): number {
 
 function isPreflightComplete(cwd: string, taskId: string): boolean {
   const researchDir = join(cwd, ".harness", taskId, "research");
-  // The seven canonical findings filenames. Mirrors PREFLIGHT_SUBAGENTS in
+  // The five canonical findings filenames. Mirrors PREFLIGHT_SUBAGENTS in
   // plan-preflight; duplicating the list here avoids importing a const just
   // for a hot-path existence check.
   const required = [
-    "scope-tracer.md",
     "codebase-locator.md",
     "codebase-pattern-finder.md",
     "codebase-analyzer.md",
     "integration-scanner.md",
-    "test-case-locator.md",
     "precedent-locator.md",
   ];
   return required.every((name) => existsSync(join(researchDir, name)));
@@ -352,7 +350,6 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
-      maxTurns: 15,
       systemPrompt,
       onEvent: () => {},
     });
@@ -397,7 +394,6 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
-      maxTurns: opts.phaseModel.maxTurns,
       systemPrompt,
       sessionPath,
       customTools: [markReadyTool],
@@ -447,18 +443,6 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
     const message = (err as Error).message;
     if (signal?.aborted || message === "aborted") {
       return zeroUsage({ ok: false, ready: false, cancelled: true });
-    }
-    if (message === "maxTurns exceeded") {
-      await opts.bus.publish({
-        kind: "plan_system",
-        systemKind: "blocked",
-        data: { reason: `maxTurns (${opts.phaseModel.maxTurns}) exceeded` },
-      });
-      return zeroUsage({
-        ok: false,
-        ready: false,
-        error: "plan: maxTurns exceeded",
-      });
     }
     await opts.bus.publish({
       kind: "plan_system",

@@ -32,11 +32,11 @@ describe("plan_* AgentEvent variants", () => {
     const e: AgentEvent = {
       ...base,
       kind: "plan_subagent_started",
-      subagent: "scope-tracer",
+      subagent: "codebase-locator",
       sessionId: "s-1",
     };
     if (e.kind === "plan_subagent_started") {
-      expect(e.subagent).toBe("scope-tracer");
+      expect(e.subagent).toBe("codebase-locator");
     } else {
       expect.fail("expected plan_subagent_started");
     }

@@ -35,7 +35,6 @@ const baseOpts = (overrides: Partial<Parameters<typeof runPreflight>[0]> = {}) =
     provider: "anthropic",
     model: "claude-opus-4-7",
     thinkingLevel: "high" as const,
-    maxTurns: 20,
   },
   createAgentSession: makeFakeWriter(),
   onSubagentEvent: () => {},
@@ -108,8 +107,8 @@ describe("runPreflight", () => {
     // Each subagent emits exactly one started + one ended.
     const startedKinds = events.filter((e) => e.kind === "started");
     const endedKinds = events.filter((e) => e.kind === "ended");
-    expect(startedKinds).toHaveLength(7);
-    expect(endedKinds).toHaveLength(7);
+    expect(startedKinds).toHaveLength(5);
+    expect(endedKinds).toHaveLength(5);
   });
 
   it("dispatches subagents concurrently (all create() calls fire before any prompt resolves)", async () => {
@@ -149,24 +148,24 @@ describe("runPreflight", () => {
       }),
     );
 
-    // All 7 sessions should be created before the first one resolves.
-    expect(peakBeforeFirstResolve.value).toBe(7);
+    // All 5 sessions should be created before the first one resolves.
+    expect(peakBeforeFirstResolve.value).toBe(5);
   });
 
-  it("one subagent failure leaves the other six successful and below the failed threshold", async () => {
+  it("one subagent failure leaves the others successful and below the failed threshold", async () => {
     const result = await runPreflight(
       baseOpts({
         createAgentSession: makeFakeWriter({
-          failSubagents: new Set(["scope-tracer"]),
+          failSubagents: new Set(["codebase-locator"]),
         }),
       }),
     );
 
     expect(result.failed).toBe(false); // 1 < 3
-    const scope = result.results.find((r) => r.subagent === "scope-tracer")!;
-    expect(scope.ok).toBe(false);
-    expect(scope.error).toContain("synthetic failure");
-    const others = result.results.filter((r) => r.subagent !== "scope-tracer");
+    const locator = result.results.find((r) => r.subagent === "codebase-locator")!;
+    expect(locator.ok).toBe(false);
+    expect(locator.error).toContain("synthetic failure");
+    const others = result.results.filter((r) => r.subagent !== "codebase-locator");
     expect(others.every((r) => r.ok)).toBe(true);
   });
 
@@ -175,9 +174,9 @@ describe("runPreflight", () => {
       baseOpts({
         createAgentSession: makeFakeWriter({
           failSubagents: new Set([
-            "scope-tracer",
             "codebase-locator",
             "codebase-pattern-finder",
+            "codebase-analyzer",
           ]),
         }),
       }),
@@ -189,7 +188,7 @@ describe("runPreflight", () => {
     // Pre-seed two findings files.
     const researchDir = join(cwd, ".harness", "T-001", "research");
     await mkdir(researchDir, { recursive: true });
-    await writeFile(join(researchDir, "scope-tracer.md"), "# pre-existing\n");
+    await writeFile(join(researchDir, "codebase-locator.md"), "# pre-existing\n");
     await writeFile(join(researchDir, "precedent-locator.md"), "# pre-existing\n");
 
     let createCount = 0;
@@ -207,15 +206,15 @@ describe("runPreflight", () => {
       }),
     );
 
-    // Only 5 of 7 should have been dispatched (scope-tracer + precedent-locator skipped).
-    expect(createCount).toBe(5);
-    expect(events.filter((e) => e.kind === "started")).toHaveLength(5);
+    // Only 3 of 5 should have been dispatched (codebase-locator + precedent-locator skipped).
+    expect(createCount).toBe(3);
+    expect(events.filter((e) => e.kind === "started")).toHaveLength(3);
 
-    // All 7 still appear in results — the pre-existing ones are reported as ok with zero usage.
-    expect(result.results).toHaveLength(7);
-    const scope = result.results.find((r) => r.subagent === "scope-tracer")!;
-    expect(scope.ok).toBe(true);
-    expect(scope.costUsd).toBe(0);
-    expect(scope.inputTokens).toBe(0);
+    // All 5 still appear in results — the pre-existing ones are reported as ok with zero usage.
+    expect(result.results).toHaveLength(5);
+    const locator = result.results.find((r) => r.subagent === "codebase-locator")!;
+    expect(locator.ok).toBe(true);
+    expect(locator.costUsd).toBe(0);
+    expect(locator.inputTokens).toBe(0);
   });
 });

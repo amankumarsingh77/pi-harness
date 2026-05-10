@@ -359,7 +359,7 @@ describe("ArtifactsStore", () => {
     await writeFile(join(dir, "plan.jsonl"), "{\"kind\":\"x\"}\n");
     await writeFile(join(dir, "pi-session-plan.jsonl"), "session\n");
     await mkdir(join(dir, "research"), { recursive: true });
-    await writeFile(join(dir, "research", "scope-tracer.md"), "# findings\n");
+    await writeFile(join(dir, "research", "codebase-locator.md"), "# findings\n");
 
     const git = simpleGit(cwd);
     await git.raw(["add", "-f", join(".harness", "T-1", "plan.md"), join(".harness", "T-1", "scenarios.yaml"), join(".harness", "T-1", "plan.jsonl"), join(".harness", "T-1", "pi-session-plan.jsonl")]);
@@ -379,6 +379,6 @@ describe("ArtifactsStore", () => {
     expect(existsSync(join(archive, "scenarios.yaml"))).toBe(true);
     expect(existsSync(join(archive, "plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
-    expect(existsSync(join(archive, "research", "scope-tracer.md"))).toBe(true);
+    expect(existsSync(join(archive, "research", "codebase-locator.md"))).toBe(true);
   });
 });
