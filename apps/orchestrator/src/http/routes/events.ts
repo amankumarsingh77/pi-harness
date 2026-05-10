@@ -15,6 +15,9 @@ export function registerEventStream(
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        // Tell intermediaries (nginx, Next.js's fetch internals, anything
+        // else in the path) not to buffer this stream.
+        "X-Accel-Buffering": "no",
       });
 
       const send = (e: AgentEvent) => {
@@ -29,7 +32,20 @@ export function registerEventStream(
 
       const unsub = deps.events.subscribe(runId, send);
 
+      // Heartbeat: an SSE comment line every 25s. Dev proxies (Next.js, nginx
+      // with default settings) close idle connections after ~30–60s; without
+      // this, a brainstorm tick that takes 40s to emit its next event would
+      // surface as a "failed to pipe response" on the dashboard side. The
+      // browser's EventSource happily ignores comment lines.
+      const heartbeat = setInterval(() => {
+        // `write` returns false under backpressure; we don't care here — if
+        // the socket is dead the close handler will fire and clear the
+        // interval before the next tick.
+        reply.raw.write(": ping\n\n");
+      }, 25_000);
+
       req.raw.on("close", () => {
+        clearInterval(heartbeat);
         unsub();
         reply.raw.end();
       });

@@ -19,6 +19,7 @@ import { WorktreeManager } from "../../src/adapters/worktree.js";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
 import { runLoop } from "../../src/runner/run-loop.js";
+import { CancellationRegistry } from "../../src/runner/cancellation.js";
 import { transition } from "../../src/domain/state-machine.js";
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
@@ -53,6 +54,7 @@ describe("brainstorm integration flow", () => {
   let worktrees: WorktreeManager;
   let store: ArtifactsStore;
   let queue: ((adapter: FakeAgentSdkAdapter) => Promise<void>)[];
+  let cancellationRegistry: CancellationRegistry;
 
   afterAll(async () => {
     await client.end();
@@ -82,6 +84,7 @@ describe("brainstorm integration flow", () => {
     );
     __resetAuthCache();
     queue = [];
+    cancellationRegistry = new CancellationRegistry();
   });
 
   afterEach(async () => {
@@ -126,6 +129,7 @@ describe("brainstorm integration flow", () => {
       phaseDeps: phaseDeps(),
       worktrees,
       retryCap: 2,
+      cancellation: cancellationRegistry,
     });
   }
 
@@ -241,7 +245,13 @@ describe("brainstorm integration flow", () => {
     expect(design?.fm.status).toBe("ready");
     expect(spec?.fm.status).toBe("ready");
     expect(task.status).toBe("brainstorming");
-    expect(task.awaitingApproval).toBe(true);
+    // Gate is derived from the worktree, not stored on the task.
+    const { deriveBrainstormGate } = await import(
+      "../../src/agents/brainstorm-gate.js"
+    );
+    expect(
+      await deriveBrainstormGate(task.worktreePath!, t.id, store),
+    ).toBe("awaiting_user");
 
     // Approve via the state-machine + artifact-status flip.
     const approved = transition(task, { type: "user_approve_brainstorm" });
@@ -249,14 +259,23 @@ describe("brainstorm integration flow", () => {
     if (approved.ok) {
       task = await runs.updateTask(t.id, {
         status: approved.task.status,
-        awaitingApproval: approved.task.awaitingApproval,
       });
       await store.setArtifactStatus(task.worktreePath!, t.id, "design", "approved", "user");
       await store.setArtifactStatus(task.worktreePath!, t.id, "spec", "approved", "user");
     }
 
     expect(task.status).toBe("planning");
-    expect(task.awaitingApproval).toBe(false);
+
+    // Single-run invariant: brainstorm reuses one Run row across all ticks
+    // (so the dashboard's SSE subscription survives a request-changes
+    // round-trip). This test bypasses the HTTP route on approve, so the
+    // run is still `running` here. The route-level close path is covered by
+    // http.test.ts (user_approve_brainstorm closes the active brainstorm
+    // run + emits phase_ended).
+    const finalRuns = await runs.listRuns(t.id);
+    expect(finalRuns).toHaveLength(1);
+    expect(finalRuns[0]!.phase).toBe("brainstorm");
+    expect(finalRuns[0]!.status).toBe("running");
 
     // Dashboard contract: the JSONL records the canonical event sequence.
     const events = (await readFile(jsonlPath, "utf8"))
@@ -272,5 +291,79 @@ describe("brainstorm integration flow", () => {
         (e["data"] as { status?: string } | undefined)?.status === "ready",
     );
     expect(statusChanged).toBeDefined();
+  });
+
+  it("nudge: free-form user input lands in the next prompt and is marked consumed", async () => {
+    const t = await runs.createTask({ title: "nudge-int" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+
+    // Turn 1: agent submits one question, then halts.
+    queue.push(async (adapter) => {
+      await executeTool(adapter, "submit_questions", {
+        questions: [
+          {
+            questionId: "q-scope",
+            prompt: "What scope?",
+            options: [
+              { id: "narrow", label: "Narrow", recommended: true, evidence: [] },
+              { id: "wide", label: "Wide", recommended: false, evidence: [] },
+            ],
+            sectionTarget: { artifact: "design", section: "Goals" },
+          },
+        ],
+      });
+    });
+
+    await tickRunLoop(t.id);
+    const task = await runs.getTask(t.id);
+    expect(task.worktreePath).toBeTruthy();
+
+    // Simulate the nudge endpoint appending a user nudge to JSONL.
+    const jsonlPath = join(task.worktreePath!, ".harness", t.id, "brainstorm.jsonl");
+    const w = new JsonlWriter(jsonlPath);
+    await w.append({
+      ts: new Date().toISOString(),
+      kind: "brainstorm_user_nudge",
+      nudgeId: "n_int_1",
+      comment: "focus on backend only — ignore the UI angle",
+      consumed: false,
+    });
+
+    // Turn 2: the run-loop ticks again. We capture the prompt sent to the
+    // bridge to assert the nudge is folded in. The agent ends the turn
+    // without a tool call.
+    let capturedPromptText: string | null = null;
+    queue.push(async (adapter) => {
+      // Wait for prompt() to register before capturing the prompt body —
+      // the driver fires immediately after createAgentSession resolves but
+      // before sdkSession.prompt has been called.
+      for (let i = 0; i < 100 && adapter.state.promptCalls.length === 0; i += 1) {
+        await new Promise((r) => setTimeout(r, 1));
+      }
+      capturedPromptText = adapter.state.promptCalls[0]?.text ?? null;
+      adapter.emit({
+        type: "agent_end",
+        messages: [assistantWithUsage(2, 1, 0.0001)],
+      } as AgentSessionEvent);
+    });
+
+    await tickRunLoop(t.id);
+
+    expect(capturedPromptText).not.toBeNull();
+    expect(capturedPromptText!).toContain("Recent user input");
+    expect(capturedPromptText!).toContain("focus on backend only");
+
+    // The nudge should now appear twice in JSONL: the original (consumed:false)
+    // and a republished consumed:true entry. The consumed:true entry is the
+    // signal for the dashboard's "agent saw this" indicator.
+    const jsonlEvents = (await readFile(jsonlPath, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const nudges = jsonlEvents.filter((e) => e.kind === "brainstorm_user_nudge");
+    expect(nudges).toHaveLength(2);
+    expect(nudges[0]!["consumed"]).toBe(false);
+    expect(nudges[1]!["consumed"]).toBe(true);
+    expect(nudges[1]!["nudgeId"]).toBe("n_int_1");
   });
 });

@@ -12,10 +12,20 @@ const LIVE_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "verifying",
 ]);
 
+// Any failure state needs to grab the user's eye — bordered red so they can
+// scan the board and immediately spot what needs triage.
+const FAILED_STATUSES: ReadonlySet<Task["status"]> = new Set([
+  "brainstorm_failed",
+  "plan_failed",
+  "code_failed",
+  "pr_failed",
+  "verification_failed",
+]);
+
 export function TaskCard({ task }: { task: Task }) {
   const kind = statusKindFor(task.status);
   const live = LIVE_STATUSES.has(task.status);
-  const attention = task.status === "verification_failed";
+  const attention = FAILED_STATUSES.has(task.status);
   const age = formatRelativeCompact(task.updatedAt ?? task.createdAt);
   const meta = metaLineFor(task);
 
@@ -23,10 +33,11 @@ export function TaskCard({ task }: { task: Task }) {
     <Link
       href={`/tasks/${task.id}` as Route}
       className={clsx(
-        "group relative block rounded-md border border-line bg-card px-3 py-2.5",
-        "transition-colors duration-150 hover:border-line-hover hover:bg-card-hover",
-        attention &&
-          "before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:rounded-full before:bg-st-blocked",
+        "group relative block rounded-md border px-3 py-2.5",
+        "transition-colors duration-150",
+        attention
+          ? "border-st-blocked/60 bg-card hover:border-st-blocked hover:bg-card-hover"
+          : "border-line bg-card hover:border-line-hover hover:bg-card-hover",
       )}
     >
       <div className="flex items-center gap-2 font-mono text-[11px] tracking-[0.01em] text-fg-mute">
@@ -94,11 +105,20 @@ function metaLineFor(task: Task): MetaPart[] {
     case "brainstorming":
       parts.push({ text: "brainstorm", tone: "live" });
       break;
+    case "brainstorm_failed":
+      parts.push({ text: "brainstorm failed", tone: "blocked" });
+      break;
     case "planning":
       parts.push({ text: "planning", tone: "live" });
       break;
+    case "plan_failed":
+      parts.push({ text: "plan failed", tone: "blocked" });
+      break;
     case "executing":
       parts.push({ text: "code", tone: "live" });
+      break;
+    case "code_failed":
+      parts.push({ text: "code failed", tone: "blocked" });
       break;
     case "verifying":
       parts.push({ text: "verify", tone: "live" });
@@ -108,6 +128,9 @@ function metaLineFor(task: Task): MetaPart[] {
       break;
     case "ready_to_ship":
       parts.push({ text: "PR open", tone: "pr" });
+      break;
+    case "pr_failed":
+      parts.push({ text: "PR failed", tone: "blocked" });
       break;
     case "done":
       parts.push({ text: "merged", tone: "merged" });

@@ -54,8 +54,12 @@ export class WorktreeManager {
     }
     await mkdir(this.opts.worktreesDir, { recursive: true });
     try {
-      // `-b <branch>` creates the branch; defaults to HEAD as the start point.
-      await this.git.raw(["worktree", "add", "-b", branch, path]);
+      // Anchor new worktrees to `main` explicitly. Without a start point, git
+      // branches from the repo root's current HEAD — so when the orchestrator
+      // runs from a feature branch, the worktree diverges from that branch and
+      // `git diff main...` sweeps in every commit between `main` and the host
+      // branch, polluting the "Files touched" list.
+      await this.git.raw(["worktree", "add", "-b", branch, path, "main"]);
     } catch (e) {
       throw new WorktreeError(`git worktree add failed: ${(e as Error).message}`, {
         taskId,

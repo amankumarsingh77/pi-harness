@@ -12,11 +12,15 @@ export type StatusKind =
 const KIND_FOR_STATUS: Record<TaskStatus, StatusKind> = {
   backlog: "intake",
   brainstorming: "progress",
+  brainstorm_failed: "blocked",
   planning: "progress",
+  plan_failed: "blocked",
   executing: "progress",
+  code_failed: "blocked",
   verifying: "progress",
   verification_failed: "blocked",
   ready_to_ship: "shipping",
+  pr_failed: "blocked",
   done: "done",
   cancelled: "blocked",
 };

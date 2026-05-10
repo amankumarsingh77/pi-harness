@@ -35,6 +35,16 @@ export const orchestrator: Api = {
       throw e;
     }
   },
+  listRunFiles: async (runId) => {
+    // Soft-fail: an unreachable orchestrator or a run without a worktree
+    // means no files-touched data — render the empty state, don't crash
+    // the page.
+    try {
+      return await real.listRunFiles(runId);
+    } catch {
+      return { files: [] };
+    }
+  },
   getArtifact: async <T>(taskId: string, name: "brainstorm" | "plan" | "proof-report"): Promise<T> => {
     try {
       return await real.getArtifact<T>(taskId, name);
@@ -55,5 +65,9 @@ export const orchestrator: Api = {
       throw e;
     }
   },
-  submitBrainstormAnswer: (taskId, payload) => real.submitBrainstormAnswer(taskId, payload),
+  submitBrainstormAnswers: (taskId, payload) => real.submitBrainstormAnswers(taskId, payload),
+  submitBrainstormNudge: (taskId, payload) => real.submitBrainstormNudge(taskId, payload),
+  restartBrainstorm: (taskId, payload) => real.restartBrainstorm(taskId, payload),
+  getBrainstormDiff: (taskId, kind) => real.getBrainstormDiff(taskId, kind),
+  submitArtifactEdit: (taskId, payload) => real.submitArtifactEdit(taskId, payload),
 };

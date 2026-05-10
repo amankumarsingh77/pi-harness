@@ -4,23 +4,27 @@ import Link from "next/link";
 import type { Route } from "next";
 import { clsx } from "clsx";
 import type { TaskStatus } from "@pi-harness/shared";
+import type { BrainstormGate } from "@/lib/api";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import {
   approveBrainstormAction,
   requestBrainstormChangesAction,
 } from "@/app/tasks/[id]/actions";
 
-// Three-state gate.
+// Four-state gate.
 //
-//  - in_progress  brainstorming, agent still ticking. Both buttons disabled.
-//  - ready        brainstorming + awaitingApproval. Approve / Request changes enabled.
+//  - not_started  no brainstorm run exists yet. Both buttons disabled, copy
+//                 says the agent hasn't been dispatched.
+//  - in_progress  run dispatched, agent still ticking. Both buttons disabled.
+//  - ready        brainstorming + gate === "awaiting_user". Approve / Request
+//                 changes enabled.
 //  - past         task has moved past brainstorming. Render a "Brainstorm
 //                 approved" affirmation with a link to the next phase. This
 //                 only shows during the brief window where the user is still
 //                 looking at /brainstorm after approve fired but before the
 //                 redirect lands — without it, a stale render shows the
 //                 misleading "in progress" copy.
-type GateState = "in_progress" | "ready" | "past";
+type GateState = "not_started" | "in_progress" | "ready" | "past" | "failed";
 
 const PAST_BRAINSTORM: ReadonlySet<TaskStatus> = new Set([
   "planning",
@@ -33,12 +37,14 @@ const PAST_BRAINSTORM: ReadonlySet<TaskStatus> = new Set([
 
 export function ApprovalGate({
   taskId,
-  awaitingApproval,
+  gate,
   taskStatus,
+  runId,
 }: {
   taskId: string;
-  awaitingApproval: boolean;
+  gate: BrainstormGate;
   taskStatus: TaskStatus;
+  runId: string | null;
 }) {
   const [pending, start] = useTransition();
   const [showRevision, setShowRevision] = useState(false);
@@ -46,9 +52,13 @@ export function ApprovalGate({
 
   const state: GateState = PAST_BRAINSTORM.has(taskStatus)
     ? "past"
-    : awaitingApproval
-      ? "ready"
-      : "in_progress";
+    : taskStatus === "brainstorm_failed"
+      ? "failed"
+      : gate === "awaiting_user"
+        ? "ready"
+        : runId === null
+          ? "not_started"
+          : "in_progress";
   const ready = state === "ready";
 
   const submitApprove = () => {
@@ -65,6 +75,31 @@ export function ApprovalGate({
       setComment("");
     });
   };
+
+  if (state === "failed") {
+    return (
+      <section className="flex items-center gap-3.5 border-t border-st-blocked/40 bg-card px-6 py-3.5">
+        <span
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full"
+          style={{
+            background: "rgba(229,90,90,0.12)",
+            boxShadow: "inset 0 0 0 1px rgba(229,90,90,0.4)",
+            color: "var(--color-st-blocked)",
+          }}
+        >
+          <StatusIcon kind="blocked" size={14} />
+        </span>
+        <div className="min-w-0 flex-1 leading-[1.45]">
+          <div className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
+            Brainstorm failed
+          </div>
+          <div className="mt-0.5 font-mono text-[11.5px] text-fg-mute">
+            Restart from the header to start a fresh tick.
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   if (state === "past") {
     return (
@@ -121,6 +156,15 @@ export function ApprovalGate({
               </div>
               <div className="mt-0.5 font-mono text-[11.5px] text-fg-mute">
                 Both artifacts marked ready · approving advances to plan
+              </div>
+            </>
+          ) : state === "not_started" ? (
+            <>
+              <div className="text-[13px] font-semibold tracking-[-0.01em] text-fg-mute">
+                Brainstorm not started
+              </div>
+              <div className="mt-0.5 font-mono text-[11.5px] text-fg-subtle">
+                Dispatch from the task page to begin the brainstorm
               </div>
             </>
           ) : (

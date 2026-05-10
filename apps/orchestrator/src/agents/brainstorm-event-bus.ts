@@ -10,7 +10,11 @@ type BrainstormKind =
   | "brainstorm_question"
   | "brainstorm_answer"
   | "brainstorm_system"
-  | "brainstorm_revision_requested";
+  | "brainstorm_revision_requested"
+  | "brainstorm_user_nudge"
+  | "brainstorm_usage"
+  | "brainstorm_artifact_edited"
+  | "brainstorm_agent_reply";
 
 // Distributed Omit: applied per-variant of the union so discriminator-keyed
 // fields (questionId, systemKind, …) survive instead of collapsing to never.

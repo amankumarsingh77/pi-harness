@@ -46,7 +46,7 @@ function makeBus() {
     runId: "r-live",
     taskId: TASK,
   });
-  return bus;
+  return { bus, eventStore };
 }
 
 function jsonlPath(): string {
@@ -72,14 +72,16 @@ describe.runIf(live)("brainstorm against real Anthropic", () => {
     "completes one Q&A round end-to-end",
     async () => {
       const store = new ArtifactsStore({ runsDir: scratch });
-      const bus = makeBus();
+      const { bus, eventStore } = makeBus();
       const phaseModel = DEFAULT_PHASE_MODELS.brainstorm;
 
       const r1 = await runBrainstorm({
         taskId: TASK,
+        runId: "r-live",
         cwd: scratch,
         store,
         bus,
+        eventStore: eventStore as never,
         phaseModel,
         sessionPath: sessionPath(),
         createAgentSession,
@@ -122,9 +124,11 @@ describe.runIf(live)("brainstorm against real Anthropic", () => {
       for (let tick = 0; tick < MAX_TICKS; tick += 1) {
         const r = await runBrainstorm({
           taskId: TASK,
+          runId: "r-live",
           cwd: scratch,
           store,
           bus,
+          eventStore: eventStore as never,
           phaseModel,
           sessionPath: sessionPath(),
           createAgentSession,
@@ -181,6 +185,82 @@ describe.runIf(live)("brainstorm against real Anthropic", () => {
       // pi-session.jsonl was written and is non-empty.
       expect(existsSync(sessionPath())).toBe(true);
       expect(statSync(sessionPath()).size).toBeGreaterThan(0);
+    },
+    10 * 60_000,
+  );
+
+  // Live verification of Phase 1: a free-form user nudge dropped after the
+  // first question batch must end up in the next prompt and be republished
+  // as consumed:true. Does not exercise the full mark_ready flow — that's
+  // covered by the happy-path live test above.
+  it(
+    "user nudge: agent receives the nudge in its next prompt and consumes it",
+    async () => {
+      const store = new ArtifactsStore({ runsDir: scratch });
+      const { bus, eventStore } = makeBus();
+      const phaseModel = DEFAULT_PHASE_MODELS.brainstorm;
+
+      // Tick 1: ask questions.
+      const r1 = await runBrainstorm({
+        taskId: TASK,
+        runId: "r-live",
+        cwd: scratch,
+        store,
+        bus,
+        eventStore: eventStore as never,
+        phaseModel,
+        sessionPath: sessionPath(),
+        createAgentSession,
+        ticketTitle: TICKET_TITLE,
+        ticketDescription: TICKET_DESCRIPTION,
+      });
+      expect(r1.ok).toBe(true);
+
+      const events1 = await readEvents();
+      const questions = events1.filter((e) => e.kind === "brainstorm_question");
+      expect(questions.length).toBeGreaterThan(0);
+
+      // Drop a free-form nudge before answering anything. The next tick must
+      // fold it into the prompt and republish it as consumed.
+      const nudgeText =
+        "Constraint: keep the tagline under 60 characters and avoid marketing buzzwords.";
+      await appendFile(
+        jsonlPath(),
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          kind: "brainstorm_user_nudge",
+          nudgeId: "n-live-1",
+          comment: nudgeText,
+          consumed: false,
+        }) + "\n",
+      );
+
+      // Tick 2: should fire (nudge alone is enough to wake the agent).
+      const r2 = await runBrainstorm({
+        taskId: TASK,
+        runId: "r-live",
+        cwd: scratch,
+        store,
+        bus,
+        eventStore: eventStore as never,
+        phaseModel,
+        sessionPath: sessionPath(),
+        createAgentSession,
+        ticketTitle: TICKET_TITLE,
+        ticketDescription: TICKET_DESCRIPTION,
+      });
+      expect(r2.ok).toBe(true);
+      expect(r2.costUsd).toBeGreaterThan(0);
+
+      // Verify the consumed:true replacement event exists in JSONL.
+      const eventsAfter = await readEvents();
+      const consumed = eventsAfter.filter(
+        (e) =>
+          e.kind === "brainstorm_user_nudge" &&
+          e["nudgeId"] === "n-live-1" &&
+          e["consumed"] === true,
+      );
+      expect(consumed.length).toBe(1);
     },
     10 * 60_000,
   );

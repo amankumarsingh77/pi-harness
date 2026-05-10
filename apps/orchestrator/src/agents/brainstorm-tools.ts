@@ -1,4 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
+import { randomUUID } from "node:crypto";
 import type { Artifact, ArtifactKind } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
@@ -50,8 +51,14 @@ const SubmitQuestionsParams = Type.Object({
 
 const MarkReadyParams = Type.Object({});
 
+const ReplyToUserParams = Type.Object({
+  message: Type.String({ minLength: 1, maxLength: 2000 }),
+  inReplyToNudgeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+});
+
 export type SubmitQuestionsDetails = { awaiting: string[] };
 export type MarkReadyDetails = { ok: boolean; missing?: string };
+export type ReplyToUserDetails = { replyId: string };
 
 export function makeSubmitQuestionsTool(deps: {
   bus: BrainstormEventBus;
@@ -63,6 +70,11 @@ export function makeSubmitQuestionsTool(deps: {
       "Batch-submit one or more brainstorm questions for the user to answer. After calling this, halt your turn; the harness will resume you with the user's answers.",
     parameters: SubmitQuestionsParams,
     async execute(_id, params) {
+      // Every question in one tool call shares a batchId. The dashboard uses
+      // this to group the questions into one composite card with a single
+      // Submit button so the user can't answer 2/3 and have the agent
+      // mark ready off partial input.
+      const batchId = `b_${randomUUID()}`;
       for (const q of params.questions) {
         await deps.bus.publish({
           kind: "brainstorm_question",
@@ -70,6 +82,7 @@ export function makeSubmitQuestionsTool(deps: {
           prompt: q.prompt,
           options: q.options,
           sectionTarget: q.sectionTarget,
+          batchId,
           ...(q.multiSelect ? { multiSelect: true } : {}),
         });
       }
@@ -119,8 +132,13 @@ export function makeMarkReadyTool(deps: {
   bus: BrainstormEventBus;
   cwd: string;
   taskId: string;
+  // Returns the count of un-consumed brainstorm_user_nudge events in the
+  // current brainstorm.jsonl. mark_ready refuses while > 0 so the agent
+  // can't ship with unaddressed user input. Injected (rather than read
+  // directly) so tests can stub it without touching the filesystem.
+  countPendingNudges: () => Promise<number>;
 }): ToolLike<typeof MarkReadyParams, MarkReadyDetails> {
-  const { store, bus, cwd, taskId } = deps;
+  const { store, bus, cwd, taskId, countPendingNudges } = deps;
 
   function reject(missing: string): ToolResult<MarkReadyDetails> {
     return {
@@ -136,6 +154,16 @@ export function makeMarkReadyTool(deps: {
       "Signal that design.md and spec.md are complete. The harness validates required sections and either accepts (status flips to ready) or returns a structured error describing what to fix.",
     parameters: MarkReadyParams,
     async execute() {
+      // Refuse mark_ready while the user has un-addressed nudges. The agent
+      // must reply / write / submit_questions for each pending nudge before
+      // it can flip the artifacts to ready — otherwise the user's most recent
+      // input is silently dropped on the floor when the gate flips.
+      const pending = await countPendingNudges();
+      if (pending > 0) {
+        const msg = `${pending} pending user nudge(s) — address them via reply_to_user / write / submit_questions before mark_ready`;
+        return reject(msg);
+      }
+
       const kinds: ArtifactKind[] = ["design", "spec"];
       const loaded: Record<ArtifactKind, Artifact> = {} as Record<ArtifactKind, Artifact>;
 
@@ -187,6 +215,42 @@ export function makeMarkReadyTool(deps: {
         content: [{ type: "text", text: "ready" }],
         details: { ok: true },
         terminate: true,
+      };
+    },
+  };
+}
+
+// Free-form prose reply from the agent to the user. Unlike submit_questions
+// this is a side-effect tool — it does NOT terminate the turn. The agent is
+// expected to call reply_to_user as a courtesy when the user's nudge contains
+// a question or wants status, then continue the turn with the actual work
+// (write artifacts, submit_questions, mark_ready). The dashboard renders
+// these in the brainstorm transcript as chat bubbles.
+export function makeReplyToUserTool(deps: {
+  bus: BrainstormEventBus;
+}): ToolLike<typeof ReplyToUserParams, ReplyToUserDetails> {
+  return {
+    name: "reply_to_user",
+    label: "Reply to user",
+    description:
+      "Send a short prose reply to the user, surfaced in the brainstorm transcript. Use this when the user's nudge asks a question or wants status. Does NOT end your turn — keep working after the reply.",
+    parameters: ReplyToUserParams,
+    async execute(_id, params) {
+      const replyId = `r_${randomUUID()}`;
+      await deps.bus.publish({
+        kind: "brainstorm_agent_reply",
+        replyId,
+        message: params.message,
+        ...(params.inReplyToNudgeId !== undefined
+          ? { inReplyToNudgeId: params.inReplyToNudgeId }
+          : {}),
+      });
+      return {
+        content: [{ type: "text", text: "replied" }],
+        details: { replyId },
+        // Intentionally not terminating — replying is a side-effect, not a
+        // halt. The agent should follow up with submit_questions / write /
+        // mark_ready.
       };
     },
   };

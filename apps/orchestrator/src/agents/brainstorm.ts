@@ -10,10 +10,13 @@ import type {
 import { AuthError } from "@pi-harness/pi-bridge";
 import type { PhaseModelConfig } from "@pi-harness/shared";
 import { readJsonl } from "../adapters/jsonl-writer.js";
+import type { EventStore } from "../adapters/event-store.js";
+import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import {
   makeMarkReadyTool,
+  makeReplyToUserTool,
   makeSubmitQuestionsTool,
 } from "./brainstorm-tools.js";
 
@@ -36,16 +39,18 @@ export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentS
 
 export type BrainstormOpts = {
   taskId: string;
+  runId: string;
   cwd: string;
   store: ArtifactsStore;
   bus: BrainstormEventBus;
+  eventStore: EventStore;
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
   ticketTitle?: string;
   ticketDescription?: string;
+  signal?: AbortSignal;
 };
-
 export type BrainstormResult = {
   ok: boolean;
   // True only when both artifacts have status: ready (mark_ready succeeded).
@@ -54,15 +59,23 @@ export type BrainstormResult = {
   inputTokens: number;
   outputTokens: number;
   error?: string;
+  // Set when the tick aborted because of a user_cancel transition. The
+  // dispatcher uses this to skip the failed-phase path: the route handler
+  // already settled the run and emitted phase_ended cancelled.
+  cancelled?: boolean;
 };
 
 type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
 
+// A pending nudge: latest event for a given nudgeId where consumed:false.
+type PendingNudge = { nudgeId: string; comment: string };
+
 type Decision =
   | { kind: "noop" }
-  | { kind: "initial" }
-  | { kind: "answers"; prompt: string }
-  | { kind: "revision"; prompt: string };
+  | { kind: "initial"; nudges: PendingNudge[] }
+  | { kind: "answers"; prompt: string; nudges: PendingNudge[] }
+  | { kind: "revision"; prompt: string; nudges: PendingNudge[] }
+  | { kind: "nudge_only"; nudges: PendingNudge[] };
 
 type HaltReason = "questions" | "ready" | "exhausted";
 
@@ -85,7 +98,19 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
     return zeroUsage({ ok: true, ready: false });
   }
 
-  const promptText =
+  // Mark every pending nudge as consumed *before* the prompt fires. This is
+  // the durable record that the agent has now seen them — even if the prompt
+  // fails or is aborted later, the next tick won't re-fold the same comments.
+  for (const n of decision.nudges) {
+    await opts.bus.publish({
+      kind: "brainstorm_user_nudge",
+      nudgeId: n.nudgeId,
+      comment: n.comment,
+      consumed: true,
+    });
+  }
+
+  const basePrompt =
     decision.kind === "initial"
       ? buildInitialPrompt({
           taskId: opts.taskId,
@@ -95,7 +120,13 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
             ? { description: opts.ticketDescription }
             : {}),
         })
-      : decision.prompt;
+      : decision.kind === "nudge_only"
+        ? "Continue."
+        : decision.prompt;
+
+  const promptText = decision.nudges.length > 0
+    ? `${buildNudgeBlock(decision.nudges)}\n\n${basePrompt}`
+    : basePrompt;
 
   return runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
 }
@@ -115,9 +146,56 @@ async function runTurn(
     bus: opts.bus,
     cwd: opts.cwd,
     taskId: opts.taskId,
+    countPendingNudges: async () => {
+      const evts = await readJsonl<JsonlEvent>(
+        join(opts.cwd, ".harness", opts.taskId, "brainstorm.jsonl"),
+      );
+      return pendingNudges(evts).length;
+    },
   });
+  const replyToUserTool = makeReplyToUserTool({ bus: opts.bus });
+
+  const forwardToEventStore = (e: PiBridgeEvent): void => {
+    // Forward streaming pi-bridge events (assistant text, generic tool calls,
+    // logs) to EventStore so the dashboard's live Agent Log surfaces them.
+    // Skip the two harness-internal control tools — brainstorm-tools already
+    // publishes richer brainstorm_* events for those.
+    if (e.kind === "turn_end" || e.kind === "error") return;
+    if (
+      (e.kind === "tool_call" || e.kind === "tool_result") &&
+      (e.tool === "submit_questions" ||
+        e.tool === "mark_ready" ||
+        e.tool === "reply_to_user")
+    ) {
+      return;
+    }
+    const base = { runId: opts.runId, taskId: opts.taskId };
+    let event;
+    if (e.kind === "message_delta") {
+      event = mkEvent({ ...base, kind: "message_delta", text: e.text });
+    } else if (e.kind === "tool_call") {
+      event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input });
+    } else if (e.kind === "tool_result") {
+      event = mkEvent({
+        ...base,
+        kind: "tool_result",
+        tool: e.tool,
+        ok: e.ok,
+        ...(e.output !== undefined ? { output: e.output } : {}),
+      });
+    } else if (e.kind === "log") {
+      event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text });
+    } else {
+      return;
+    }
+    // Fire-and-forget: pi-bridge's onEvent is synchronous. Errors surface
+    // through the EventStore's underlying logger; we don't want to block
+    // streaming on a transient db hiccup.
+    void opts.eventStore.append(event).catch(() => {});
+  };
 
   const handleEvent = (e: PiBridgeEvent): void => {
+    forwardToEventStore(e);
     if (e.kind === "tool_call" && e.tool === "submit_questions") {
       haltReason = "questions";
       return;
@@ -157,7 +235,7 @@ async function runTurn(
       maxTurns: opts.phaseModel.maxTurns,
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
-      customTools: [submitQuestionsTool, markReadyTool],
+      customTools: [submitQuestionsTool, markReadyTool, replyToUserTool],
       onEvent: handleEvent,
     });
   } catch (err) {
@@ -197,12 +275,29 @@ async function runTurn(
     });
   }
 
+  // Cooperative cancellation: when the run-loop signals abort (user_cancel
+  // landed), tear the SDK turn down at the session level so prompt() rejects
+  // immediately rather than waiting on the LLM stream to finish.
+  const signal = opts.signal;
+  const onAbort = (): void => {
+    void session.abort().catch(() => {});
+  };
+  if (signal?.aborted) {
+    await session.close().catch(() => {});
+    return zeroUsage({ ok: false, ready: false, cancelled: true });
+  }
+  signal?.addEventListener("abort", onAbort, { once: true });
+
   let usage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
   try {
     usage = await session.prompt(promptText);
   } catch (err) {
+    signal?.removeEventListener("abort", onAbort);
     await session.close().catch(() => {});
     const message = (err as Error).message;
+    if (signal?.aborted || message === "aborted") {
+      return zeroUsage({ ok: false, ready: false, cancelled: true });
+    }
     if (message === "maxTurns exceeded") {
       await opts.bus.publish({
         kind: "brainstorm_system",
@@ -223,7 +318,43 @@ async function runTurn(
     return zeroUsage({ ok: false, ready: false, error: message });
   }
 
+  signal?.removeEventListener("abort", onAbort);
   await session.close();
+
+  // Emit per-tick usage. Cumulatives survive orchestrator restarts because we
+  // re-read JSONL inside runBrainstorm and seed the totals from the latest
+  // brainstorm_usage event. The bus dual-writes to JSONL + EventStore so the
+  // cost strip on the dashboard updates live.
+  if (usage.inputTokens > 0 || usage.outputTokens > 0 || usage.costUsd > 0) {
+    const priorEvents = await readJsonl<JsonlEvent>(
+      join(opts.cwd, ".harness", opts.taskId, "brainstorm.jsonl"),
+    );
+    let cumIn = 0;
+    let cumOut = 0;
+    let cumCost = 0;
+    let lastTickIndex = -1;
+    for (const e of priorEvents) {
+      if (e.kind !== "brainstorm_usage") continue;
+      const ci = numField(e, "cumulativeInputTokens");
+      const co = numField(e, "cumulativeOutputTokens");
+      const cc = numField(e, "cumulativeCostUsd");
+      const ti = numField(e, "tickIndex");
+      if (ci !== null) cumIn = ci;
+      if (co !== null) cumOut = co;
+      if (cc !== null) cumCost = cc;
+      if (ti !== null && ti > lastTickIndex) lastTickIndex = ti;
+    }
+    await opts.bus.publish({
+      kind: "brainstorm_usage",
+      tickIndex: lastTickIndex + 1,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd: usage.costUsd,
+      cumulativeInputTokens: cumIn + usage.inputTokens,
+      cumulativeOutputTokens: cumOut + usage.outputTokens,
+      cumulativeCostUsd: cumCost + usage.costUsd,
+    });
+  }
 
   const [design, spec] = await Promise.all([
     opts.store.readArtifact(opts.cwd, opts.taskId, "design"),
@@ -250,7 +381,9 @@ async function runTurn(
 }
 
 function decide(events: JsonlEvent[]): Decision {
-  if (events.length === 0) return { kind: "initial" };
+  const nudges = pendingNudges(events);
+
+  if (events.length === 0) return { kind: "initial", nudges };
 
   const lastAgentIdx = lastIndexWhere(
     events,
@@ -268,6 +401,7 @@ function decide(events: JsonlEvent[]): Decision {
     return {
       kind: "revision",
       prompt: buildRevisionPrompt(typeof last["comment"] === "string" ? (last["comment"] as string) : ""),
+      nudges,
     };
   }
 
@@ -276,13 +410,44 @@ function decide(events: JsonlEvent[]): Decision {
     .filter(({ e, i }) => e.kind === "brainstorm_answer" && i > lastAgentIdx)
     .map(({ e }) => e);
   if (newAnswers.length > 0) {
-    return { kind: "answers", prompt: buildAnswersDeltaPrompt(newAnswers) };
+    return { kind: "answers", prompt: buildAnswersDeltaPrompt(newAnswers), nudges };
   }
 
   // No initial event implies first dispatch; otherwise nothing new to feed
-  // the agent — let the run-loop sleep until the user produces an event.
-  if (lastAgentIdx === -1) return { kind: "initial" };
+  // the agent — unless the user dropped a nudge, in which case the nudge
+  // alone is enough to wake the agent for one turn.
+  if (lastAgentIdx === -1) return { kind: "initial", nudges };
+  if (nudges.length > 0) return { kind: "nudge_only", nudges };
   return { kind: "noop" };
+}
+
+// Walk the JSONL keeping the LAST event per nudgeId. A consumed:true event
+// supersedes any earlier consumed:false for the same id, so it drops out
+// of the pending list. Order in the returned array follows first-seen order
+// of each nudgeId so multiple nudges fold in the order the user filed them.
+function pendingNudges(events: JsonlEvent[]): PendingNudge[] {
+  const seenOrder: string[] = [];
+  const latest = new Map<string, JsonlEvent>();
+  for (const e of events) {
+    if (e.kind !== "brainstorm_user_nudge") continue;
+    const id = typeof e["nudgeId"] === "string" ? (e["nudgeId"] as string) : null;
+    if (!id) continue;
+    if (!latest.has(id)) seenOrder.push(id);
+    latest.set(id, e);
+  }
+  const out: PendingNudge[] = [];
+  for (const id of seenOrder) {
+    const e = latest.get(id)!;
+    if (e["consumed"] === true) continue;
+    const comment = typeof e["comment"] === "string" ? (e["comment"] as string) : "";
+    out.push({ nudgeId: id, comment });
+  }
+  return out;
+}
+
+function buildNudgeBlock(nudges: PendingNudge[]): string {
+  const lines = nudges.map((n) => `- [nudgeId: ${n.nudgeId}] ${n.comment}`).join("\n");
+  return `Recent user input (consider before asking your next question):\n${lines}\n\nWhen you call reply_to_user, set inReplyToNudgeId to the bracketed id of the nudge you are responding to.`;
 }
 
 function buildInitialPrompt(opts: {
@@ -337,6 +502,11 @@ function hasReadyEvent(events: JsonlEvent[]): boolean {
       e["systemKind"] === "status_changed" &&
       ((e["data"] as { status?: string } | undefined)?.status === "ready"),
   );
+}
+
+function numField(e: JsonlEvent, key: string): number | null {
+  const v = e[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 function lastIndexWhere<T>(arr: T[], pred: (t: T) => boolean): number {

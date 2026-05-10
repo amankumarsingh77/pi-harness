@@ -15,6 +15,7 @@ vi.mock("../src/runner/phase-prompts.js", () => ({
 
 import { runLoop } from "../src/runner/run-loop.js";
 import { runPhase } from "../src/runner/phase-prompts.js";
+import { CancellationRegistry } from "../src/runner/cancellation.js";
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
 
@@ -83,15 +84,16 @@ describe("runLoop", () => {
       phaseDeps: phaseDepsBase,
       worktrees,
       retryCap: 2,
+      cancellation: new CancellationRegistry(),
     });
 
-    // Mid-Q&A: stays in brainstorming, no gate yet.
+    // Mid-Q&A: stays in brainstorming. The gate is derived from filesystem
+    // facts on read; we only assert the persisted status here.
     expect(after.status).toBe("brainstorming");
-    expect(after.awaitingApproval).toBe(false);
     expect(runPhase).toHaveBeenCalledTimes(1);
   });
 
-  it("brainstorm phase succeeded with both artifacts ready → awaitingApproval", async () => {
+  it("brainstorm phase succeeded with both artifacts ready → gate awaits user", async () => {
     const t = await runs.createTask({ title: "ready" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
 
@@ -119,10 +121,35 @@ describe("runLoop", () => {
       phaseDeps: readyDeps,
       worktrees,
       retryCap: 2,
+      cancellation: new CancellationRegistry(),
     });
 
     expect(after.status).toBe("brainstorming");
-    expect(after.awaitingApproval).toBe(true);
+    // The run-loop only persists status. The gate is computed on read by
+    // deriveBrainstormGate; the run-loop's responsibility is to *not advance*
+    // when the gate would say awaiting_user. Re-running the loop here would
+    // be a no-op because the gate check at entry returns early.
+    const second = await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: readyDeps,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+    expect(second.status).toBe("brainstorming");
+    // runPhase was only called once — the second pass hit the gate.
+    expect(runPhase).toHaveBeenCalledTimes(1);
+
+    // Single Run row, still `running` with endedAt unset. The phase ends only
+    // when the user approves (handled in routes/tasks.ts) — keeping the run
+    // open across the awaiting-user pause is what lets the dashboard's SSE
+    // subscription survive a request-changes round-trip.
+    const list = await runs.listRuns(t.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.status).toBe("running");
+    expect(list[0]!.endedAt).toBeNull();
   });
 
   it("creates worktree + branch + scaffolding commit on brainstorm entry", async () => {
@@ -143,6 +170,7 @@ describe("runLoop", () => {
       phaseDeps: phaseDepsBase,
       worktrees,
       retryCap: 2,
+      cancellation: new CancellationRegistry(),
     });
 
     // Task picked up branch + worktree path
@@ -189,6 +217,7 @@ describe("runLoop", () => {
       phaseDeps: phaseDepsBase,
       worktrees,
       retryCap: 2,
+      cancellation: new CancellationRegistry(),
     });
 
     const passedDeps = vi.mocked(runPhase).mock.calls[0]![2]!;
@@ -216,6 +245,7 @@ describe("runLoop", () => {
       phaseDeps: phaseDepsBase,
       worktrees,
       retryCap: 2,
+      cancellation: new CancellationRegistry(),
     });
 
     // Reset task back to brainstorming to simulate a re-dispatch
@@ -230,6 +260,7 @@ describe("runLoop", () => {
         phaseDeps: phaseDepsBase,
         worktrees,
         retryCap: 2,
+        cancellation: new CancellationRegistry(),
       }),
     ).resolves.toBeDefined();
 
@@ -256,6 +287,7 @@ describe("runLoop", () => {
       phaseDeps: phaseDepsBase,
       worktrees,
       retryCap: 2,
+      cancellation: new CancellationRegistry(),
     });
 
     expect(after.status).toBe("executing");

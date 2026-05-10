@@ -12,7 +12,6 @@ const baseTask = (overrides: Partial<Task>): Task => ({
   worktreePath: null,
   branchName: null,
   retryCount: 0,
-  awaitingApproval: false,
   phaseModels: {},
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -77,5 +76,48 @@ describe("KanbanBoard", () => {
     render(<KanbanBoard tasks={[]} counts={{}} />);
     // 8 columns, all empty
     expect(screen.getAllByText("empty")).toHaveLength(8);
+  });
+
+  it("brainstorm_failed task buckets into Brainstorming column with blocked meta and red border", () => {
+    const tasks = [
+      baseTask({
+        id: "3",
+        title: "Brainstorm crashed mid-tick",
+        status: "brainstorm_failed",
+        workflow: "backend-feature",
+      }),
+    ];
+    render(
+      <KanbanBoard
+        tasks={tasks}
+        counts={{ brainstorming: 0, brainstorm_failed: 1 }}
+      />,
+    );
+
+    // Card visible — and the Brainstorming column it landed in shows count 1
+    // (the brainstorm_failed count was folded into brainstorming).
+    expect(screen.getByText("Brainstorm crashed mid-tick")).toBeInTheDocument();
+    const brainstormHeader = screen.getByText("Brainstorming").closest("header")!;
+    expect(brainstormHeader).toHaveTextContent("1");
+
+    // Card has the "brainstorm failed" meta and a red border style.
+    expect(screen.getByText("brainstorm failed")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /brainstorm crashed mid-tick/i });
+    expect(link.className).toMatch(/border-st-blocked/);
+  });
+
+  it("plan_failed / code_failed / pr_failed bucket under their parent phase columns", () => {
+    const tasks = [
+      baseTask({ id: "p", title: "plan crashed", status: "plan_failed" }),
+      baseTask({ id: "c", title: "code crashed", status: "code_failed" }),
+      baseTask({ id: "r", title: "pr crashed", status: "pr_failed" }),
+    ];
+    render(<KanbanBoard tasks={tasks} counts={{}} />);
+    expect(screen.getByText("plan crashed")).toBeInTheDocument();
+    expect(screen.getByText("code crashed")).toBeInTheDocument();
+    expect(screen.getByText("pr crashed")).toBeInTheDocument();
+    expect(screen.getByText("plan failed")).toBeInTheDocument();
+    expect(screen.getByText("code failed")).toBeInTheDocument();
+    expect(screen.getByText("PR failed")).toBeInTheDocument();
   });
 });

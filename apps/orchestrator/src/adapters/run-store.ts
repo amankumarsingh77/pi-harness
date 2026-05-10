@@ -78,6 +78,13 @@ export class RunStore {
     return rows.length > 0;
   }
 
+  async getRun(id: string): Promise<Run> {
+    if (!UUID_RE.test(id)) throw new NotFoundError("run", id);
+    const [row] = await this.db.select().from(runs).where(eq(runs.id, id));
+    if (!row) throw new NotFoundError("run", id);
+    return row as Run;
+  }
+
   async listRuns(taskId: string): Promise<Run[]> {
     const rows = await this.db
       .select()
@@ -105,6 +112,21 @@ export class RunStore {
       .orderBy(desc(runs.startedAt))
       .limit(1);
     return (rows[0] as Run | undefined) ?? null;
+  }
+
+  // All non-terminal runs for a task across all phases. Used by user_cancel
+  // to settle every active run in one pass.
+  async findActiveRunsForTask(taskId: string): Promise<Run[]> {
+    const rows = await this.db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          eq(runs.taskId, taskId),
+          inArray(runs.status, ["pending", "running"]),
+        ),
+      );
+    return rows as Run[];
   }
 
   async updateRun(id: string, patch: Partial<Run>): Promise<Run> {

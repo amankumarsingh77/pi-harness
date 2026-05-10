@@ -41,6 +41,10 @@ export type PhaseInput = {
   // threaded down so the agent sees the merged per-phase model config.
   phaseModel?: PhaseModelConfig;
   sessionPath?: string;
+  // Cooperative cancellation. Aborted when user_cancel lands while the phase
+  // is mid-flight; long-running drivers (brainstorm) tear down their session
+  // immediately rather than waiting on the LLM stream to finish.
+  signal?: AbortSignal;
 };
 
 export type PhaseOutput = {
@@ -52,6 +56,10 @@ export type PhaseOutput = {
   // Phase-specific extras the run-loop forwards into Task fields.
   branch?: string;
   prUrl?: string;
+  // True when the phase ended because the user cancelled the task. The
+  // run-loop uses this to skip the failed-phase event/transition path: the
+  // route handler already settled the run and emitted phase_ended cancelled.
+  cancelled?: boolean;
 };
 
 const NOT_IMPLEMENTED = (phase: Phase): PhaseOutput => ({
@@ -90,9 +98,11 @@ export async function runPhase(
       });
       const r = await runBrainstorm({
         taskId: input.taskId,
+        runId: input.runId,
         cwd: deps.cwd,
         store: deps.store,
         bus,
+        eventStore: deps.eventStore,
         phaseModel: input.phaseModel,
         sessionPath: input.sessionPath,
         createAgentSession: deps.createAgentSession,
@@ -100,6 +110,7 @@ export async function runPhase(
         ...(input.ticketDescription !== undefined
           ? { ticketDescription: input.ticketDescription }
           : {}),
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
       });
       return {
         ok: r.ok,
@@ -107,6 +118,7 @@ export async function runPhase(
         inputTokens: r.inputTokens,
         outputTokens: r.outputTokens,
         ...(r.error !== undefined ? { error: r.error } : {}),
+        ...(r.cancelled ? { cancelled: true } : {}),
       };
     }
     case "plan":

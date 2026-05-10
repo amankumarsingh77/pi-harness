@@ -12,6 +12,22 @@ const COLUMN_ORDER: TaskStatus[] = [
   "done",
 ];
 
+// Phase-scoped failure sub-statuses are *modes*, not their own columns. Render
+// them under the original phase column with a red-border card (see card.tsx),
+// so a brainstorm that errored stays visible on the brainstorm surface for
+// triage. verification_failed remains its own column — it's a distinct triage
+// state with retry-cap semantics.
+const BUCKET: Partial<Record<TaskStatus, TaskStatus>> = {
+  brainstorm_failed: "brainstorming",
+  plan_failed: "planning",
+  code_failed: "executing",
+  pr_failed: "ready_to_ship",
+};
+
+function bucketStatus(status: TaskStatus): TaskStatus {
+  return BUCKET[status] ?? status;
+}
+
 export function KanbanBoard({
   tasks,
   counts,
@@ -20,7 +36,14 @@ export function KanbanBoard({
   counts: Partial<Record<TaskStatus, number>>;
 }) {
   const byStatus: Record<string, Task[]> = {};
-  for (const t of tasks) (byStatus[t.status] ??= []).push(t);
+  for (const t of tasks) (byStatus[bucketStatus(t.status)] ??= []).push(t);
+  // Fold counts the same way the tasks are bucketed so the column header
+  // count matches the rendered card count.
+  const bucketedCounts: Partial<Record<TaskStatus, number>> = {};
+  for (const [status, n] of Object.entries(counts) as [TaskStatus, number][]) {
+    const target = bucketStatus(status);
+    bucketedCounts[target] = (bucketedCounts[target] ?? 0) + n;
+  }
 
   return (
     <main className="relative">
@@ -36,7 +59,7 @@ export function KanbanBoard({
               key={status}
               status={status}
               tasks={byStatus[status] ?? []}
-              count={counts[status] ?? 0}
+              count={bucketedCounts[status] ?? 0}
             />
           ))}
         </div>

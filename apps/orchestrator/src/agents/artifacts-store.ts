@@ -67,6 +67,162 @@ export class ArtifactsStore {
     await rename(tmpPath, finalPath);
   }
 
+  // Read an artifact's contents as it existed at a specific git ref (commit
+  // SHA, branch, or tag). Returns null when the file didn't exist at that
+  // ref or the ref is unknown. Used by the diff endpoint to reconstruct the
+  // pre-revision baseline so the dashboard can highlight what changed.
+  async getArtifactAt(
+    cwd: string,
+    taskId: string,
+    kind: ArtifactKind,
+    gitRef: string,
+  ): Promise<Artifact | null> {
+    const relPath = `.harness/${taskId}/${kind}.md`;
+    const git = simpleGit(cwd);
+    try {
+      const raw = await git.show([`${gitRef}:${relPath}`]);
+      if (!raw) return null;
+      return parseArtifact(raw);
+    } catch {
+      // simple-git rejects with a stderr-bearing GitError when the ref or
+      // file is missing. Either case is "no baseline available" — treat as
+      // null and let the caller decide how to render the empty state.
+      return null;
+    }
+  }
+
+  // Find the commit hash of the diff baseline for an artifact. The baseline
+  // is the artifact's commit at the most recent brainstorm_revision_requested
+  // timestamp (so the diff shows "what the agent changed since the user
+  // last asked for revisions"). Falls back to the parent of the first
+  // "mark <kind> as ready" commit when no revisions have been filed yet, so
+  // the user always sees the agent's authored content vs the empty scaffold.
+  // Returns null when there's no usable baseline (artifact never marked
+  // ready and no revisions filed).
+  async findDiffBaseline(
+    cwd: string,
+    taskId: string,
+    kind: ArtifactKind,
+    revisionTs: string | null,
+  ): Promise<string | null> {
+    const relPath = `.harness/${taskId}/${kind}.md`;
+    const git = simpleGit(cwd);
+
+    if (revisionTs) {
+      // The newest commit touching this file at-or-before the revision
+      // timestamp is the version the user was looking at when they asked
+      // for changes. simple-git's log options object inconsistently quotes
+      // timestamps; using raw avoids that fragility.
+      try {
+        const out = await git.raw([
+          "log",
+          `--before=${revisionTs}`,
+          "-n",
+          "1",
+          "--format=%H",
+          "--",
+          relPath,
+        ]);
+        const hash = out.trim();
+        return hash.length > 0 ? hash : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // No revisions yet. Preferred anchor: the parent of the first "mark
+    // <kind> as ready" commit so the diff shows agent-authored vs scaffold.
+    // Fallback: the first (chronologically earliest) commit touching the
+    // artifact, used as the baseline directly (= scaffold body) so the
+    // diff surfaces the agent's still-uncommitted writes against the
+    // initial draft. This keeps the diff useful in the common case where
+    // mark_ready writes the artifact but doesn't commit.
+    let log;
+    try {
+      log = await git.log({ file: relPath });
+    } catch {
+      return null;
+    }
+    const all = [...log.all].reverse(); // chronological order
+    const ready = all.find((c) => c.message.includes(`mark ${kind} as ready`));
+    if (ready) {
+      try {
+        const parent = await git.raw(["rev-parse", `${ready.hash}^`]);
+        const hash = parent.trim();
+        return hash.length > 0 ? hash : ready.hash;
+      } catch {
+        return ready.hash;
+      }
+    }
+    const first = all[0];
+    return first ? first.hash : null;
+  }
+
+  // Move the current brainstorm run's per-run files into runs/<runId>/ on
+  // the same task branch, then commit the move. Used by the brainstorm
+  // restart endpoint: archives design.md, spec.md, brainstorm.jsonl, and
+  // pi-session.jsonl so the new run starts from a clean slate but the
+  // archived contents stay reachable via git history.
+  //
+  // Files that don't exist are silently skipped — partial-state runs still
+  // archive cleanly (e.g. a restart before the agent wrote any artifacts).
+  async archiveCurrentRun(cwd: string, taskId: string, runId: string): Promise<void> {
+    const baseDir = this.artifactDir(cwd, taskId);
+    const archiveDir = join(baseDir, "runs", runId);
+    await mkdir(archiveDir, { recursive: true });
+    const candidates = ["design.md", "spec.md", "brainstorm.jsonl", "pi-session.jsonl"];
+    const moved: string[] = [];
+    for (const name of candidates) {
+      const src = join(baseDir, name);
+      if (!existsSync(src)) continue;
+      const dst = join(archiveDir, name);
+      await rename(src, dst);
+      moved.push(join(".harness", taskId, "runs", runId, name));
+    }
+    if (moved.length === 0) return;
+    const git = simpleGit(cwd);
+    // .harness is gitignored — same -f trick as setArtifactStatus.
+    await git.raw([
+      "add",
+      "-f",
+      "--",
+      ...moved,
+      // Stage deletions of the originals too so the commit captures the move.
+      join(".harness", taskId),
+    ]);
+    await git.commit(`chore(${taskId}): archive run ${runId}`);
+  }
+
+  // Apply a user-authored edit to an artifact. Body is replaced verbatim;
+  // frontmatter is preserved (only `status`, `last_updated`, and
+  // `last_updated_by` change). Commits on the worktree's branch with a
+  // human-attribution message so the diff endpoint can locate this revision
+  // explicitly. Returns the new artifact + commit SHA so the caller can
+  // surface it in the brainstorm_artifact_edited event.
+  async applyHumanEdit(
+    cwd: string,
+    taskId: string,
+    kind: ArtifactKind,
+    body: string,
+  ): Promise<{ artifact: Artifact; commitSha: string }> {
+    const cur = await this.readArtifact(cwd, taskId, kind);
+    if (!cur) throw new Error(`artifact ${kind}.md not found for ${taskId}`);
+    const next: Artifact = {
+      fm: {
+        ...cur.fm,
+        status: "human_edited",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "human",
+      },
+      body,
+    };
+    await this.writeArtifact(cwd, taskId, next);
+    const git = simpleGit(cwd);
+    await git.raw(["add", "-f", join(".harness", taskId, `${kind}.md`)]);
+    const commit = await git.commit(`human(${taskId}): edit ${kind}.md`);
+    return { artifact: next, commitSha: commit.commit };
+  }
+
   // Helper used by the approval gate: read the artifact, mutate its status,
   // bump last_updated, write atomically, then commit on the worktree's branch.
   async setArtifactStatus(
@@ -89,7 +245,10 @@ export class ArtifactsStore {
     };
     await this.writeArtifact(cwd, taskId, next);
     const git = simpleGit(cwd);
-    await git.add([join(".harness", taskId, `${kind}.md`)]);
+    // .harness/ is gitignored at the repo root; force-add so the commit
+    // captures the artifact-status flip just like the scaffolding commit
+    // does (see scaffold-brainstorm.ts).
+    await git.raw(["add", "-f", join(".harness", taskId, `${kind}.md`)]);
     await git.commit(`chore(${taskId}): mark ${kind} as ${status}`);
     return next;
   }

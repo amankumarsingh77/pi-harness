@@ -7,9 +7,11 @@ import { RunStore } from "./adapters/run-store.js";
 import { EventStore } from "./adapters/event-store.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
+import { deriveBrainstormGate } from "./agents/brainstorm-gate.js";
 import { createPinoLogger, fromPino } from "./domain/logger.js";
 import { reconcileWorktrees } from "./runner/janitor.js";
 import { TaskScheduler } from "./runner/scheduler.js";
+import { CancellationRegistry } from "./runner/cancellation.js";
 import type { PhaseDeps } from "./runner/phase-prompts.js";
 import { buildServer } from "./http/server.js";
 
@@ -69,12 +71,14 @@ async function main(): Promise<void> {
     },
   };
 
+  const cancellation = new CancellationRegistry();
   const scheduler = new TaskScheduler({
     runs,
     events,
     phaseDeps,
     worktrees,
     retryCap: config.retryCap,
+    cancellation,
     logger: log.child({ component: "scheduler" }),
   });
 
@@ -82,7 +86,10 @@ async function main(): Promise<void> {
   // where it left off after a restart. The run-loop is idempotent on JSONL
   // state (cursor recomputes from events).
   for (const t of activeTasks) {
-    if (t.status === "brainstorming" && t.awaitingApproval) continue; // gated on user
+    if (t.status === "brainstorming" && t.worktreePath) {
+      const gate = await deriveBrainstormGate(t.worktreePath, t.id, artifacts);
+      if (gate === "awaiting_user") continue; // gated on user
+    }
     scheduler.enqueue(t.id);
   }
   log.info(
@@ -95,6 +102,7 @@ async function main(): Promise<void> {
     events,
     runsDir: config.runsDir,
     scheduler,
+    cancellation,
     pinoLogger: pinoRoot,
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });

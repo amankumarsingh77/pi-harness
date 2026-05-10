@@ -1,7 +1,13 @@
 import type { Task, Run, AgentEvent, Workflow, Artifact } from "@pi-harness/shared";
 
+// "awaiting_user" exactly when the artifacts on disk are status: ready AND
+// no brainstorm_revision_requested event has been filed since the last
+// status_changed → ready event. Server-derived per request — there is no
+// stored boolean for the gate. Mirrors the orchestrator's BrainstormGate.
+export type BrainstormGate = "running" | "awaiting_user";
+
 export type BrainstormBundle = {
-  awaitingApproval: boolean;
+  gate: BrainstormGate;
   status: Task["status"];
   design: Artifact | null;
   spec: Artifact | null;
@@ -20,6 +26,7 @@ export type BrainstormJsonlEvent =
       options: { id: string; label: string; recommended: boolean; evidence: string[]; description?: string }[];
       sectionTarget: { artifact: "design" | "spec"; section: string };
       multiSelect?: boolean;
+      batchId: string;
     }
   | {
       kind: "brainstorm_answer";
@@ -40,7 +47,39 @@ export type BrainstormJsonlEvent =
         | "session_reset";
       data?: Record<string, unknown>;
     }
-  | { kind: "brainstorm_revision_requested"; ts: string; comment: string };
+  | { kind: "brainstorm_revision_requested"; ts: string; comment: string }
+  | {
+      kind: "brainstorm_user_nudge";
+      ts: string;
+      nudgeId: string;
+      comment: string;
+      consumed: boolean;
+    }
+  | {
+      kind: "brainstorm_usage";
+      ts: string;
+      tickIndex: number;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
+      cumulativeInputTokens: number;
+      cumulativeOutputTokens: number;
+      cumulativeCostUsd: number;
+    }
+  | {
+      kind: "brainstorm_artifact_edited";
+      ts: string;
+      artifact: "design" | "spec";
+      commitSha: string;
+      sizeDelta: number;
+    }
+  | {
+      kind: "brainstorm_agent_reply";
+      ts: string;
+      replyId: string;
+      message: string;
+      inReplyToNudgeId?: string;
+    };
 
 export class ApiError extends Error {
   readonly status: number;
@@ -54,9 +93,17 @@ export class ApiError extends Error {
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
+export type RunFile = {
+  path: string;
+  added: number;
+  removed: number;
+  state: "live" | "settled";
+};
+
 export type Api = {
   listTasks: () => Promise<{ tasks: Task[]; counts: Record<string, number> }>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
+  listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
   createTask: (input: { title: string; description?: string }) => Promise<Task>;
   transitionTask: (
     id: string,
@@ -71,10 +118,39 @@ export type Api = {
   listEvents: (runId: string) => Promise<{ events: AgentEvent[] }>;
   getArtifact: <T>(taskId: string, name: "brainstorm" | "plan" | "proof-report") => Promise<T>;
   getBrainstormBundle: (taskId: string) => Promise<BrainstormBundle>;
-  submitBrainstormAnswer: (
+  submitBrainstormAnswers: (
     taskId: string,
-    payload: { questionId: string; optionId?: string; optionIds?: string[]; freeText?: string },
-  ) => Promise<{ ok: true }>;
+    payload: {
+      answers: {
+        questionId: string;
+        optionId?: string;
+        optionIds?: string[];
+        freeText?: string;
+      }[];
+    },
+  ) => Promise<{ ok: true; count: number }>;
+  submitBrainstormNudge: (
+    taskId: string,
+    payload: { comment: string },
+  ) => Promise<{ ok: true; nudgeId: string }>;
+  restartBrainstorm: (
+    taskId: string,
+    payload: { note?: string },
+  ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
+  getBrainstormDiff: (
+    taskId: string,
+    kind: "design" | "spec",
+  ) => Promise<BrainstormDiff>;
+  submitArtifactEdit: (
+    taskId: string,
+    payload: { kind: "design" | "spec"; body: string },
+  ) => Promise<{ ok: true; commitSha: string }>;
+};
+
+export type BrainstormDiff = {
+  kind: "design" | "spec";
+  baseline: { commit: string; body: string } | null;
+  current: { body: string } | null;
 };
 
 export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
@@ -117,13 +193,37 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       const r = await send<{ events: AgentEvent[] }>(`/api/runs/${runId}/events`);
       return { events: r.events.map(hydrateEvent) };
     },
+    listRunFiles: (runId) => send<{ files: RunFile[] }>(`/api/runs/${runId}/files`),
     getArtifact: (taskId, name) => send(`/api/tasks/${taskId}/artifacts/${name}`),
     getBrainstormBundle: (taskId) => send<BrainstormBundle>(`/api/tasks/${taskId}/brainstorm`),
-    submitBrainstormAnswer: (taskId, payload) =>
-      send<{ ok: true }>(`/api/tasks/${taskId}/brainstorm/answer`, {
+    submitBrainstormAnswers: (taskId, payload) =>
+      send<{ ok: true; count: number }>(`/api/tasks/${taskId}/brainstorm/answers`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    submitBrainstormNudge: (taskId, payload) =>
+      send<{ ok: true; nudgeId: string }>(`/api/tasks/${taskId}/brainstorm/nudge`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    restartBrainstorm: (taskId, payload) =>
+      send<{ ok: true; archivedRunId: string; newRunId: string }>(
+        `/api/tasks/${taskId}/brainstorm/restart`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+    getBrainstormDiff: (taskId, kind) =>
+      send<BrainstormDiff>(`/api/tasks/${taskId}/brainstorm/diff?kind=${kind}`),
+    submitArtifactEdit: (taskId, payload) =>
+      send<{ ok: true; commitSha: string }>(
+        `/api/tasks/${taskId}/brainstorm/artifact`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
   };
 }
 

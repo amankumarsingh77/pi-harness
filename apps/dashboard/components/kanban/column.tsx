@@ -2,14 +2,23 @@ import type { Task, TaskStatus } from "@pi-harness/shared";
 import { TaskCard } from "./card";
 import { StatusIcon, statusKindFor } from "./status-icon";
 
+// Failed sub-statuses (brainstorm_failed, plan_failed, code_failed, pr_failed)
+// are bucketed under their parent phase by `board.tsx` and never render as a
+// column header on their own. The titles are required for type-exhaustiveness
+// and act as a defensive fallback if a future caller forgets to bucket — they
+// reuse the parent phase title so the header still reads sensibly.
 const TITLES: Record<TaskStatus, string> = {
   backlog: "Backlog",
   brainstorming: "Brainstorming",
+  brainstorm_failed: "Brainstorming",
   planning: "Planning",
+  plan_failed: "Planning",
   executing: "Code",
+  code_failed: "Code",
   verifying: "Verifying",
   verification_failed: "Verify Failed",
   ready_to_ship: "Ready to Ship",
+  pr_failed: "Ready to Ship",
   done: "Done",
   cancelled: "Cancelled",
 };

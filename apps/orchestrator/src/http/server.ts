@@ -6,6 +6,7 @@ import type { EventStore } from "../adapters/event-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
+import type { CancellationRegistry } from "../runner/cancellation.js";
 import { isHarnessError } from "../domain/errors.js";
 import { registerHealth } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
@@ -24,6 +25,9 @@ export type ServerDeps = {
   // Optional in tests that don't need to drive the agent. Production always
   // provides one — the transitions/answer routes call enqueue after persisting.
   scheduler?: TaskScheduler;
+  // Optional in tests. user_cancel uses this to abort an in-flight phase
+  // driver before settling its run rows.
+  cancellation?: CancellationRegistry;
   // pino instance shared with the rest of the orchestrator. Fastify uses it
   // for HTTP request logging and per-request `req.log` children. When omitted
   // (tests), Fastify falls back to a quiet warn-level logger.
@@ -65,7 +69,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
   registerHealth(app);
-  registerTaskRoutes(app, { runs: deps.runs, ...(deps.scheduler ? { scheduler: deps.scheduler } : {}) });
+  registerTaskRoutes(app, {
+    runs: deps.runs,
+    events: deps.events,
+    artifacts,
+    ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
+    ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
+  });
   registerRunRoutes(app, { runs: deps.runs, events: deps.events });
   registerEventStream(app, { events: deps.events });
   registerArtifactRoutes(app, { runsDir: deps.runsDir });
@@ -73,7 +83,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   registerBrainstormRoutes(app, {
     runs: deps.runs,
     artifacts,
+    events: deps.events,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
+    ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
   return app;
 }

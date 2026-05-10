@@ -9,6 +9,7 @@ import { BrainstormEventBus } from "../../src/agents/brainstorm-event-bus.js";
 import {
   makeSubmitQuestionsTool,
   makeMarkReadyTool,
+  makeReplyToUserTool,
 } from "../../src/agents/brainstorm-tools.js";
 
 let scratch: string;
@@ -130,6 +131,39 @@ describe("makeSubmitQuestionsTool", () => {
     expect(published.sectionTarget).toEqual({ artifact: "design", section: "Goals" });
     expect(published.options).toEqual(params.questions[0]!.options);
     expect("multiSelect" in published).toBe(false);
+    expect(typeof published.batchId).toBe("string");
+    expect(String(published.batchId)).toMatch(/^b_/);
+  });
+
+  it("stamps every question in one tool call with the same batchId", async () => {
+    const { bus, eventAppends } = makeBus();
+    const tool = makeSubmitQuestionsTool({ bus });
+    await fakeExecute(tool, {
+      questions: [
+        {
+          questionId: "q-a",
+          prompt: "A?",
+          options: [
+            { id: "o1", label: "O1", recommended: true, evidence: [] },
+            { id: "o2", label: "O2", recommended: false, evidence: [] },
+          ],
+          sectionTarget: { artifact: "design" as const, section: "Goals" },
+        },
+        {
+          questionId: "q-b",
+          prompt: "B?",
+          options: [
+            { id: "o1", label: "O1", recommended: true, evidence: [] },
+            { id: "o2", label: "O2", recommended: false, evidence: [] },
+          ],
+          sectionTarget: { artifact: "spec" as const, section: "Acceptance" },
+        },
+      ],
+    });
+    expect(eventAppends).toHaveLength(2);
+    const a = eventAppends[0] as Record<string, unknown>;
+    const b = eventAppends[1] as Record<string, unknown>;
+    expect(a.batchId).toBe(b.batchId);
   });
 
   it("propagates multiSelect flag when set", async () => {
@@ -164,7 +198,7 @@ describe("makeMarkReadyTool", () => {
   it("returns missing detail when design.md is absent (no terminate, no status_changed)", async () => {
     const { bus, eventAppends } = makeBus();
     const store = makeStore();
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({ ok: false, missing: "design.md not found" });
     expect(result.terminate).toBeUndefined();
@@ -175,7 +209,7 @@ describe("makeMarkReadyTool", () => {
     const { bus, eventAppends } = makeBus();
     const store = makeStore();
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({ ok: false, missing: "spec.md not found" });
     expect(eventAppends).toHaveLength(0);
@@ -186,7 +220,7 @@ describe("makeMarkReadyTool", () => {
     const store = makeStore();
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
     await writeArtifactFile(store, "spec", "## Verification scenarios\nfoo\n");
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({ ok: false, missing: "spec.md missing: ## Acceptance criteria" });
     expect(result.terminate).toBeUndefined();
@@ -208,7 +242,7 @@ describe("makeMarkReadyTool", () => {
     ].join("\n");
     await writeArtifactFile(store, "design", designEmptyTradeoffs);
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({ ok: false, missing: "design.md missing: ## Trade-offs (empty)" });
   });
@@ -218,7 +252,7 @@ describe("makeMarkReadyTool", () => {
     const store = makeStore();
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
 
     expect(result.details).toEqual({ ok: true });
@@ -243,7 +277,7 @@ describe("makeMarkReadyTool", () => {
     const store = makeStore();
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY, "ready");
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY, "ready");
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
 
     expect(result.details).toEqual({ ok: true });
@@ -271,12 +305,71 @@ describe("makeMarkReadyTool", () => {
     };
     await writeFile(join(dir, "design.md"), stringifyArtifact(approved));
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
-    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK });
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({
       ok: false,
       missing: "design.md frontmatter status invalid (got: approved)",
     });
     expect(eventAppends).toHaveLength(0);
+  });
+
+  it("rejects with structured error when nudges are pending", async () => {
+    const { bus, eventAppends } = makeBus();
+    const store = makeStore();
+    await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
+    await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
+    const tool = makeMarkReadyTool({
+      store,
+      bus,
+      cwd,
+      taskId: TASK,
+      countPendingNudges: async () => 2,
+    });
+    const result = await fakeExecute(tool, {});
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("2 pending user nudge");
+    expect(result.terminate).toBeUndefined();
+    // No status_changed published — the artifacts stay in draft.
+    expect(eventAppends).toHaveLength(0);
+  });
+});
+
+describe("makeReplyToUserTool", () => {
+  it("publishes a brainstorm_agent_reply event and does NOT terminate the turn", async () => {
+    const { bus, jsonlAppends } = makeBus();
+    const tool = makeReplyToUserTool({ bus });
+    const result = await tool.execute(
+      "tc1",
+      { message: "Yes, that's everything I wanted to ask for now." },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    expect(result.terminate).toBeUndefined();
+    expect(result.details.replyId).toMatch(/^r_/);
+    expect(jsonlAppends).toHaveLength(1);
+    expect(jsonlAppends[0]).toMatchObject({
+      kind: "brainstorm_agent_reply",
+      message: "Yes, that's everything I wanted to ask for now.",
+    });
+    // Generated replyId is present and non-empty.
+    expect(typeof jsonlAppends[0]!["replyId"]).toBe("string");
+  });
+
+  it("threads inReplyToNudgeId when the agent provides one", async () => {
+    const { bus, jsonlAppends } = makeBus();
+    const tool = makeReplyToUserTool({ bus });
+    await tool.execute(
+      "tc1",
+      { message: "Acknowledged.", inReplyToNudgeId: "n_abc" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    expect(jsonlAppends[0]).toMatchObject({
+      kind: "brainstorm_agent_reply",
+      inReplyToNudgeId: "n_abc",
+    });
   });
 });

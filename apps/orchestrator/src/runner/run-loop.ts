@@ -7,6 +7,8 @@ import { transition } from "../domain/state-machine.js";
 import { phasesFor } from "../domain/phase-chain.js";
 import { runPhase, type PhaseDeps, type PhaseInput, type PhaseOutput } from "./phase-prompts.js";
 import { scaffoldBrainstorm } from "./scaffold-brainstorm.js";
+import { deriveBrainstormGate } from "../agents/brainstorm-gate.js";
+import type { CancellationRegistry } from "./cancellation.js";
 
 export type RunLoopOpts = {
   task: Task;
@@ -18,6 +20,7 @@ export type RunLoopOpts = {
   phaseDeps: PhaseDeps;
   worktrees: WorktreeManager;
   retryCap: number;
+  cancellation: CancellationRegistry;
 };
 
 // Branch name convention. Per design doc Decision #2: `pi/T-NNN`.
@@ -30,7 +33,7 @@ function branchNameFor(taskId: string): string {
 // failure. The orchestrator's main scheduler loops on this until the task is
 // done or blocked.
 export async function runLoop(opts: RunLoopOpts): Promise<Task> {
-  const { runs, events, phaseDeps, worktrees, retryCap } = opts;
+  const { runs, events, phaseDeps, worktrees, retryCap, cancellation } = opts;
   let task = opts.task;
 
   if (!task.workflow) return task;
@@ -40,10 +43,15 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
   const phase = STATUS_TO_PHASE[task.status];
   if (!phase) return task;
 
-  // Brainstorm approval gate: if artifacts are ready and we're waiting for
-  // the user, do not re-dispatch. The user's approve/request-changes action
-  // is what advances the state.
-  if (phase === "brainstorm" && task.awaitingApproval) return task;
+  // Brainstorm approval gate: if artifacts are ready AND no revision was
+  // filed since the last ready event, we're waiting on the user — do not
+  // re-dispatch. The user's approve/request-changes action is what
+  // advances the state. The gate is derived from filesystem facts (artifact
+  // frontmatter + brainstorm.jsonl), not a stored boolean.
+  if (phase === "brainstorm" && task.worktreePath) {
+    const gate = await deriveBrainstormGate(task.worktreePath, task.id, phaseDeps.store);
+    if (gate === "awaiting_user") return task;
+  }
 
   // Worktree-first invariant: every phase runs inside the task's worktree.
   // Branch + worktree are created on first dispatch and reused thereafter.
@@ -57,9 +65,9 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
   }
 
   if (phase === "brainstorm") {
-    return dispatchBrainstorm({ task, branch, worktree, runs, events, phaseDeps, retryCap });
+    return dispatchBrainstorm({ task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation });
   }
-  return dispatchGenericPhase({ task, phase, worktree, runs, events, phaseDeps, retryCap });
+  return dispatchGenericPhase({ task, phase, worktree, runs, events, phaseDeps, retryCap, cancellation });
 }
 
 type DispatchOpts = {
@@ -69,6 +77,7 @@ type DispatchOpts = {
   events: EventStore;
   phaseDeps: PhaseDeps;
   retryCap: number;
+  cancellation: CancellationRegistry;
 };
 
 // Brainstorm has shape no other phase has: it scaffolds artifacts on first
@@ -79,7 +88,7 @@ type DispatchOpts = {
 async function dispatchBrainstorm(
   opts: DispatchOpts & { branch: string },
 ): Promise<Task> {
-  const { runs, events, phaseDeps, worktree, retryCap, branch } = opts;
+  const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
   let task = opts.task;
 
   // Lay down design.md / spec.md scaffolding + initial commit. Idempotent.
@@ -87,8 +96,18 @@ async function dispatchBrainstorm(
 
   // Reuse a single Run across ticks so the dashboard's SSE subscription,
   // opened on the first render, keeps receiving events as the agent advances.
-  let run: Run = (await runs.findActiveRun(task.id, "brainstorm"))
-    ?? (await runs.createRun({ taskId: task.id, phase: "brainstorm" }));
+  const existingRun = await runs.findActiveRun(task.id, "brainstorm");
+  let run: Run = existingRun ?? (await runs.createRun({ taskId: task.id, phase: "brainstorm" }));
+  if (!existingRun) {
+    await events.append({
+      id: crypto.randomUUID(),
+      runId: run.id,
+      taskId: task.id,
+      ts: new Date(),
+      kind: "phase_started",
+      phase: "brainstorm",
+    });
+  }
 
   const phaseModel = mergePhaseModels(task.phaseModels, "brainstorm");
   const sessionPath = join(worktree.path, ".harness", task.id, "pi-session.jsonl");
@@ -96,6 +115,7 @@ async function dispatchBrainstorm(
     run = await runs.updateRun(run.id, { piSessionPath: sessionPath });
   }
 
+  const controller = cancellation.register(task.id);
   const phaseInput: PhaseInput = {
     taskId: task.id,
     runId: run.id,
@@ -104,35 +124,45 @@ async function dispatchBrainstorm(
     ...(task.branchName ? { branch: task.branchName } : {}),
     phaseModel,
     sessionPath,
+    signal: controller.signal,
   };
 
-  const result = await runPhase("brainstorm", phaseInput, { ...phaseDeps, cwd: worktree.path });
-
-  // Brainstorm gate: success only counts when both artifacts hit `status: ready`.
-  let bothReady = false;
-  if (result.ok) {
-    const [design, spec] = await Promise.all([
-      phaseDeps.store.readArtifact(worktree.path, task.id, "design"),
-      phaseDeps.store.readArtifact(worktree.path, task.id, "spec"),
-    ]);
-    bothReady = design?.fm.status === "ready" && spec?.fm.status === "ready";
+  let result: PhaseOutput;
+  try {
+    result = await runPhase("brainstorm", phaseInput, { ...phaseDeps, cwd: worktree.path });
+  } finally {
+    cancellation.release(task.id, controller);
   }
 
-  // Accumulate cost/tokens across ticks instead of overwriting.
-  const tickStatus = result.ok ? (bothReady ? "succeeded" : "running") : "failed";
+  // The route handler that processed user_cancel already settled the run and
+  // emitted phase_ended cancelled. Don't double-write status or events.
+  if (result.cancelled) return task;
+
+  // Brainstorm runs intentionally stay `running` across all ticks. The phase
+  // ends only when the user approves (handled in routes/tasks.ts
+  // user_approve_brainstorm) or when a tick itself fails. This keeps a single
+  // runId alive so the dashboard's SSE subscription survives a request-changes
+  // round-trip without losing the transcript.
   await runs.updateRun(run.id, {
-    ...(tickStatus !== "running" ? { endedAt: new Date() } : {}),
-    status: tickStatus,
+    ...(result.ok ? {} : { endedAt: new Date() }),
+    status: result.ok ? "running" : "failed",
     error: result.error ?? null,
     inputTokens: run.inputTokens + result.inputTokens,
     outputTokens: run.outputTokens + result.outputTokens,
     costUsd: run.costUsd + result.costUsd,
   });
 
-  if (result.ok && !bothReady) {
-    // Mid-Q&A. No state-machine transition; the next user answer re-enters.
-    return task;
-  }
+  if (result.ok) return task;
+
+  await events.append({
+    id: crypto.randomUUID(),
+    runId: run.id,
+    taskId: task.id,
+    ts: new Date(),
+    kind: "phase_ended",
+    phase: "brainstorm",
+    status: "failed",
+  });
 
   return applyTransition({ task, runs, events, runId: run.id, phase: "brainstorm", result, retryCap });
 }
@@ -143,6 +173,15 @@ async function dispatchGenericPhase(
   const { task, phase, worktree, runs, events, phaseDeps, retryCap } = opts;
 
   const run = await runs.createRun({ taskId: task.id, phase });
+  await events.append({
+    id: crypto.randomUUID(),
+    runId: run.id,
+    taskId: task.id,
+    ts: new Date(),
+    kind: "phase_started",
+    phase,
+  });
+
   const phaseInput: PhaseInput = {
     taskId: task.id,
     runId: run.id,
@@ -160,6 +199,16 @@ async function dispatchGenericPhase(
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
     costUsd: result.costUsd,
+  });
+
+  await events.append({
+    id: crypto.randomUUID(),
+    runId: run.id,
+    taskId: task.id,
+    ts: new Date(),
+    kind: "phase_ended",
+    phase,
+    status: result.ok ? "succeeded" : "failed",
   });
 
   return applyTransition({ task, runs, events, runId: run.id, phase, result, retryCap });
@@ -199,7 +248,6 @@ async function applyTransition(opts: {
   let next = await runs.updateTask(task.id, {
     status: nextResult.task.status,
     retryCount: nextResult.task.retryCount,
-    awaitingApproval: nextResult.task.awaitingApproval,
   });
 
   if (result.branch) {
