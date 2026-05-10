@@ -95,7 +95,11 @@ export function makeSubmitQuestionsTool(deps: {
   };
 }
 
-const REQUIRED_SECTIONS: Record<ArtifactKind, string[]> = {
+// Brainstorm writes only `design` and `spec`. Plan/scenarios are owned by
+// the plan phase and have their own required-section check there.
+type BrainstormArtifactKind = Extract<ArtifactKind, "design" | "spec">;
+
+const REQUIRED_SECTIONS: Record<BrainstormArtifactKind, string[]> = {
   design: ["## Goals", "## Trade-offs", "## Alternatives considered"],
   spec: ["## Verification scenarios", "## Acceptance criteria"],
 };
@@ -104,7 +108,7 @@ const REQUIRED_SECTIONS: Record<ArtifactKind, string[]> = {
 // present with non-empty bodies. A section's body runs from immediately after
 // the heading line to the next line beginning with "## " (or EOF). "Empty"
 // means no non-whitespace character appears in that range.
-function findMissingSection(kind: ArtifactKind, body: string): string | null {
+function findMissingSection(kind: BrainstormArtifactKind, body: string): string | null {
   const lines = body.split("\n");
   for (const heading of REQUIRED_SECTIONS[kind]) {
     const headingIdx = lines.findIndex((l) => l.trim() === heading);
@@ -164,8 +168,11 @@ export function makeMarkReadyTool(deps: {
         return reject(msg);
       }
 
-      const kinds: ArtifactKind[] = ["design", "spec"];
-      const loaded: Record<ArtifactKind, Artifact> = {} as Record<ArtifactKind, Artifact>;
+      const kinds: BrainstormArtifactKind[] = ["design", "spec"];
+      const loaded: Record<BrainstormArtifactKind, Artifact> = {} as Record<
+        BrainstormArtifactKind,
+        Artifact
+      >;
 
       for (const kind of kinds) {
         const art = await store.readArtifact(cwd, taskId, kind);

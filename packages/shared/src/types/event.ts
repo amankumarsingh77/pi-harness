@@ -108,4 +108,59 @@ export type AgentEvent =
       replyId: string;
       message: string;
       inReplyToNudgeId?: string;
+    })
+  // Plan-phase events. Mirrored to <worktree>/.harness/<taskId>/plan.jsonl.
+  // The plan phase has two stages — a parallel preflight of 8 research
+  // subagents, then a single planner pi session — and these variants capture
+  // both stages plus the approval-gate signals.
+  | (AgentEventBase & {
+      kind: "plan_system";
+      systemKind:
+        | "preflight_started"
+        | "preflight_complete"
+        | "planner_started"
+        | "status_changed"
+        | "blocked"
+        | "session_reset";
+      data?: Record<string, unknown>;
+    })
+  // Lifecycle of a single research subagent in the preflight fan-out. One
+  // started + one ended event per subagent per attempt. `sessionId` lets the
+  // dashboard thread per-subagent message_delta / tool_call events even though
+  // the underlying EventStore subscription is shared with the planner.
+  | (AgentEventBase & {
+      kind: "plan_subagent_started";
+      subagent: string;
+      sessionId: string;
+    })
+  | (AgentEventBase & {
+      kind: "plan_subagent_ended";
+      subagent: string;
+      sessionId: string;
+      ok: boolean;
+      durationMs: number;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      error?: string;
+    })
+  | (AgentEventBase & {
+      kind: "plan_revision_requested";
+      comment: string;
+    })
+  | (AgentEventBase & {
+      kind: "plan_usage";
+      tickIndex: number;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
+      cumulativeInputTokens: number;
+      cumulativeOutputTokens: number;
+      cumulativeCostUsd: number;
+    })
+  | (AgentEventBase & {
+      kind: "plan_artifact_edited";
+      artifact: "plan" | "scenarios";
+      commitSha: string;
+      sizeDelta: number;
     });

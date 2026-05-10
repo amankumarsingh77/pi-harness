@@ -275,4 +275,110 @@ describe("ArtifactsStore", () => {
     const list = await store.listArtifacts(cwd, "T-1");
     expect(list.map((a) => a.fm.kind)).toEqual(["design", "spec"]);
   });
+
+  // Plan-phase additions (kind extension to design/spec/plan/scenarios).
+
+  const planSample: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "plan",
+      parent: "design.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: "2026-05-10T00:00:00.000Z",
+      last_updated_by: "orchestrator",
+    },
+    body: "# Plan\n\nbody\n",
+  };
+
+  const scenariosSample: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "scenarios",
+      parent: "plan.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: "2026-05-10T00:00:00.000Z",
+      last_updated_by: "orchestrator",
+    },
+    body: "scenarios: []\n",
+  };
+
+  it("plan + scenarios round-trip with correct file extensions", async () => {
+    const store = new ArtifactsStore();
+    await store.writeArtifact(cwd, "T-1", planSample);
+    await store.writeArtifact(cwd, "T-1", scenariosSample);
+
+    const planPath = store.artifactPath(cwd, "T-1", "plan");
+    const scenariosPath = store.artifactPath(cwd, "T-1", "scenarios");
+    expect(planPath.endsWith("plan.md")).toBe(true);
+    expect(scenariosPath.endsWith("scenarios.yaml")).toBe(true);
+
+    const plan = await store.readArtifact(cwd, "T-1", "plan");
+    const scenarios = await store.readArtifact(cwd, "T-1", "scenarios");
+    expect(plan?.fm.kind).toBe("plan");
+    expect(scenarios?.fm.kind).toBe("scenarios");
+    expect(scenarios?.body).toContain("scenarios:");
+  });
+
+  it("setArtifactStatus on scenarios commits with the .yaml file path", async () => {
+    const store = new ArtifactsStore();
+    await store.writeArtifact(cwd, "T-1", scenariosSample);
+    const git = simpleGit(cwd);
+    await git.raw(["add", "-f", join(".harness", "T-1", "scenarios.yaml")]);
+    await git.commit("seed");
+    const updated = await store.setArtifactStatus(cwd, "T-1", "scenarios", "ready", "plan-agent");
+    expect(updated.fm.status).toBe("ready");
+    const log = await git.log();
+    expect(log.latest?.message).toContain("mark scenarios as ready");
+  });
+
+  it("listArtifacts returns all four kinds when present", async () => {
+    const store = new ArtifactsStore();
+    await store.writeArtifact(cwd, "T-1", sample);
+    await store.writeArtifact(cwd, "T-1", { fm: { ...sample.fm, kind: "spec", parent: "design.md" }, body: "# Spec\n" });
+    await store.writeArtifact(cwd, "T-1", planSample);
+    await store.writeArtifact(cwd, "T-1", scenariosSample);
+    const list = await store.listArtifacts(cwd, "T-1");
+    expect(list.map((a) => a.fm.kind)).toEqual(["design", "spec", "plan", "scenarios"]);
+  });
+
+  it("listArtifacts honors a kinds filter", async () => {
+    const store = new ArtifactsStore();
+    await store.writeArtifact(cwd, "T-1", sample);
+    await store.writeArtifact(cwd, "T-1", planSample);
+    const list = await store.listArtifacts(cwd, "T-1", ["plan"]);
+    expect(list.map((a) => a.fm.kind)).toEqual(["plan"]);
+  });
+
+  it("archiveCurrentRun moves plan artifacts + research/ directory", async () => {
+    const store = new ArtifactsStore();
+    await store.writeArtifact(cwd, "T-1", planSample);
+    await store.writeArtifact(cwd, "T-1", scenariosSample);
+    const dir = join(cwd, ".harness", "T-1");
+    await writeFile(join(dir, "plan.jsonl"), "{\"kind\":\"x\"}\n");
+    await writeFile(join(dir, "pi-session-plan.jsonl"), "session\n");
+    await mkdir(join(dir, "research"), { recursive: true });
+    await writeFile(join(dir, "research", "scope-tracer.md"), "# findings\n");
+
+    const git = simpleGit(cwd);
+    await git.raw(["add", "-f", join(".harness", "T-1", "plan.md"), join(".harness", "T-1", "scenarios.yaml"), join(".harness", "T-1", "plan.jsonl"), join(".harness", "T-1", "pi-session-plan.jsonl")]);
+    await git.commit("seed");
+
+    await store.archiveCurrentRun(cwd, "T-1", "r_old");
+
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, "plan.md"))).toBe(false);
+    expect(existsSync(join(dir, "scenarios.yaml"))).toBe(false);
+    expect(existsSync(join(dir, "plan.jsonl"))).toBe(false);
+    expect(existsSync(join(dir, "pi-session-plan.jsonl"))).toBe(false);
+    expect(existsSync(join(dir, "research"))).toBe(false);
+
+    const archive = join(dir, "runs", "r_old");
+    expect(existsSync(join(archive, "plan.md"))).toBe(true);
+    expect(existsSync(join(archive, "scenarios.yaml"))).toBe(true);
+    expect(existsSync(join(archive, "plan.jsonl"))).toBe(true);
+    expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
+    expect(existsSync(join(archive, "research", "scope-tracer.md"))).toBe(true);
+  });
 });

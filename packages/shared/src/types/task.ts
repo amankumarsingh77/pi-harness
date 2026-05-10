@@ -26,7 +26,7 @@ export const STATUS_TO_PHASE: Record<TaskStatus, Phase | null> = {
   backlog: null,
   brainstorming: "brainstorm",
   brainstorm_failed: null, // user must triage / restart
-  planning: null, // user must approve plan
+  planning: "plan", // run-loop dispatches plan agent; gate stops dispatch when artifacts ready
   plan_failed: null, // user must triage / restart
   executing: "code",
   code_failed: null, // user must triage / restart

@@ -4,7 +4,7 @@ import { z } from "zod";
 // spec.md) and any future phase that needs to commit per-task artifacts to
 // the worktree's branch. See:
 // docs/superpowers/specs/2026-05-09-brainstorm-phase-design.md (Decisions §1, §6, §9).
-export const ArtifactKindSchema = z.enum(["design", "spec"]);
+export const ArtifactKindSchema = z.enum(["design", "spec", "plan", "scenarios"]);
 export type ArtifactKind = z.infer<typeof ArtifactKindSchema>;
 
 // `human_edited` marks artifacts the user touched directly via the dashboard

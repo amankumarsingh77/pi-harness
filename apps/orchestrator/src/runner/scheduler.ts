@@ -114,6 +114,7 @@ export class TaskScheduler {
         worktrees: this.deps.worktrees,
         retryCap: this.deps.retryCap,
         cancellation: this.deps.cancellation,
+        enqueue: (id: string) => this.enqueue(id),
       });
       log.debug({ durationMs: Date.now() - startedAt }, "tick complete");
     } catch (e) {

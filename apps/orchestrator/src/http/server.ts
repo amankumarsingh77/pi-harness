@@ -15,6 +15,7 @@ import { registerEventStream } from "./routes/events.js";
 import { registerArtifactRoutes } from "./routes/artifacts.js";
 import { registerScreenshotRoutes } from "./routes/screenshots.js";
 import { registerBrainstormRoutes } from "./routes/brainstorm.js";
+import { registerPlanRoutes } from "./routes/plan.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -81,6 +82,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   registerArtifactRoutes(app, { runsDir: deps.runsDir });
   registerScreenshotRoutes(app, { runsDir: deps.runsDir });
   registerBrainstormRoutes(app, {
+    runs: deps.runs,
+    artifacts,
+    events: deps.events,
+    ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
+    ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
+  });
+  registerPlanRoutes(app, {
     runs: deps.runs,
     artifacts,
     events: deps.events,
