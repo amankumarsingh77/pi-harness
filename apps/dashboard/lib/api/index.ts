@@ -14,6 +14,71 @@ export type BrainstormBundle = {
   events: BrainstormJsonlEvent[];
 };
 
+// Plan-phase counterpart to BrainstormBundle. Same gate semantics; research
+// is keyed by subagent name (one of the 7 preflight + claim-verifier).
+export type PlanGate = "running" | "awaiting_user";
+
+export type PlanBundle = {
+  gate: PlanGate;
+  status: Task["status"];
+  plan: Artifact | null;
+  scenarios: Artifact | null;
+  research: Record<string, string | null>;
+  events: PlanJsonlEvent[];
+};
+
+export type PlanJsonlEvent =
+  | {
+      kind: "plan_system";
+      ts: string;
+      systemKind:
+        | "preflight_started"
+        | "preflight_complete"
+        | "planner_started"
+        | "status_changed"
+        | "blocked"
+        | "session_reset";
+      data?: Record<string, unknown>;
+    }
+  | { kind: "plan_subagent_started"; ts: string; subagent: string; sessionId: string }
+  | {
+      kind: "plan_subagent_ended";
+      ts: string;
+      subagent: string;
+      sessionId: string;
+      ok: boolean;
+      durationMs: number;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      error?: string;
+    }
+  | { kind: "plan_revision_requested"; ts: string; comment: string }
+  | {
+      kind: "plan_usage";
+      ts: string;
+      tickIndex: number;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
+      cumulativeInputTokens: number;
+      cumulativeOutputTokens: number;
+      cumulativeCostUsd: number;
+    }
+  | {
+      kind: "plan_artifact_edited";
+      ts: string;
+      artifact: "plan" | "scenarios";
+      commitSha: string;
+      sizeDelta: number;
+    };
+
+export type PlanDiff = {
+  kind: "plan";
+  baseline: { commit: string; body: string } | null;
+  current: { body: string } | null;
+};
+
 // JSONL events as written by the orchestrator (mirrors AgentEvent's
 // brainstorm_* kinds, but tagged with `kind` directly — no AgentEventBase
 // envelope on disk).
@@ -112,6 +177,7 @@ export type Api = {
       | { type: "user_approve_brainstorm" }
       | { type: "user_request_brainstorm_changes"; comment: string }
       | { type: "user_approve_plan" }
+      | { type: "user_request_plan_changes"; comment: string }
       | { type: "user_cancel" }
       | { type: "user_retry_failed" },
   ) => Promise<{ task: Task }>;
@@ -145,6 +211,16 @@ export type Api = {
     taskId: string,
     payload: { kind: "design" | "spec"; body: string },
   ) => Promise<{ ok: true; commitSha: string }>;
+  getPlanBundle: (taskId: string) => Promise<PlanBundle>;
+  getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
+  submitPlanArtifactEdit: (
+    taskId: string,
+    payload: { kind: "plan"; body: string },
+  ) => Promise<{ ok: true; commitSha: string }>;
+  restartPlan: (
+    taskId: string,
+    payload: { note?: string },
+  ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
 };
 
 export type BrainstormDiff = {
@@ -219,6 +295,25 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
     submitArtifactEdit: (taskId, payload) =>
       send<{ ok: true; commitSha: string }>(
         `/api/tasks/${taskId}/brainstorm/artifact`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+    getPlanBundle: (taskId) => send<PlanBundle>(`/api/tasks/${taskId}/plan`),
+    getPlanDiff: (taskId, kind) =>
+      send<PlanDiff>(`/api/tasks/${taskId}/plan/diff?kind=${kind}`),
+    submitPlanArtifactEdit: (taskId, payload) =>
+      send<{ ok: true; commitSha: string }>(
+        `/api/tasks/${taskId}/plan/artifact`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+    restartPlan: (taskId, payload) =>
+      send<{ ok: true; archivedRunId: string; newRunId: string }>(
+        `/api/tasks/${taskId}/plan/restart`,
         {
           method: "POST",
           body: JSON.stringify(payload),
