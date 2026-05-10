@@ -78,6 +78,19 @@ describe("transition", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("user_request_plan_changes: stays in planning", () => {
+    const t = mkTask("planning", { workflow: "backend-feature" });
+    const r = transition(t, { type: "user_request_plan_changes", comment: "tighten scope" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.status).toBe("planning");
+  });
+
+  it("user_request_plan_changes rejected from non-planning status", () => {
+    const t = mkTask("brainstorming", { workflow: "backend-feature" });
+    const r = transition(t, { type: "user_request_plan_changes", comment: "x" });
+    expect(r.ok).toBe(false);
+  });
+
   it("agent_phase_succeeded: verify → ready_to_ship", () => {
     const t = mkTask("verifying", { workflow: "backend-feature" });
     const r = transition(t, { type: "agent_phase_succeeded", phase: "verify" });

@@ -7,7 +7,9 @@ import { transition } from "../domain/state-machine.js";
 import { phasesFor } from "../domain/phase-chain.js";
 import { runPhase, type PhaseDeps, type PhaseInput, type PhaseOutput } from "./phase-prompts.js";
 import { scaffoldBrainstorm } from "./scaffold-brainstorm.js";
+import { scaffoldPlan } from "./scaffold-plan.js";
 import { deriveBrainstormGate } from "../agents/brainstorm-gate.js";
+import { derivePlanGate } from "../agents/plan-gate.js";
 import type { CancellationRegistry } from "./cancellation.js";
 
 export type RunLoopOpts = {
@@ -53,6 +55,14 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     if (gate === "awaiting_user") return task;
   }
 
+  // Same posture for plan: derived gate from plan.md/scenarios.yaml
+  // frontmatter + plan.jsonl ordering. When awaiting_user, the user's
+  // approve/request-changes click is the only thing that advances state.
+  if (phase === "plan" && task.worktreePath) {
+    const gate = await derivePlanGate(task.worktreePath, task.id, phaseDeps.store);
+    if (gate === "awaiting_user") return task;
+  }
+
   // Worktree-first invariant: every phase runs inside the task's worktree.
   // Branch + worktree are created on first dispatch and reused thereafter.
   const branch = task.branchName ?? branchNameFor(task.id);
@@ -66,6 +76,9 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
 
   if (phase === "brainstorm") {
     return dispatchBrainstorm({ task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation });
+  }
+  if (phase === "plan") {
+    return dispatchPlan({ task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation });
   }
   return dispatchGenericPhase({ task, phase, worktree, runs, events, phaseDeps, retryCap, cancellation });
 }
@@ -165,6 +178,83 @@ async function dispatchBrainstorm(
   });
 
   return applyTransition({ task, runs, events, runId: run.id, phase: "brainstorm", result, retryCap });
+}
+
+// Plan mirrors brainstorm's asymmetric shape: scaffold artifacts on first
+// entry, reuse one Run row across multiple ticks (preflight tick + planner
+// tick + revision ticks), and stay `running` until the user approves. The
+// session JSONL is namespaced (pi-session-plan.jsonl) so a future code phase
+// can claim its own pi-session-code.jsonl without colliding.
+async function dispatchPlan(
+  opts: DispatchOpts & { branch: string },
+): Promise<Task> {
+  const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
+  let task = opts.task;
+
+  await scaffoldPlan({ cwd: worktree.path, taskId: task.id, branch });
+
+  const existingRun = await runs.findActiveRun(task.id, "plan");
+  let run: Run = existingRun ?? (await runs.createRun({ taskId: task.id, phase: "plan" }));
+  if (!existingRun) {
+    await events.append({
+      id: crypto.randomUUID(),
+      runId: run.id,
+      taskId: task.id,
+      ts: new Date(),
+      kind: "phase_started",
+      phase: "plan",
+    });
+  }
+
+  const phaseModel = mergePhaseModels(task.phaseModels, "plan");
+  const sessionPath = join(worktree.path, ".harness", task.id, "pi-session-plan.jsonl");
+  if (run.piSessionPath !== sessionPath) {
+    run = await runs.updateRun(run.id, { piSessionPath: sessionPath });
+  }
+
+  const controller = cancellation.register(task.id);
+  const phaseInput: PhaseInput = {
+    taskId: task.id,
+    runId: run.id,
+    ticketTitle: task.title,
+    ticketDescription: task.description,
+    ...(task.branchName ? { branch: task.branchName } : {}),
+    phaseModel,
+    sessionPath,
+    signal: controller.signal,
+  };
+
+  let result: PhaseOutput;
+  try {
+    result = await runPhase("plan", phaseInput, { ...phaseDeps, cwd: worktree.path });
+  } finally {
+    cancellation.release(task.id, controller);
+  }
+
+  if (result.cancelled) return task;
+
+  await runs.updateRun(run.id, {
+    ...(result.ok ? {} : { endedAt: new Date() }),
+    status: result.ok ? "running" : "failed",
+    error: result.error ?? null,
+    inputTokens: run.inputTokens + result.inputTokens,
+    outputTokens: run.outputTokens + result.outputTokens,
+    costUsd: run.costUsd + result.costUsd,
+  });
+
+  if (result.ok) return task;
+
+  await events.append({
+    id: crypto.randomUUID(),
+    runId: run.id,
+    taskId: task.id,
+    ts: new Date(),
+    kind: "phase_ended",
+    phase: "plan",
+    status: "failed",
+  });
+
+  return applyTransition({ task, runs, events, runId: run.id, phase: "plan", result, retryCap });
 }
 
 async function dispatchGenericPhase(

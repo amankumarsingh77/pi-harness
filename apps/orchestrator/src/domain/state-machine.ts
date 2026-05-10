@@ -7,6 +7,7 @@ export type TransitionAction =
   | { type: "user_approve_brainstorm" }
   | { type: "user_request_brainstorm_changes"; comment: string }
   | { type: "user_approve_plan" }
+  | { type: "user_request_plan_changes"; comment: string }
   | { type: "user_approve_scenarios" }
   | { type: "user_cancel" }
   | { type: "user_retry_failed" }
@@ -65,6 +66,13 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
       // Planning → Executing happens when *user* approves plan.
       if (task.status !== "planning") return reject("must be in planning");
       return advance("executing");
+
+    case "user_request_plan_changes":
+      // Symmetric to user_request_brainstorm_changes: the route enforces the
+      // gate, writes a plan_revision_requested event, and resets both
+      // artifacts to draft. The state machine just keeps the task in planning.
+      if (task.status !== "planning") return reject("must be in planning");
+      return advance("planning");
 
     case "user_approve_scenarios":
       // v1 scenarios are reviewed in the same step as the plan; this is reserved

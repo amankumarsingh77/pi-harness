@@ -12,6 +12,7 @@ import { CreateTaskSchema, TransitionSchema, UpdateTaskSchema } from "../schemas
 import { ValidationError } from "../../domain/errors.js";
 import { JsonlWriter } from "../../adapters/jsonl-writer.js";
 import { deriveBrainstormGate } from "../../agents/brainstorm-gate.js";
+import { derivePlanGate } from "../../agents/plan-gate.js";
 
 export function registerTaskRoutes(
   app: FastifyInstance,
@@ -126,6 +127,24 @@ export function registerTaskRoutes(
         }
       }
 
+      if (
+        action.type === "user_approve_plan" ||
+        action.type === "user_request_plan_changes"
+      ) {
+        if (!task.worktreePath) {
+          reply.code(409);
+          return { error: "no_worktree", message: "task has no worktree yet" };
+        }
+        const gate = await derivePlanGate(task.worktreePath, task.id, artifacts);
+        if (gate !== "awaiting_user") {
+          reply.code(409);
+          return {
+            error: "gate_closed",
+            message: "plan is not awaiting approval",
+          };
+        }
+      }
+
       const result = transition(task, action);
       if (!result.ok) {
         reply.code(result.error.status);
@@ -167,6 +186,35 @@ export function registerTaskRoutes(
             taskId: task.id,
             ts,
             kind: "brainstorm_revision_requested",
+            comment: action.comment,
+          });
+        }
+      }
+
+      // Plan-side mirror of brainstorm's revision flow: append the revision
+      // event to plan.jsonl, reset both artifacts to draft so the next tick
+      // sees the gate as `running`, and broadcast on EventStore so live SSE
+      // surfaces the comment without a refetch. Research findings stay
+      // intact — only the planner re-runs (see runPlan's revision branch).
+      if (action.type === "user_request_plan_changes") {
+        const cwd = task.worktreePath!;
+        const ts = new Date();
+        const path = join(cwd, ".harness", task.id, "plan.jsonl");
+        await new JsonlWriter(path).append({
+          ts: ts.toISOString(),
+          kind: "plan_revision_requested",
+          comment: action.comment,
+        });
+        await artifacts.setArtifactStatus(cwd, task.id, "plan", "draft", "user-revision");
+        await artifacts.setArtifactStatus(cwd, task.id, "scenarios", "draft", "user-revision");
+        const activeRun = await runs.findActiveRun(task.id, "plan");
+        if (activeRun) {
+          await eventStore.append({
+            id: crypto.randomUUID(),
+            runId: activeRun.id,
+            taskId: task.id,
+            ts,
+            kind: "plan_revision_requested",
             comment: action.comment,
           });
         }
@@ -214,6 +262,28 @@ export function registerTaskRoutes(
             ts,
             kind: "phase_ended",
             phase: "brainstorm",
+            status: "succeeded",
+          });
+        }
+      }
+
+      // Same as brainstorm-approve but for plan: settle the long-lived plan
+      // run that's been alive across all preflight + planner + revision ticks.
+      if (action.type === "user_approve_plan") {
+        const activeRun = await runs.findActiveRun(task.id, "plan");
+        if (activeRun) {
+          const ts = new Date();
+          await runs.updateRun(activeRun.id, {
+            status: "succeeded",
+            endedAt: ts,
+          });
+          await eventStore.append({
+            id: crypto.randomUUID(),
+            runId: activeRun.id,
+            taskId: task.id,
+            ts,
+            kind: "phase_ended",
+            phase: "plan",
             status: "succeeded",
           });
         }

@@ -10,6 +10,8 @@ import type { EventStore } from "../adapters/event-store.js";
 import { JsonlWriter } from "../adapters/jsonl-writer.js";
 import { BrainstormEventBus } from "../agents/brainstorm-event-bus.js";
 import { runBrainstorm } from "../agents/brainstorm.js";
+import { PlanEventBus } from "../agents/plan-event-bus.js";
+import { runPlan } from "../agents/plan.js";
 
 // Common deps every phase needs. The orchestrator constructs this once and
 // passes it into runPhase.
@@ -121,7 +123,51 @@ export async function runPhase(
         ...(r.cancelled ? { cancelled: true } : {}),
       };
     }
-    case "plan":
+    case "plan": {
+      if (!input.phaseModel || !input.sessionPath || !input.ticketTitle || !input.ticketDescription) {
+        return {
+          ok: false,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          error: "plan phase requires phaseModel, sessionPath, ticketTitle, and ticketDescription",
+        };
+      }
+      const jsonl = new JsonlWriter(
+        join(deps.cwd, ".harness", input.taskId, "plan.jsonl"),
+      );
+      const bus = new PlanEventBus({
+        eventStore: deps.eventStore,
+        jsonl,
+        runId: input.runId,
+        taskId: input.taskId,
+      });
+      const r = await runPlan({
+        taskId: input.taskId,
+        runId: input.runId,
+        cwd: deps.cwd,
+        store: deps.store,
+        bus,
+        phaseModel: input.phaseModel,
+        sessionPath: input.sessionPath,
+        createAgentSession: deps.createAgentSession,
+        ticketTitle: input.ticketTitle,
+        ticketDescription: input.ticketDescription,
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        // claim-verifier cap is per tick (one runPlan invocation). The cap
+        // protects against a perpetual mark_ready loop within a single turn;
+        // across ticks the agent has to recover its own way.
+        claimVerifierState: { attempts: 0, cap: 2 },
+      });
+      return {
+        ok: r.ok,
+        costUsd: r.costUsd,
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        ...(r.error !== undefined ? { error: r.error } : {}),
+        ...(r.cancelled ? { cancelled: true } : {}),
+      };
+    }
     case "code":
     case "verify":
     case "pr":
