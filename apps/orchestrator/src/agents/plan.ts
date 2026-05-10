@@ -1,0 +1,542 @@
+import { existsSync, readFileSync } from "node:fs";
+import { unlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+  AgentSession,
+  AgentSessionOptions,
+  PiBridgeEvent,
+} from "@pi-harness/pi-bridge";
+import { AuthError } from "@pi-harness/pi-bridge";
+import type { PhaseModelConfig } from "@pi-harness/shared";
+import { readJsonl } from "../adapters/jsonl-writer.js";
+import type { ArtifactsStore } from "./artifacts-store.js";
+import type { PlanEventBus } from "./plan-event-bus.js";
+import {
+  makeMarkReadyTool,
+  parseFalsifiedClaims,
+  type ClaimVerifierState,
+  type DispatchClaimVerifier,
+} from "./plan-tools.js";
+import {
+  runPreflight,
+  type PreflightResult,
+  type PreflightSubagent,
+  type PreflightSubagentEvent,
+} from "./plan-preflight.js";
+
+// Same anchor as brainstorm.ts. agents/ → src/ → orchestrator/ → apps/ → repo
+// root → subagents/ours/plan.md.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PLAN_PROMPT_PATH = resolvePath(
+  HERE,
+  "..",
+  "..",
+  "..",
+  "..",
+  "subagents",
+  "ours",
+  "plan.md",
+);
+
+const VENDORED_DIR = resolvePath(HERE, "..", "..", "..", "..", "subagents", "_vendored");
+
+export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
+
+export type PlanOpts = {
+  taskId: string;
+  runId: string;
+  cwd: string;
+  store: ArtifactsStore;
+  bus: PlanEventBus;
+  phaseModel: PhaseModelConfig;
+  sessionPath: string;
+  createAgentSession: CreateAgentSessionFn;
+  ticketTitle: string;
+  ticketDescription: string;
+  signal?: AbortSignal;
+  // Mutable per-run state that survives multiple ticks within the same Run
+  // (mark_ready may dispatch claim-verifier across multiple tool calls in
+  // one turn). The run-loop creates this once per run and threads it through.
+  claimVerifierState: ClaimVerifierState;
+  // Forward subagent bridge events into the plan-event-bus / EventStore so
+  // the existing Agent Log on /tasks/[id] surfaces them. Defaulted to a no-op
+  // by the run-loop; tests stub it for assertions.
+  onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
+};
+
+export type PlanResult = {
+  ok: boolean;
+  ready: boolean;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  error?: string;
+  cancelled?: boolean;
+};
+
+type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
+
+// Drives one plan tick. Two-stage shape:
+//
+//   Stage 1 (preflight): runPreflight dispatches the seven research
+//   subagents (skipping any whose findings file already exists). On
+//   completion, returns ok:true with ready:false so the run-loop re-enters
+//   for the planner stage.
+//
+//   Stage 2 (planner): opens or resumes a real pi session at
+//   pi-session-plan.jsonl, reads the chosen prompt (initial or revision),
+//   drains one prompt(), and reports usage. The mark_ready tool is the only
+//   halt-causing custom tool — its handler validates artifacts + dispatches
+//   claim-verifier and flips status to ready on success.
+export async function runPlan(opts: PlanOpts): Promise<PlanResult> {
+  const events = await readJsonl<JsonlEvent>(
+    join(opts.cwd, ".harness", opts.taskId, "plan.jsonl"),
+  );
+
+  if (hasReadyEvent(events)) {
+    return zeroUsage({ ok: true, ready: true });
+  }
+
+  // Stage 1: preflight. We're done with stage 1 once every subagent's findings
+  // file exists. The "preflight_complete" event is published once when the
+  // last missing findings file lands, so any tick after that goes straight to
+  // the planner.
+  if (!isPreflightComplete(opts.cwd, opts.taskId)) {
+    return runPreflightStage(opts);
+  }
+
+  // Stage 2: planner. Decide between initial prompt and revision prompt based
+  // on the JSONL ordering — the same revision-after-ready logic the gate uses,
+  // but here the planner needs the comment to fold into its next prompt.
+  const decision = decidePlannerPrompt(events);
+  if (decision.kind === "noop") {
+    return zeroUsage({ ok: true, ready: false });
+  }
+
+  return runPlannerStage(opts, decision.prompt);
+}
+
+type PlannerDecision =
+  | { kind: "noop" }
+  | { kind: "initial"; prompt: string }
+  | { kind: "revision"; prompt: string };
+
+function decidePlannerPrompt(events: JsonlEvent[]): PlannerDecision {
+  // First-ever planner tick: no plan_system{planner_started} yet.
+  const hasPlannerStarted = events.some(
+    (e) => e.kind === "plan_system" && e["systemKind"] === "planner_started",
+  );
+
+  // The most-recent revision request that postdates the most-recent ready
+  // event is the trigger for a revision turn.
+  const lastReadyIdx = lastIndexWhere(events, isReadyEvent);
+  const lastRevisionIdx = lastIndexWhere(events, isRevisionEvent);
+  const hasNewRevision = lastRevisionIdx !== -1 && lastRevisionIdx > lastReadyIdx;
+
+  if (hasNewRevision) {
+    const e = events[lastRevisionIdx]!;
+    const comment = typeof e["comment"] === "string" ? (e["comment"] as string) : "";
+    return { kind: "revision", prompt: buildRevisionPrompt(comment) };
+  }
+
+  if (!hasPlannerStarted) {
+    return { kind: "initial", prompt: buildInitialPrompt() };
+  }
+
+  return { kind: "noop" };
+}
+
+function buildInitialPrompt(): string {
+  return [
+    "Begin the plan phase.",
+    "",
+    "1. Read design.md and spec.md from .harness/<this task>/.",
+    "2. Read every file under .harness/<this task>/research/ — there are seven research findings, one per subagent.",
+    "3. Author plan.md and scenarios.yaml per the protocol in your system prompt.",
+    "4. Call mark_ready when both artifacts are complete and you have cross-checked your citations.",
+  ].join("\n");
+}
+
+function buildRevisionPrompt(comment: string): string {
+  return [
+    "The user has requested revisions to your plan:",
+    "",
+    `> ${comment}`,
+    "",
+    "Read your existing plan.md and scenarios.yaml, revise them in place to address the comment, then call mark_ready again.",
+    "",
+    "The research findings under .harness/<task>/research/ have not changed — use them as-is.",
+  ].join("\n");
+}
+
+function hasReadyEvent(events: JsonlEvent[]): boolean {
+  return events.some(isReadyEvent);
+}
+
+function isReadyEvent(e: JsonlEvent): boolean {
+  if (e.kind !== "plan_system") return false;
+  if (e["systemKind"] !== "status_changed") return false;
+  const data = e["data"] as { status?: string } | undefined;
+  return data?.status === "ready";
+}
+
+function isRevisionEvent(e: JsonlEvent): boolean {
+  return e.kind === "plan_revision_requested";
+}
+
+function lastIndexWhere<T>(arr: T[], pred: (e: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    if (pred(arr[i]!)) return i;
+  }
+  return -1;
+}
+
+function isPreflightComplete(cwd: string, taskId: string): boolean {
+  const researchDir = join(cwd, ".harness", taskId, "research");
+  // The seven canonical findings filenames. Mirrors PREFLIGHT_SUBAGENTS in
+  // plan-preflight; duplicating the list here avoids importing a const just
+  // for a hot-path existence check.
+  const required = [
+    "scope-tracer.md",
+    "codebase-locator.md",
+    "codebase-pattern-finder.md",
+    "codebase-analyzer.md",
+    "integration-scanner.md",
+    "test-case-locator.md",
+    "precedent-locator.md",
+  ];
+  return required.every((name) => existsSync(join(researchDir, name)));
+}
+
+async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
+  await opts.bus.publish({
+    kind: "plan_system",
+    systemKind: "preflight_started",
+  });
+
+  const [design, spec] = await Promise.all([
+    opts.store.readArtifact(opts.cwd, opts.taskId, "design"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "spec"),
+  ]);
+  if (!design || !spec) {
+    await opts.bus.publish({
+      kind: "plan_system",
+      systemKind: "blocked",
+      data: { reason: "design.md or spec.md missing — brainstorm not approved?" },
+    });
+    return zeroUsage({
+      ok: false,
+      ready: false,
+      error: "plan: missing brainstorm artifacts",
+    });
+  }
+
+  let result: PreflightResult;
+  try {
+    result = await runPreflight({
+      cwd: opts.cwd,
+      taskId: opts.taskId,
+      ticketTitle: opts.ticketTitle,
+      ticketDescription: opts.ticketDescription,
+      designBody: design.body,
+      specBody: spec.body,
+      phaseModel: opts.phaseModel,
+      createAgentSession: opts.createAgentSession,
+      onSubagentEvent: async (e: PreflightSubagentEvent) => {
+        if (e.kind === "started") {
+          await opts.bus.publish({
+            kind: "plan_subagent_started",
+            subagent: e.subagent,
+            sessionId: e.sessionId,
+          });
+        } else {
+          await opts.bus.publish({
+            kind: "plan_subagent_ended",
+            subagent: e.subagent,
+            sessionId: e.sessionId,
+            ok: e.ok,
+            durationMs: e.durationMs,
+            costUsd: e.costUsd,
+            inputTokens: e.inputTokens,
+            outputTokens: e.outputTokens,
+            ...(e.error !== undefined ? { error: e.error } : {}),
+          });
+        }
+      },
+      ...(opts.onSubagentBridgeEvent ? { onSubagentBridgeEvent: opts.onSubagentBridgeEvent } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+  } catch (err) {
+    if (err instanceof AuthError) {
+      await opts.bus.publish({
+        kind: "plan_system",
+        systemKind: "blocked",
+        data: { reason: err.message },
+      });
+      return zeroUsage({
+        ok: false,
+        ready: false,
+        error: `plan preflight: ${err.message}`,
+      });
+    }
+    throw err;
+  }
+
+  // Sum up usage across the subagents.
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  for (const r of result.results) {
+    inputTokens += r.inputTokens;
+    outputTokens += r.outputTokens;
+    costUsd += r.costUsd;
+  }
+
+  if (result.failed) {
+    await opts.bus.publish({
+      kind: "plan_system",
+      systemKind: "blocked",
+      data: { reason: "preflight: ≥3 subagents failed" },
+    });
+    return {
+      ok: false,
+      ready: false,
+      error: "plan preflight: too many subagent failures",
+      inputTokens,
+      outputTokens,
+      costUsd,
+    };
+  }
+
+  await opts.bus.publish({
+    kind: "plan_system",
+    systemKind: "preflight_complete",
+    data: { count: result.results.length },
+  });
+
+  return { ok: true, ready: false, inputTokens, outputTokens, costUsd };
+}
+
+async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<PlanResult> {
+  await opts.bus.publish({
+    kind: "plan_system",
+    systemKind: "planner_started",
+  });
+
+  // Build claim-verifier dispatcher closure. It runs the vendored
+  // claim-verifier subagent with plan.md as input, writes findings to
+  // research/claim-verifier.md, and parses Falsified entries. Capped via
+  // claimVerifierState; the tool itself enforces the cap.
+  const dispatchClaimVerifier: DispatchClaimVerifier = async (planBody: string) => {
+    const findingsPath = join(opts.cwd, ".harness", opts.taskId, "research", "claim-verifier.md");
+    if (existsSync(findingsPath)) {
+      // Re-dispatch: clear stale findings so the next attempt starts fresh.
+      await unlink(findingsPath).catch(() => {});
+    }
+    const promptPath = join(VENDORED_DIR, "claim-verifier.md");
+    const systemPrompt = readFileSync(promptPath, "utf8");
+    const userPrompt = [
+      `You are auditing the plan for task ${opts.taskId}. Read the plan below and tag every claim as Verified, Weakened, or Falsified per your system prompt.`,
+      ``,
+      `Write your findings to \`.harness/${opts.taskId}/research/claim-verifier.md\` using the standard claim-verifier output format.`,
+      ``,
+      `# plan.md`,
+      ``,
+      planBody,
+    ].join("\n");
+
+    const session = await opts.createAgentSession({
+      cwd: opts.cwd,
+      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+      ...(opts.phaseModel.thinkingLevel !== "off"
+        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+        : {}),
+      maxTurns: 15,
+      systemPrompt,
+      onEvent: () => {},
+    });
+    try {
+      await session.prompt(userPrompt);
+    } finally {
+      await session.close().catch(() => {});
+    }
+    if (!existsSync(findingsPath)) {
+      return { falsifiedClaims: [] };
+    }
+    const findings = readFileSync(findingsPath, "utf8");
+    return { falsifiedClaims: parseFalsifiedClaims(findings) };
+  };
+
+  const markReadyTool = makeMarkReadyTool({
+    store: opts.store,
+    bus: opts.bus,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+    dispatchClaimVerifier,
+    claimVerifierState: opts.claimVerifierState,
+  });
+
+  let systemPrompt: string;
+  try {
+    systemPrompt = readFileSync(PLAN_PROMPT_PATH, "utf8");
+  } catch (err) {
+    return zeroUsage({
+      ok: false,
+      ready: false,
+      error: `plan: cannot read system prompt: ${(err as Error).message}`,
+    });
+  }
+
+  const sessionPath = opts.sessionPath;
+  let session: AgentSession;
+  try {
+    session = await opts.createAgentSession({
+      cwd: opts.cwd,
+      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+      ...(opts.phaseModel.thinkingLevel !== "off"
+        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+        : {}),
+      maxTurns: opts.phaseModel.maxTurns,
+      systemPrompt,
+      sessionPath,
+      customTools: [markReadyTool],
+      onEvent: () => {
+        // Bridge events from the planner session aren't forwarded here
+        // because the run-loop also subscribes to them via PhaseDeps in
+        // Phase 5; centralizing the forwarding there keeps the driver
+        // single-purpose.
+      },
+    });
+  } catch (err) {
+    if (err instanceof AuthError) {
+      await opts.bus.publish({
+        kind: "plan_system",
+        systemKind: "blocked",
+        data: { reason: err.message },
+      });
+      return zeroUsage({
+        ok: false,
+        ready: false,
+        error: `missing API key for ${opts.phaseModel.provider}`,
+      });
+    }
+    return zeroUsage({
+      ok: false,
+      ready: false,
+      error: (err as Error).message,
+    });
+  }
+
+  const signal = opts.signal;
+  const onAbort = (): void => {
+    void session.abort().catch(() => {});
+  };
+  if (signal?.aborted) {
+    await session.close().catch(() => {});
+    return zeroUsage({ ok: false, ready: false, cancelled: true });
+  }
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  let usage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+  try {
+    usage = await session.prompt(promptText);
+  } catch (err) {
+    signal?.removeEventListener("abort", onAbort);
+    await session.close().catch(() => {});
+    const message = (err as Error).message;
+    if (signal?.aborted || message === "aborted") {
+      return zeroUsage({ ok: false, ready: false, cancelled: true });
+    }
+    if (message === "maxTurns exceeded") {
+      await opts.bus.publish({
+        kind: "plan_system",
+        systemKind: "blocked",
+        data: { reason: `maxTurns (${opts.phaseModel.maxTurns}) exceeded` },
+      });
+      return zeroUsage({
+        ok: false,
+        ready: false,
+        error: "plan: maxTurns exceeded",
+      });
+    }
+    await opts.bus.publish({
+      kind: "plan_system",
+      systemKind: "blocked",
+      data: { reason: message },
+    });
+    return zeroUsage({ ok: false, ready: false, error: message });
+  }
+
+  signal?.removeEventListener("abort", onAbort);
+  await session.close();
+
+  // Per-tick usage event. Cumulatives survive orchestrator restarts because
+  // we re-read plan.jsonl on every runPlan invocation and seed totals from
+  // the latest plan_usage event.
+  if (usage.inputTokens > 0 || usage.outputTokens > 0 || usage.costUsd > 0) {
+    const priorEvents = await readJsonl<JsonlEvent>(
+      join(opts.cwd, ".harness", opts.taskId, "plan.jsonl"),
+    );
+    let cumIn = 0;
+    let cumOut = 0;
+    let cumCost = 0;
+    let lastTickIndex = -1;
+    for (const e of priorEvents) {
+      if (e.kind !== "plan_usage") continue;
+      const ci = numField(e, "cumulativeInputTokens");
+      const co = numField(e, "cumulativeOutputTokens");
+      const cc = numField(e, "cumulativeCostUsd");
+      const ti = numField(e, "tickIndex");
+      if (ci !== null) cumIn = ci;
+      if (co !== null) cumOut = co;
+      if (cc !== null) cumCost = cc;
+      if (ti !== null && ti > lastTickIndex) lastTickIndex = ti;
+    }
+    await opts.bus.publish({
+      kind: "plan_usage",
+      tickIndex: lastTickIndex + 1,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd: usage.costUsd,
+      cumulativeInputTokens: cumIn + usage.inputTokens,
+      cumulativeOutputTokens: cumOut + usage.outputTokens,
+      cumulativeCostUsd: cumCost + usage.costUsd,
+    });
+  }
+
+  // Re-read artifacts to determine ready-ness, since mark_ready may have
+  // succeeded inside the prompt without our switch logic seeing it (we
+  // don't subscribe to bridge events in the planner stage; the bus does
+  // the publishing internally).
+  const [plan, scenarios] = await Promise.all([
+    opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "scenarios"),
+  ]);
+  const ready =
+    plan?.fm.status === "ready" && scenarios?.fm.status === "ready";
+
+  return {
+    ok: true,
+    ready: Boolean(ready),
+    costUsd: usage.costUsd,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
+}
+
+function numField(e: JsonlEvent, k: string): number | null {
+  const v = (e as Record<string, unknown>)[k];
+  return typeof v === "number" ? v : null;
+}
+
+function zeroUsage(rest: Omit<PlanResult, "costUsd" | "inputTokens" | "outputTokens">): PlanResult {
+  return { ...rest, costUsd: 0, inputTokens: 0, outputTokens: 0 };
+}
+
+// Helper: write a placeholder file to ensure parent directory exists when
+// callers want to seed an empty findings file (used in tests).
+export async function _ensureResearchFile(cwd: string, taskId: string, name: string): Promise<void> {
+  const path = join(cwd, ".harness", taskId, "research", name);
+  await writeFile(path, "# placeholder\n");
+}

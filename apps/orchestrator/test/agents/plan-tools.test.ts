@@ -1,0 +1,372 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import simpleGit from "simple-git";
+import type { Artifact } from "@pi-harness/shared";
+import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
+import { PlanEventBus } from "../../src/agents/plan-event-bus.js";
+import {
+  makeMarkReadyTool,
+  validateScenariosYaml,
+  parseFalsifiedClaims,
+  type ClaimVerifierState,
+  type DispatchClaimVerifier,
+} from "../../src/agents/plan-tools.js";
+import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
+import type { AgentEvent } from "@pi-harness/shared";
+
+class InMemoryEventStore {
+  private events: AgentEvent[] = [];
+  async append(e: AgentEvent): Promise<void> {
+    this.events.push(e);
+  }
+  async list(runId: string): Promise<AgentEvent[]> {
+    return this.events.filter((e) => e.runId === runId);
+  }
+}
+
+let scratch: string;
+let cwd: string;
+let store: ArtifactsStore;
+let bus: PlanEventBus;
+let eventStore: InMemoryEventStore;
+
+const validScenariosYaml = `scenarios:
+  - id: s1
+    type: api
+    name: smoke
+    request:
+      method: GET
+      url: http://localhost/health
+    expect:
+      status: 200
+`;
+
+const validPlanBody = [
+  "# Plan",
+  "",
+  "## Goal",
+  "Add retry to webhooks.",
+  "",
+  "## Patterns to follow",
+  "- `src/foo.ts:42` — exponential backoff helper",
+  "",
+  "## Touchpoints",
+  "- api: `src/webhooks.ts` — current send path has no retry",
+  "",
+  "## Blast radius",
+  "- outbound: third-party webhook receivers",
+  "",
+  "## Precedent warnings",
+  "- abc123 — last retry attempt double-billed receivers",
+  "",
+  "## Steps",
+  "1. Add backoff helper",
+  "   - modify src/webhooks.ts",
+  "   - Assertion: webhook test passes with 5 retries",
+  "",
+  "## Out of scope",
+  "- Inbound webhook receipts",
+].join("\n");
+
+async function seedRepo() {
+  const git = simpleGit(cwd);
+  await git.init();
+  await git.addConfig("user.email", "test@example.com", false, "local");
+  await git.addConfig("user.name", "Test", false, "local");
+  await writeFile(join(cwd, ".gitignore"), ".harness/\n");
+  await writeFile(join(cwd, "README.md"), "init\n");
+  await git.add(["README.md", ".gitignore"]);
+  await git.commit("init");
+  await git.checkoutLocalBranch("pi/T-1");
+}
+
+async function writePlanArtifacts(planBody: string, scenariosBody: string) {
+  const plan: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "plan",
+      parent: "design.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "orchestrator",
+    },
+    body: planBody,
+  };
+  const scenarios: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "scenarios",
+      parent: "plan.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "orchestrator",
+    },
+    body: scenariosBody,
+  };
+  await store.writeArtifact(cwd, "T-1", plan);
+  await store.writeArtifact(cwd, "T-1", scenarios);
+}
+
+beforeEach(async () => {
+  scratch = await mkdtemp(join(tmpdir(), "plan-tools-test-"));
+  cwd = join(scratch, "wt");
+  await mkdir(cwd, { recursive: true });
+  await seedRepo();
+  store = new ArtifactsStore();
+  eventStore = new InMemoryEventStore();
+  await mkdir(join(cwd, ".harness", "T-1"), { recursive: true });
+  bus = new PlanEventBus({
+    eventStore: eventStore as never,
+    jsonl: new JsonlWriter(join(cwd, ".harness", "T-1", "plan.jsonl")),
+    runId: "r-1",
+    taskId: "T-1",
+  });
+});
+
+afterEach(async () => {
+  await rm(scratch, { recursive: true, force: true });
+});
+
+const noopDispatcher: DispatchClaimVerifier = async () => ({ falsifiedClaims: [] });
+const newState = (): ClaimVerifierState => ({ attempts: 0, cap: 2 });
+
+describe("mark_ready", () => {
+  it("rejects when plan.md is missing", async () => {
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toBe("plan.md not found");
+  });
+
+  it("rejects when scenarios.yaml is missing", async () => {
+    const planOnly: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "plan",
+        parent: "design.md",
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "orchestrator",
+      },
+      body: validPlanBody,
+    };
+    await store.writeArtifact(cwd, "T-1", planOnly);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toBe("scenarios.yaml not found");
+  });
+
+  it("rejects when a required section is missing", async () => {
+    const planMissing = validPlanBody.replace("## Out of scope\n- Inbound webhook receipts", "");
+    await writePlanArtifacts(planMissing, validScenariosYaml);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("## Out of scope");
+  });
+
+  it("rejects when a required section is empty", async () => {
+    const planEmpty = validPlanBody.replace(
+      "## Out of scope\n- Inbound webhook receipts",
+      "## Out of scope\n",
+    );
+    await writePlanArtifacts(planEmpty, validScenariosYaml);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("## Out of scope");
+    expect(result.details.missing).toContain("empty");
+  });
+
+  it("rejects when scenarios.yaml is malformed YAML", async () => {
+    await writePlanArtifacts(validPlanBody, "scenarios: [unclosed\n");
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("scenarios.yaml");
+  });
+
+  it("rejects when scenarios.yaml fails schema (missing required field)", async () => {
+    const bad = `scenarios:
+  - id: s1
+    type: api
+    name: smoke
+    request:
+      method: GET
+      url: http://localhost/health
+`; // expect.status missing
+    await writePlanArtifacts(validPlanBody, bad);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("scenarios.yaml");
+  });
+
+  it("rejects when claim-verifier flags Falsified claims", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const dispatcher = vi.fn(async () => ({
+      falsifiedClaims: ["pattern at src/foo.ts:42 does not exist"],
+    }));
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: dispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("claim-verifier");
+    expect(result.details.missing).toContain("does not exist");
+    expect(dispatcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("claim-verifier dispatch is capped at 2 attempts per run", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const dispatcher = vi.fn(async () => ({ falsifiedClaims: ["c1"] }));
+    const state = newState();
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: dispatcher,
+      claimVerifierState: state,
+    });
+
+    // First call dispatches.
+    let r = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(r.details.ok).toBe(false);
+    expect(dispatcher).toHaveBeenCalledTimes(1);
+
+    // Second call dispatches.
+    r = await tool.execute("t2", {}, undefined, undefined, null as never);
+    expect(r.details.ok).toBe(false);
+    expect(dispatcher).toHaveBeenCalledTimes(2);
+
+    // Third call: cap exhausted, no dispatch.
+    r = await tool.execute("t3", {}, undefined, undefined, null as never);
+    expect(r.details.ok).toBe(false);
+    expect(r.details.missing).toContain("exhausted");
+    expect(dispatcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("succeeds: flips both artifacts to ready and publishes status_changed event", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(true);
+    expect(result.terminate).toBe(true);
+
+    const plan = await store.readArtifact(cwd, "T-1", "plan");
+    const scenarios = await store.readArtifact(cwd, "T-1", "scenarios");
+    expect(plan?.fm.status).toBe("ready");
+    expect(scenarios?.fm.status).toBe("ready");
+    expect(plan?.fm.last_updated_by).toBe("plan-agent");
+
+    const events = await eventStore.list("r-1");
+    const statusChanged = events.find(
+      (e) => e.kind === "plan_system" && (e as { systemKind?: string }).systemKind === "status_changed",
+    );
+    expect(statusChanged).toBeDefined();
+  });
+
+  it("idempotent: succeeds again without writing when already ready", async () => {
+    const planReady: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "plan",
+        parent: "design.md",
+        status: "ready",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "plan-agent",
+      },
+      body: validPlanBody,
+    };
+    const scenariosReady: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "scenarios",
+        parent: "plan.md",
+        status: "ready",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "plan-agent",
+      },
+      body: validScenariosYaml,
+    };
+    await store.writeArtifact(cwd, "T-1", planReady);
+    await store.writeArtifact(cwd, "T-1", scenariosReady);
+
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(true);
+  });
+});
+
+describe("validateScenariosYaml", () => {
+  it("returns null on a valid file", () => {
+    expect(validateScenariosYaml(validScenariosYaml)).toBeNull();
+  });
+
+  it("returns a YAML parse error on malformed input", () => {
+    expect(validateScenariosYaml("scenarios: [unclosed")).toMatch(/YAML parse/);
+  });
+
+  it("returns a schema error when scenarios is empty", () => {
+    expect(validateScenariosYaml("scenarios: []")).toContain("scenarios");
+  });
+});
+
+describe("parseFalsifiedClaims", () => {
+  it("returns empty when no Falsified entries", () => {
+    expect(parseFalsifiedClaims("# claims\n## c1\nVerified\n")).toEqual([]);
+  });
+
+  it("collects each header preceded by a Falsified marker", () => {
+    const md = [
+      "# Audit",
+      "## Claim 1",
+      "Verified",
+      "## Claim 2",
+      "Falsified — file does not exist",
+      "## Claim 3",
+      "**Falsified**",
+    ].join("\n");
+    expect(parseFalsifiedClaims(md)).toEqual(["Claim 2", "Claim 3"]);
+  });
+});
