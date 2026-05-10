@@ -307,6 +307,31 @@ describe("createAgentSession", () => {
     expect(u2).toEqual({ inputTokens: 4, outputTokens: 2, costUsd: 0.0002 });
   });
 
+  it("crofai auth missing: AuthError names CROFAI_API_KEY", async () => {
+    delete process.env["CROFAI_API_KEY"];
+    const adapter = createFakeAdapter();
+    await expect(
+      createAgentSession(
+        { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+        adapter,
+      ),
+    ).rejects.toThrow(/CROFAI_API_KEY/);
+  });
+
+  it("crofai auth present: assertCredential passes when CROFAI_API_KEY is set", async () => {
+    process.env["CROFAI_API_KEY"] = "test-crofai-key";
+    try {
+      const adapter = createFakeAdapter();
+      const session = await createAgentSession(
+        { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+        adapter,
+      );
+      await session.close();
+    } finally {
+      delete process.env["CROFAI_API_KEY"];
+    }
+  });
+
   it("abort: rejects pending prompt with 'aborted' and forwards to sdk", async () => {
     const adapter = createFakeAdapter();
     const session = await createAgentSession(

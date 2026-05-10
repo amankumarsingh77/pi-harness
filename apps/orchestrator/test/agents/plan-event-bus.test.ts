@@ -50,7 +50,7 @@ describe("PlanEventBus", () => {
     });
     await bus.publish({
       kind: "plan_subagent_started",
-      subagent: "scope-tracer",
+      subagent: "codebase-locator",
       sessionId: "s1",
     });
     expect(order).toEqual(["jsonl", "event"]);

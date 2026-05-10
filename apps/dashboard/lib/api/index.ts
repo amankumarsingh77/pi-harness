@@ -15,7 +15,7 @@ export type BrainstormBundle = {
 };
 
 // Plan-phase counterpart to BrainstormBundle. Same gate semantics; research
-// is keyed by subagent name (one of the 7 preflight + claim-verifier).
+// is keyed by subagent name (one of the 5 preflight + claim-verifier).
 export type PlanGate = "running" | "awaiting_user";
 
 export type PlanBundle = {

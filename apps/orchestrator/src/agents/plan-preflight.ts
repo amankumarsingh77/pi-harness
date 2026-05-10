@@ -17,16 +17,19 @@ import type { PhaseModelConfig } from "@pi-harness/shared";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VENDORED_DIR = resolvePath(HERE, "..", "..", "..", "..", "subagents", "_vendored");
 
-// The seven research subagents that run in parallel before the planner.
+// The five research subagents that run in parallel before the planner.
 // claim-verifier is intentionally excluded — it runs from mark_ready (Phase 4),
 // not from preflight, because it operates on the planner's draft plan.md.
+//
+// scope-tracer and test-case-locator were dropped: brainstorm already bounds
+// scope (and gates on user approval), and test-case-locator searches the
+// rpiv-mono `.rpiv/test-cases/` convention which doesn't exist here. Their
+// vendored prompts remain on disk in subagents/_vendored/ for revivability.
 export const PREFLIGHT_SUBAGENTS = [
-  "scope-tracer",
   "codebase-locator",
   "codebase-pattern-finder",
   "codebase-analyzer",
   "integration-scanner",
-  "test-case-locator",
   "precedent-locator",
 ] as const;
 export type PreflightSubagent = (typeof PREFLIGHT_SUBAGENTS)[number];
@@ -35,8 +38,6 @@ export type PreflightSubagent = (typeof PREFLIGHT_SUBAGENTS)[number];
 // vendored system prompt does the heavy lifting; this just tells the agent
 // what *this* ticket needs from it.
 const FRAMINGS: Record<PreflightSubagent, string> = {
-  "scope-tracer":
-    "Bound the investigation for this ticket. Produce a discovery summary plus any ambiguities the planner needs to resolve.",
   "codebase-locator":
     "Locate every file that will be read or modified to deliver this ticket.",
   "codebase-pattern-finder":
@@ -45,16 +46,9 @@ const FRAMINGS: Record<PreflightSubagent, string> = {
     "Trace how the relevant call paths (the touchpoints surfaced by codebase-locator) work today.",
   "integration-scanner":
     "Identify inbound and outbound system edges affected by this ticket.",
-  "test-case-locator":
-    "Map existing test coverage relevant to the touchpoints this ticket modifies.",
   "precedent-locator":
     "Find past similar changes from git history and what went wrong with each one.",
 };
-
-// Hard cap per subagent. They're focused single-shots — the vendored prompts
-// expect to finish in a handful of turns. The planner's own maxTurns is
-// independent (configured via task.phaseModels.plan).
-const SUBAGENT_MAX_TURNS = 15;
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -211,7 +205,6 @@ async function runOneSubagent(args: {
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
-      maxTurns: SUBAGENT_MAX_TURNS,
       systemPrompt,
       onEvent: (e) => opts.onSubagentBridgeEvent?.(subagent, e),
     });

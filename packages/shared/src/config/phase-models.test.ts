@@ -15,7 +15,14 @@ describe("DEFAULT_PHASE_MODELS", () => {
       expect(cfg.provider.length).toBeGreaterThan(0);
       expect(cfg.model.length).toBeGreaterThan(0);
       expect(THINKING_LEVELS).toContain(cfg.thinkingLevel);
-      expect(cfg.maxTurns).toBeGreaterThan(0);
+    }
+  });
+
+  it("routes every phase to crofai/kimi-k2.6", () => {
+    for (const phase of PHASES) {
+      const cfg = DEFAULT_PHASE_MODELS[phase];
+      expect(cfg.provider).toBe("crofai");
+      expect(cfg.model).toBe("kimi-k2.6");
     }
   });
 });
@@ -48,14 +55,13 @@ describe("mergePhaseModels", () => {
       provider: "openai",
       model: "gpt-x",
       thinkingLevel: "off",
-      maxTurns: 99,
     };
     expect(mergePhaseModels({ brainstorm: override }, "brainstorm")).toEqual(override);
   });
 
   it("does not mutate the input overrides object", () => {
     const overrides: Partial<Record<Phase, Partial<PhaseModelConfig>>> = {
-      brainstorm: { maxTurns: 7 },
+      brainstorm: { thinkingLevel: "low" },
     };
     const snapshot = JSON.stringify(overrides);
     mergePhaseModels(overrides, "brainstorm");

@@ -18,10 +18,14 @@ export type BrainstormOption = {
 export type AgentEvent =
   | (AgentEventBase & { kind: "phase_started"; phase: string })
   | (AgentEventBase & { kind: "phase_ended"; phase: string; status: "succeeded" | "failed" | "cancelled" })
-  | (AgentEventBase & { kind: "message_delta"; text: string })
-  | (AgentEventBase & { kind: "tool_call"; tool: string; input: unknown })
-  | (AgentEventBase & { kind: "tool_result"; tool: string; ok: boolean; output?: unknown })
-  | (AgentEventBase & { kind: "log"; level: "info" | "warn" | "error"; text: string })
+  // `subagent` is set when the event originated inside a research subagent's
+  // pi session (plan-phase preflight). Absent for events emitted by the
+  // primary phase agent (the planner itself, brainstorm, etc.). The dashboard
+  // routes drawer rendering off this field.
+  | (AgentEventBase & { kind: "message_delta"; text: string; subagent?: string })
+  | (AgentEventBase & { kind: "tool_call"; tool: string; input: unknown; subagent?: string })
+  | (AgentEventBase & { kind: "tool_result"; tool: string; ok: boolean; output?: unknown; subagent?: string })
+  | (AgentEventBase & { kind: "log"; level: "info" | "warn" | "error"; text: string; subagent?: string })
   // Brainstorm-specific events. Mirrored to <worktree>/.harness/<taskId>/brainstorm.jsonl.
   | (AgentEventBase & {
       kind: "brainstorm_question";

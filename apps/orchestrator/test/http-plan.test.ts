@@ -116,7 +116,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(body.gate).toBe("running");
     expect(body.plan).toBeNull();
     expect(body.scenarios).toBeNull();
-    expect(body.research["scope-tracer"]).toBeNull();
+    expect(body.research["codebase-locator"]).toBeNull();
   });
 
   it("GET surfaces plan, scenarios, gate, and research findings", async () => {
@@ -126,7 +126,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     // Drop a fake findings file.
     const researchDir = join(wt, ".harness", t.id, "research");
     await mkdir(researchDir, { recursive: true });
-    await writeFile(join(researchDir, "scope-tracer.md"), "# scope-tracer findings\n");
+    await writeFile(join(researchDir, "codebase-locator.md"), "# codebase-locator findings\n");
 
     const res = await app.inject({ method: "GET", url: `/api/tasks/${t.id}/plan` });
     expect(res.statusCode).toBe(200);
@@ -134,8 +134,8 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(body.gate).toBe("awaiting_user");
     expect(body.plan?.fm.status).toBe("ready");
     expect(body.scenarios?.fm.status).toBe("ready");
-    expect(body.research["scope-tracer"]).toContain("scope-tracer findings");
-    expect(body.research["codebase-locator"]).toBeNull();
+    expect(body.research["codebase-locator"]).toContain("codebase-locator findings");
+    expect(body.research["codebase-pattern-finder"]).toBeNull();
   });
 
   it("user_request_plan_changes resets artifacts to draft + writes revision event", async () => {

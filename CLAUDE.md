@@ -101,12 +101,12 @@ Implemented end-to-end against the real `@earendil-works/pi-coding-agent` SDK. S
 - On task entry: branch `pi/T-NNN`, worktree at `.harness/worktrees/<taskId>/`, `chore(<taskId>): brainstorm scaffolding` commit lays down `design.md` + `spec.md` with `status: draft` frontmatter at `<worktree>/.harness/<taskId>/`.
 - Q&A: `apps/orchestrator/src/agents/brainstorm.ts` opens or resumes a real pi agent session per tick. The system prompt is `subagents/ours/brainstorm.md`; phase-specific custom tools `submit_questions` and `mark_ready` live in `apps/orchestrator/src/agents/brainstorm-tools.ts`. `BrainstormEventBus` dual-writes every event to JSONL (`brainstorm.jsonl`) and EventStore (for live SSE).
 - Resume: pi's session JSONL is persisted at `<worktree>/.harness/<taskId>/pi-session.jsonl`; each tick reopens it so orchestrator restarts don't lose context.
-- Per-phase model config: `effectiveConfig = { ...DEFAULT_PHASE_MODELS[phase], ...task.phaseModels[phase] }` (`packages/shared/src/config/phase-models.ts`). Defaults to anthropic / claude-sonnet for brainstorm.
+- Per-phase model config: `effectiveConfig = { ...DEFAULT_PHASE_MODELS[phase], ...task.phaseModels[phase] }` (`packages/shared/src/config/phase-models.ts`). Defaults to crofai / kimi-k2.6 for every phase. CrofAI is registered as a custom provider via `ModelRegistry.registerProvider` in `packages/pi-bridge/src/agent-session.ts`; the curated model list lives in `packages/pi-bridge/src/providers/crofai.ts`.
 - Approval: `awaitingApproval=true` is the brainstorm sub-state — task sits in `brainstorming` until the user clicks Approve (advances to `planning`, marks both artifacts `approved`) or Request changes (appends revision event, agent re-walks).
 
 ### Live exercises
 
-`PI_LIVE=1 pnpm --filter @pi-harness/orchestrator test brainstorm.live` runs `apps/orchestrator/test/agents/brainstorm.live.test.ts` against a real Anthropic key. Requires `.env.harness` at repo root with `ANTHROPIC_API_KEY=...` (see `.env.harness.example`). The file is excluded from default `pnpm test` via the `**/*.live.test.ts` exclude in `apps/orchestrator/vitest.config.ts`.
+`PI_LIVE=1 pnpm --filter @pi-harness/orchestrator test brainstorm.live` runs `apps/orchestrator/test/agents/brainstorm.live.test.ts`. Requires `.env.harness` at repo root with `CROFAI_API_KEY=...` (default) or whichever provider's key matches the test's configured `phaseModel` — `ANTHROPIC_API_KEY=...` works if the test is pointed at the anthropic provider. See `.env.harness.example`. The file is excluded from default `pnpm test` via the `**/*.live.test.ts` exclude in `apps/orchestrator/vitest.config.ts`.
 
 ## Known gaps (intentionally deferred)
 

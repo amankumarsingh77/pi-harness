@@ -59,7 +59,7 @@ describe("scaffoldPlan", () => {
     await scaffoldPlan({ cwd: scratch, taskId: "T-001", branch: "pi/T-001" });
     const researchDir = join(scratch, ".harness", "T-001", "research");
     await mkdir(researchDir, { recursive: true });
-    await writeFile(join(researchDir, "scope-tracer.md"), "# scope-tracer findings\n");
+    await writeFile(join(researchDir, "codebase-locator.md"), "# codebase-locator findings\n");
     const git = simpleGit(scratch);
     const status = await git.status();
     // .harness/T-001/research/* should NOT appear in status — neither staged
