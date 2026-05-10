@@ -19,12 +19,15 @@ export type PhaseModelConfig = {
 
 // Code-level defaults. Edits require a deploy. Per-task overrides go through
 // the tasks.phase_models JSONB column and merge into these via mergePhaseModels.
+// All phases use opencode-go + kimi-k2.6 today. Single provider keeps auth
+// surface to one env key (OPENCODE_API_KEY); model id is from pi-ai's
+// generated registry (`kimi-k2.6` under provider `opencode-go`).
 export const DEFAULT_PHASE_MODELS: Record<Phase, PhaseModelConfig> = {
-  brainstorm: { provider: "opencode-go", model: "deepseek-v4-pro", thinkingLevel: "medium", maxTurns: 30 },
-  plan:       { provider: "anthropic", model: "claude-opus-4-7",   thinkingLevel: "high",   maxTurns: 20 },
-  code:       { provider: "anthropic", model: "claude-sonnet-4-6", thinkingLevel: "medium", maxTurns: 80 },
-  verify:     { provider: "anthropic", model: "claude-opus-4-7",   thinkingLevel: "high",   maxTurns: 30 },
-  pr:         { provider: "anthropic", model: "claude-sonnet-4-6", thinkingLevel: "off",    maxTurns: 5  },
+  brainstorm: { provider: "opencode-go", model: "kimi-k2.6", thinkingLevel: "medium", maxTurns: 30 },
+  plan:       { provider: "opencode-go", model: "kimi-k2.6", thinkingLevel: "high",   maxTurns: 20 },
+  code:       { provider: "opencode-go", model: "kimi-k2.6", thinkingLevel: "medium", maxTurns: 80 },
+  verify:     { provider: "opencode-go", model: "kimi-k2.6", thinkingLevel: "high",   maxTurns: 30 },
+  pr:         { provider: "opencode-go", model: "kimi-k2.6", thinkingLevel: "off",    maxTurns: 5  },
 };
 
 export function mergePhaseModels(
