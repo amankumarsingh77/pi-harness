@@ -8,8 +8,10 @@ import type {
   PiBridgeEvent,
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
-import type { PhaseModelConfig } from "@pi-harness/shared";
+import type { AgentEvent, PhaseModelConfig } from "@pi-harness/shared";
 import { readJsonl } from "../adapters/jsonl-writer.js";
+import type { EventStore } from "../adapters/event-store.js";
+import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
 import {
@@ -49,6 +51,11 @@ export type PlanOpts = {
   cwd: string;
   store: ArtifactsStore;
   bus: PlanEventBus;
+  // EventStore is needed alongside the bus because pi-bridge tool_call /
+  // tool_result events go straight to EventStore (not the JSONL plan log).
+  // Mirrors brainstorm's split: control-plane events on the bus, raw bridge
+  // events on the store.
+  eventStore: EventStore;
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
@@ -59,9 +66,9 @@ export type PlanOpts = {
   // (mark_ready may dispatch claim-verifier across multiple tool calls in
   // one turn). The run-loop creates this once per run and threads it through.
   claimVerifierState: ClaimVerifierState;
-  // Forward subagent bridge events into the plan-event-bus / EventStore so
-  // the existing Agent Log on /tasks/[id] surfaces them. Defaulted to a no-op
-  // by the run-loop; tests stub it for assertions.
+  // Optional override for tests. Production callers leave this unset and the
+  // driver wires its own forwarder that tags events with the subagent name
+  // and pushes them to EventStore.
   onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
 };
 
@@ -230,6 +237,34 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     });
   }
 
+  // Default forwarder: tag every bridge event with the subagent name and push
+  // it to EventStore so the dashboard's per-agent drawer can filter by
+  // subagent. Skip turn_end / error (control-plane only) and the harness's
+  // own custom-tool calls (planner publishes richer events for those).
+  // Tests can pass their own onSubagentBridgeEvent to assert ordering.
+  const defaultForward = (subagent: PreflightSubagent, e: PiBridgeEvent): void => {
+    if (e.kind === "turn_end" || e.kind === "error") return;
+    const base = { runId: opts.runId, taskId: opts.taskId };
+    let event: AgentEvent | null = null;
+    if (e.kind === "message_delta") {
+      event = mkEvent({ ...base, kind: "message_delta", text: e.text, subagent });
+    } else if (e.kind === "tool_call") {
+      event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input, subagent });
+    } else if (e.kind === "tool_result") {
+      event = mkEvent({
+        ...base,
+        kind: "tool_result",
+        tool: e.tool,
+        ok: e.ok,
+        ...(e.output !== undefined ? { output: e.output } : {}),
+        subagent,
+      });
+    } else if (e.kind === "log") {
+      event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text, subagent });
+    }
+    if (event) void opts.eventStore.append(event).catch(() => {});
+  };
+
   let result: PreflightResult;
   try {
     result = await runPreflight({
@@ -241,6 +276,7 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
       specBody: spec.body,
       phaseModel: opts.phaseModel,
       createAgentSession: opts.createAgentSession,
+      onSubagentBridgeEvent: opts.onSubagentBridgeEvent ?? defaultForward,
       onSubagentEvent: async (e: PreflightSubagentEvent) => {
         if (e.kind === "started") {
           await opts.bus.publish({
@@ -262,7 +298,6 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
           });
         }
       },
-      ...(opts.onSubagentBridgeEvent ? { onSubagentBridgeEvent: opts.onSubagentBridgeEvent } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
   } catch (err) {
@@ -397,11 +432,36 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       systemPrompt,
       sessionPath,
       customTools: [markReadyTool],
-      onEvent: () => {
-        // Bridge events from the planner session aren't forwarded here
-        // because the run-loop also subscribes to them via PhaseDeps in
-        // Phase 5; centralizing the forwarding there keeps the driver
-        // single-purpose.
+      onEvent: (e: PiBridgeEvent) => {
+        // Forward planner-session bridge events to EventStore (no subagent
+        // tag — the dashboard treats untagged events as planner output).
+        // Skip turn_end / error (internal) and mark_ready (planner publishes
+        // richer plan_* events for that one).
+        if (e.kind === "turn_end" || e.kind === "error") return;
+        if (
+          (e.kind === "tool_call" || e.kind === "tool_result") &&
+          e.tool === "mark_ready"
+        ) {
+          return;
+        }
+        const base = { runId: opts.runId, taskId: opts.taskId };
+        let event: AgentEvent | null = null;
+        if (e.kind === "message_delta") {
+          event = mkEvent({ ...base, kind: "message_delta", text: e.text });
+        } else if (e.kind === "tool_call") {
+          event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input });
+        } else if (e.kind === "tool_result") {
+          event = mkEvent({
+            ...base,
+            kind: "tool_result",
+            tool: e.tool,
+            ok: e.ok,
+            ...(e.output !== undefined ? { output: e.output } : {}),
+          });
+        } else if (e.kind === "log") {
+          event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text });
+        }
+        if (event) void opts.eventStore.append(event).catch(() => {});
       },
     });
   } catch (err) {

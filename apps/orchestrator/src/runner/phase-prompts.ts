@@ -148,6 +148,7 @@ export async function runPhase(
         cwd: deps.cwd,
         store: deps.store,
         bus,
+        eventStore: deps.eventStore,
         phaseModel: input.phaseModel,
         sessionPath: input.sessionPath,
         createAgentSession: deps.createAgentSession,
