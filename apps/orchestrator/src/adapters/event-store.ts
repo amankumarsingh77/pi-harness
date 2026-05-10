@@ -1,5 +1,5 @@
 import { eq, asc } from "drizzle-orm";
-import { events as eventsTable } from "@pi-harness/db";
+import { events as eventsTable, type DbClient } from "@pi-harness/db";
 import type { AgentEvent } from "@pi-harness/shared";
 
 type Subscriber = (e: AgentEvent) => void;
@@ -13,8 +13,7 @@ type Subscriber = (e: AgentEvent) => void;
 export class EventStore {
   private readonly subs = new Map<string, Set<Subscriber>>(); // runId → subs
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(private readonly db: any) {}
+  constructor(private readonly db: DbClient) {}
 
   async append(e: AgentEvent): Promise<void> {
     // Map AgentEvent → row. The row stores `kind` and stuffs the rest into
@@ -41,13 +40,13 @@ export class EventStore {
       .from(eventsTable)
       .where(eq(eventsTable.runId, runId))
       .orderBy(asc(eventsTable.ts));
-    return rows.map((r: { id: string; runId: string; taskId: string; ts: Date; kind: string; payload: Record<string, unknown> }) => ({
+    return rows.map((r) => ({
       id: r.id,
       runId: r.runId,
       taskId: r.taskId,
       ts: r.ts,
       kind: r.kind,
-      ...r.payload,
+      ...(r.payload as Record<string, unknown>),
     })) as AgentEvent[];
   }
 

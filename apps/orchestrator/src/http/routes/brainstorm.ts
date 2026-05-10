@@ -1,10 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { z, ZodError } from "zod";
 import type { RunStore } from "../../adapters/run-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
-import { JsonlWriter } from "../../adapters/jsonl-writer.js";
+import { JsonlWriter, readJsonl } from "../../adapters/jsonl-writer.js";
 import { join } from "node:path";
 import { ValidationError } from "../../domain/errors.js";
 
@@ -59,22 +58,7 @@ export function registerBrainstormRoutes(
       deps.artifacts.readArtifact(cwd, task.id, "spec"),
     ]);
 
-    const jsonlPath = join(cwd, ".harness", task.id, "brainstorm.jsonl");
-    let events: unknown[] = [];
-    if (existsSync(jsonlPath)) {
-      const raw = readFileSync(jsonlPath, "utf8");
-      events = raw
-        .split("\n")
-        .filter((l) => l.trim().length > 0)
-        .map((l) => {
-          try {
-            return JSON.parse(l) as unknown;
-          } catch {
-            return null;
-          }
-        })
-        .filter((x) => x !== null);
-    }
+    const events = await readJsonl(join(cwd, ".harness", task.id, "brainstorm.jsonl"));
 
     void reply; // satisfy typecheck if unused
     return {

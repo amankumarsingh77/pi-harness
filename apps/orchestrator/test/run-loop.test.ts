@@ -21,8 +21,7 @@ const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localh
 const phaseDepsBase: any = {
   cwd: "/tmp",
   onEvent: () => {},
-  createSession: vi.fn(),
-  runSubagent: vi.fn(),
+  createAgentSession: vi.fn(),
   // Mocked runPhase doesn't actually use store, but run-loop reads artifacts
   // post-phase to compute the brainstorm gate. Stub the methods it touches.
   store: {

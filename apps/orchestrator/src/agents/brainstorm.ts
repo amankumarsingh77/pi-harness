@@ -9,6 +9,7 @@ import type {
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
 import type { PhaseModelConfig } from "@pi-harness/shared";
+import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import {
@@ -71,7 +72,9 @@ type HaltReason = "questions" | "ready" | "exhausted";
 // flipping artifact status) are owned by the brainstorm-tools module; this
 // function only inspects events to decide *why* the turn ended.
 export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormResult> {
-  const events = readJsonlEvents(opts.cwd, opts.taskId);
+  const events = await readJsonl<JsonlEvent>(
+    join(opts.cwd, ".harness", opts.taskId, "brainstorm.jsonl"),
+  );
 
   if (hasReadyEvent(events)) {
     return zeroUsage({ ok: true, ready: true });
@@ -95,13 +98,6 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
       : decision.prompt;
 
   return runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
-}
-
-async function runTurnNoSession(
-  opts: BrainstormOpts,
-  promptText: string,
-): Promise<BrainstormResult> {
-  return runTurn(opts, promptText, undefined, /* allowRetry */ false);
 }
 
 async function runTurn(
@@ -189,7 +185,7 @@ async function runTurn(
           systemKind: "session_reset",
           data: { reason: (err as Error).message },
         });
-        return runTurnNoSession(opts, promptText);
+        return runTurn(opts, promptText, undefined, /* allowRetry */ false);
       } catch {
         // fall through to error return
       }
@@ -332,22 +328,6 @@ function buildAnswersDeltaPrompt(answers: JsonlEvent[]): string {
 
 function buildRevisionPrompt(comment: string): string {
   return `User requested revisions: ${comment}\n\nRe-examine the artifacts and ask any clarifying questions you need before revising.`;
-}
-
-function readJsonlEvents(cwd: string, taskId: string): JsonlEvent[] {
-  const path = join(cwd, ".harness", taskId, "brainstorm.jsonl");
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .filter((l) => l.trim().length > 0)
-    .map((l) => {
-      try {
-        return JSON.parse(l) as JsonlEvent;
-      } catch {
-        return null;
-      }
-    })
-    .filter((e): e is JsonlEvent => e !== null);
 }
 
 function hasReadyEvent(events: JsonlEvent[]): boolean {
