@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 // Renders the `research/<agent>.md` file body for a finished subagent.
-// `body` is null until the agent ends — show a faint placeholder.
+// `body` is null until the agent ends — show a one-line empty state.
 
 export function AgentFindings({ body }: { body: string | null }) {
   if (body === null) {
