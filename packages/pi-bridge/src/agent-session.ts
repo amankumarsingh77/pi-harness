@@ -11,11 +11,25 @@ import {
 import { findEnvKeys, getEnvApiKey, getModel } from "@earendil-works/pi-ai";
 import type { AssistantMessage, KnownProvider, Usage } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { PiBridgeEvent } from "./types.js";
 import { AuthError, loadEnvHarness } from "./auth.js";
 
 export { AuthError };
 export type { ThinkingLevel, ToolDefinition };
+
+// The bridge's outward event surface. Owned here because agent-session is the
+// sole producer (see sdkSession.subscribe below) and consumers (orchestrator's
+// brainstorm driver, runner/phase-prompts) only see this shape — never the
+// raw SDK AgentSessionEvent. Variants map 1:1 to the switch arms below.
+export type PiBridgeEvent =
+  | { kind: "message_delta"; text: string }
+  | { kind: "tool_call"; tool: string; input: unknown }
+  | { kind: "tool_result"; tool: string; ok: boolean; output?: unknown }
+  | { kind: "log"; level: "info" | "warn" | "error"; text: string }
+  | {
+      kind: "turn_end";
+      usage: { inputTokens: number; outputTokens: number; costUsd: number };
+    }
+  | { kind: "error"; text: string };
 
 export type AgentSessionOptions = {
   cwd: string;

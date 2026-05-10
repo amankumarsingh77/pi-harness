@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentSession, AuthError } from "./agent-session.js";
+import { createAgentSession, AuthError, type PiBridgeEvent } from "./agent-session.js";
 import { __resetAuthCache } from "./auth.js";
 import { createFakeAdapter } from "./_test/fake-sdk.js";
-import type { PiBridgeEvent } from "./types.js";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 // The fake-sdk adapter satisfies SdkBoundary structurally and lets each test
