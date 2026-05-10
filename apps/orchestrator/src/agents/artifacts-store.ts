@@ -16,15 +16,24 @@ import {
   type ProofReport,
 } from "@pi-harness/shared";
 
+// Per-kind on-disk file name. Markdown for prose artifacts; YAML for the
+// plan phase's structured scenarios file (consumed by the verify phase).
+// Centralized so callers never compose a path themselves.
+export function artifactFileName(kind: ArtifactKind): string {
+  return kind === "scenarios" ? "scenarios.yaml" : `${kind}.md`;
+}
+
 // Branch-scoped artifact store. Owns every read/write under
 // `<worktree>/.harness/<taskId>/`. The brainstorm phase, brainstorm-tools,
 // the run-loop's gate check, and the brainstorm GET route all go through
 // here so no caller knows the literal paths.
 //
-// Layout:
+// Layout (post plan-phase):
 //   <cwd>/.harness/<taskId>/
-//     ├── design.md   (frontmatter + body)
-//     └── spec.md     (frontmatter + body)
+//     ├── design.md       (frontmatter + body)
+//     ├── spec.md         (frontmatter + body)
+//     ├── plan.md         (frontmatter + body)
+//     └── scenarios.yaml  (frontmatter + body)
 //
 // Legacy run-scoped artifacts (BrainstormArtifact / PlanArtifact /
 // ProofReport JSON) live in LegacyRunArtifactsStore — separate class because
@@ -36,7 +45,7 @@ export class ArtifactsStore {
   }
 
   artifactPath(cwd: string, taskId: string, kind: ArtifactKind): string {
-    return join(this.artifactDir(cwd, taskId), `${kind}.md`);
+    return join(this.artifactDir(cwd, taskId), artifactFileName(kind));
   }
 
   async readArtifact(cwd: string, taskId: string, kind: ArtifactKind): Promise<Artifact | null> {
@@ -46,9 +55,13 @@ export class ArtifactsStore {
     return parseArtifact(raw);
   }
 
-  async listArtifacts(cwd: string, taskId: string): Promise<Artifact[]> {
+  async listArtifacts(
+    cwd: string,
+    taskId: string,
+    kinds: readonly ArtifactKind[] = ["design", "spec", "plan", "scenarios"],
+  ): Promise<Artifact[]> {
     const out: Artifact[] = [];
-    for (const kind of ["design", "spec"] as const) {
+    for (const kind of kinds) {
       const a = await this.readArtifact(cwd, taskId, kind);
       if (a) out.push(a);
     }
@@ -77,7 +90,7 @@ export class ArtifactsStore {
     kind: ArtifactKind,
     gitRef: string,
   ): Promise<Artifact | null> {
-    const relPath = `.harness/${taskId}/${kind}.md`;
+    const relPath = `.harness/${taskId}/${artifactFileName(kind)}`;
     const git = simpleGit(cwd);
     try {
       const raw = await git.show([`${gitRef}:${relPath}`]);
@@ -105,7 +118,7 @@ export class ArtifactsStore {
     kind: ArtifactKind,
     revisionTs: string | null,
   ): Promise<string | null> {
-    const relPath = `.harness/${taskId}/${kind}.md`;
+    const relPath = `.harness/${taskId}/${artifactFileName(kind)}`;
     const git = simpleGit(cwd);
 
     if (revisionTs) {
@@ -158,19 +171,28 @@ export class ArtifactsStore {
     return first ? first.hash : null;
   }
 
-  // Move the current brainstorm run's per-run files into runs/<runId>/ on
-  // the same task branch, then commit the move. Used by the brainstorm
-  // restart endpoint: archives design.md, spec.md, brainstorm.jsonl, and
-  // pi-session.jsonl so the new run starts from a clean slate but the
+  // Move the current run's per-run files into runs/<runId>/ on the same
+  // task branch, then commit the move. Used by the brainstorm and plan
+  // restart endpoints: archives both phases' artifacts + JSONLs + the plan
+  // research/ directory so the new run starts from a clean slate but the
   // archived contents stay reachable via git history.
   //
-  // Files that don't exist are silently skipped — partial-state runs still
-  // archive cleanly (e.g. a restart before the agent wrote any artifacts).
+  // Files (and the research/ directory) that don't exist are silently
+  // skipped — partial-state runs still archive cleanly.
   async archiveCurrentRun(cwd: string, taskId: string, runId: string): Promise<void> {
     const baseDir = this.artifactDir(cwd, taskId);
     const archiveDir = join(baseDir, "runs", runId);
     await mkdir(archiveDir, { recursive: true });
-    const candidates = ["design.md", "spec.md", "brainstorm.jsonl", "pi-session.jsonl"];
+    const candidates = [
+      "design.md",
+      "spec.md",
+      "brainstorm.jsonl",
+      "pi-session.jsonl",
+      "plan.md",
+      "scenarios.yaml",
+      "plan.jsonl",
+      "pi-session-plan.jsonl",
+    ];
     const moved: string[] = [];
     for (const name of candidates) {
       const src = join(baseDir, name);
@@ -178,6 +200,14 @@ export class ArtifactsStore {
       const dst = join(archiveDir, name);
       await rename(src, dst);
       moved.push(join(".harness", taskId, "runs", runId, name));
+    }
+    // Plan-phase research findings (uncommitted via per-task .gitignore).
+    // Move the whole directory if it exists; nothing to git-stage since
+    // it's ignored.
+    const researchSrc = join(baseDir, "research");
+    if (existsSync(researchSrc)) {
+      const researchDst = join(archiveDir, "research");
+      await rename(researchSrc, researchDst);
     }
     if (moved.length === 0) return;
     const git = simpleGit(cwd);
@@ -218,8 +248,9 @@ export class ArtifactsStore {
     };
     await this.writeArtifact(cwd, taskId, next);
     const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", taskId, `${kind}.md`)]);
-    const commit = await git.commit(`human(${taskId}): edit ${kind}.md`);
+    const fileName = artifactFileName(kind);
+    await git.raw(["add", "-f", join(".harness", taskId, fileName)]);
+    const commit = await git.commit(`human(${taskId}): edit ${fileName}`);
     return { artifact: next, commitSha: commit.commit };
   }
 
@@ -248,7 +279,7 @@ export class ArtifactsStore {
     // .harness/ is gitignored at the repo root; force-add so the commit
     // captures the artifact-status flip just like the scaffolding commit
     // does (see scaffold-brainstorm.ts).
-    await git.raw(["add", "-f", join(".harness", taskId, `${kind}.md`)]);
+    await git.raw(["add", "-f", join(".harness", taskId, artifactFileName(kind))]);
     await git.commit(`chore(${taskId}): mark ${kind} as ${status}`);
     return next;
   }
