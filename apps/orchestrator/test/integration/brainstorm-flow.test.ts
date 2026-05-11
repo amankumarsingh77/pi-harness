@@ -22,7 +22,7 @@ import { runLoop } from "../../src/runner/run-loop.js";
 import { CancellationRegistry } from "../../src/runner/cancellation.js";
 import { transition } from "../../src/domain/state-machine.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
+const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
 function assistantWithUsage(input: number, output: number, costTotal: number) {
   return {

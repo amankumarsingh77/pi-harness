@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { mkEvent } from "../src/domain/events.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
+const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
 describe("SSE /api/runs/:id/events/stream", () => {
   const { db, client } = createDb(url);

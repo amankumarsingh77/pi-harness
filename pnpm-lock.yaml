@@ -32,6 +32,9 @@ importers:
       '@pi-harness/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@pi-harness/subagents':
+        specifier: workspace:*
+        version: link:../../subagents
       '@tanstack/react-query':
         specifier: ^5.59.0
         version: 5.100.9(react@19.2.6)
@@ -225,6 +228,10 @@ importers:
         version: 2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
   subagents:
+    dependencies:
+      '@pi-harness/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
     devDependencies:
       typescript:
         specifier: ^5.6.0

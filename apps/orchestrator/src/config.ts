@@ -47,7 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
     port: parseInt(env.PORT ?? "4000", 10),
     databaseUrl:
       env.DATABASE_URL ??
-      "postgresql://piharness:piharness@localhost:5433/piharness",
+      "postgresql://piharness:piharness@localhost:54330/piharness",
     runsDir: env.HARNESS_RUNS_DIR ?? ".harness/runs",
     worktreesDir: env.HARNESS_WORKTREES_DIR ?? ".harness/worktrees",
     retryCap: parseInt(env.HARNESS_RETRY_CAP ?? "2", 10),

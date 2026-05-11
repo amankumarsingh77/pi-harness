@@ -8,7 +8,7 @@ import { RunStore } from "../../src/adapters/run-store.js";
 import { EventStore } from "../../src/adapters/event-store.js";
 import { buildServer } from "../../src/http/server.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
+const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
 describe("/api/tasks/:id/artifacts and /screenshots", () => {
   const { db, client } = createDb(url);

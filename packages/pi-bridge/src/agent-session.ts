@@ -45,6 +45,10 @@ export type AgentSessionOptions = {
   maxTurns?: number;
   systemPrompt?: string;
   customTools?: ToolDefinition[];
+  // Allowlist of built-in tool names. When provided, only these built-ins
+  // are enabled (custom tools are always available). Omit to keep the SDK's
+  // default builtins: read, bash, edit, write.
+  tools?: string[];
   sessionPath?: string;
   onEvent: (e: PiBridgeEvent) => void;
 };
@@ -70,6 +74,7 @@ export type SdkBoundaryCreateOptions = {
   thinkingLevel?: ThinkingLevel;
   systemPrompt?: string;
   customTools?: ToolDefinition[];
+  tools?: string[];
   sessionPath?: string;
 };
 
@@ -126,6 +131,7 @@ const defaultBoundary: SdkBoundary = {
       sessionManager,
       customTools: opts.customTools ?? [],
       ...(opts.thinkingLevel !== undefined ? { thinkingLevel: opts.thinkingLevel } : {}),
+      ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
       ...(opts.systemPrompt !== undefined
         ? { resourceLoader: await buildResourceLoader(opts.cwd, opts.systemPrompt) }
         : {}),
@@ -288,6 +294,7 @@ async function openSession(
       ...(opts.thinkingLevel !== undefined ? { thinkingLevel: opts.thinkingLevel } : {}),
       ...(opts.systemPrompt !== undefined ? { systemPrompt: opts.systemPrompt } : {}),
       ...(opts.customTools !== undefined ? { customTools: opts.customTools } : {}),
+      ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
       ...(opts.sessionPath !== undefined ? { sessionPath: opts.sessionPath } : {}),
     };
     const { session } = await boundary.create(create);

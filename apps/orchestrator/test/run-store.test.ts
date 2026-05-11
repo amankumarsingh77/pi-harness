@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { createDb } from "@pi-harness/db";
 import { RunStore } from "../src/adapters/run-store.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
+const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
 describe("RunStore", () => {
   const { db, client } = createDb(url);

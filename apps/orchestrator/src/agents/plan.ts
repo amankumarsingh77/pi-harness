@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type {
   AgentSession,
   AgentSessionOptions,
@@ -9,6 +8,9 @@ import type {
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
 import type { AgentEvent, PhaseModelConfig } from "@pi-harness/shared";
+import { getSubagent, PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
+import { makeWriteFindingsTool } from "./write-findings-tool.js";
+import { SUBAGENT_FOOTER } from "./subagent-footer.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
@@ -26,22 +28,6 @@ import {
   type PreflightSubagent,
   type PreflightSubagentEvent,
 } from "./plan-preflight.js";
-
-// Same anchor as brainstorm.ts. agents/ → src/ → orchestrator/ → apps/ → repo
-// root → subagents/ours/plan.md.
-const HERE = dirname(fileURLToPath(import.meta.url));
-const PLAN_PROMPT_PATH = resolvePath(
-  HERE,
-  "..",
-  "..",
-  "..",
-  "..",
-  "subagents",
-  "ours",
-  "plan.md",
-);
-
-const VENDORED_DIR = resolvePath(HERE, "..", "..", "..", "..", "subagents", "_vendored");
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -159,7 +145,7 @@ function buildInitialPrompt(): string {
     "Begin the plan phase.",
     "",
     "1. Read design.md and spec.md from .harness/<this task>/.",
-    "2. Read every file under .harness/<this task>/research/ — there are seven research findings, one per subagent.",
+    `2. Read every file under .harness/<this task>/research/ — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
     "3. Author plan.md and scenarios.yaml per the protocol in your system prompt.",
     "4. Call mark_ready when both artifacts are complete and you have cross-checked your citations.",
   ].join("\n");
@@ -201,17 +187,9 @@ function lastIndexWhere<T>(arr: T[], pred: (e: T) => boolean): number {
 
 function isPreflightComplete(cwd: string, taskId: string): boolean {
   const researchDir = join(cwd, ".harness", taskId, "research");
-  // The five canonical findings filenames. Mirrors PREFLIGHT_SUBAGENTS in
-  // plan-preflight; duplicating the list here avoids importing a const just
-  // for a hot-path existence check.
-  const required = [
-    "codebase-locator.md",
-    "codebase-pattern-finder.md",
-    "codebase-analyzer.md",
-    "integration-scanner.md",
-    "precedent-locator.md",
-  ];
-  return required.every((name) => existsSync(join(researchDir, name)));
+  return PREFLIGHT_SUBAGENTS.every((sa) =>
+    existsSync(join(researchDir, `${sa}.md`)),
+  );
 }
 
 async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
@@ -367,12 +345,12 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       // Re-dispatch: clear stale findings so the next attempt starts fresh.
       await unlink(findingsPath).catch(() => {});
     }
-    const promptPath = join(VENDORED_DIR, "claim-verifier.md");
-    const systemPrompt = readFileSync(promptPath, "utf8");
+    const cvDef = getSubagent("claim-verifier");
+    const systemPrompt = `${readFileSync(cvDef.promptPath, "utf8")}\n\n${SUBAGENT_FOOTER}\n`;
     const userPrompt = [
       `You are auditing the plan for task ${opts.taskId}. Read the plan below and tag every claim as Verified, Weakened, or Falsified per your system prompt.`,
       ``,
-      `Write your findings to \`.harness/${opts.taskId}/research/claim-verifier.md\` using the standard claim-verifier output format.`,
+      `Persist your findings via the \`write_findings\` tool using the standard claim-verifier output format.`,
       ``,
       `# plan.md`,
       ``,
@@ -386,6 +364,10 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
       systemPrompt,
+      tools: [...cvDef.allowedTools],
+      customTools: [
+        makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
+      ],
       onEvent: () => {},
     });
     try {
@@ -411,7 +393,7 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
 
   let systemPrompt: string;
   try {
-    systemPrompt = readFileSync(PLAN_PROMPT_PATH, "utf8");
+    systemPrompt = readFileSync(getSubagent("plan").promptPath, "utf8");
   } catch (err) {
     return zeroUsage({
       ok: false,
