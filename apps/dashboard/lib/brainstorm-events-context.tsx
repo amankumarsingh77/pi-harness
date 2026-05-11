@@ -5,11 +5,11 @@ import { useEvents } from "./use-events";
 
 // Single SSE subscription shared by every component on the brainstorm page.
 //
-// Three brainstorm widgets (ChatPanel, CostStrip, ArtifactPane via the
-// activity hook) all watch the same runId. With each calling useEvents
-// directly, the page opened three EventSource connections and accumulated
-// three independent copies of the event list — every incoming event
-// triggered three React re-renders, each over a separate growing array. In
+// Multiple brainstorm widgets (ChatPanel, ArtifactPane via the activity
+// hook, etc.) all watch the same runId. With each calling useEvents
+// directly, the page opened multiple EventSource connections and accumulated
+// independent copies of the event list — every incoming event
+// triggered multiple React re-renders, each over a separate growing array. In
 // HTTP/1.1 dev that also pinned three of the browser's six per-origin
 // sockets, leaving no headroom for the action POST + RSC refresh that fire
 // on submit.

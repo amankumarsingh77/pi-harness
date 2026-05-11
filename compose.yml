@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: piharness
       POSTGRES_DB: piharness
     ports:
-      - "5433:5432"
+      - "54330:5432"
     volumes:
       - pi-harness-pg:/var/lib/postgresql/data
     healthcheck:

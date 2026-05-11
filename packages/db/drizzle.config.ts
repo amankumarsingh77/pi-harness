@@ -6,6 +6,6 @@ export default {
   out: "./migrations",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness",
+    url: process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness",
   },
 } satisfies Config;

@@ -3,7 +3,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb, tasks, runs, events } from "../src/index.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
+const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
 describe("schema round-trip", () => {
   const { db, client } = createDb(url);

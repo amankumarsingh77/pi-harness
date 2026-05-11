@@ -7,7 +7,6 @@ import { ArtifactPane } from "@/components/brainstorm/emerging-spec";
 import { ApprovalGate } from "@/components/brainstorm/approval-gate";
 import { SplitPane } from "@/components/brainstorm/split-pane";
 import { RestartButton } from "@/components/brainstorm/restart-button";
-import { CostStrip } from "@/components/brainstorm/cost-strip";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import { ApiError } from "@/lib/api";
 import { BrainstormEventsProvider } from "@/lib/brainstorm-events-context";
@@ -110,11 +109,6 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
               </>
             )}
           </span>
-          <CostStrip
-            runId={brainstormRunId}
-            gate={bundle.gate}
-            initialEvents={bundle.events}
-          />
           <RestartButton
             taskId={task.id}
             disabled={

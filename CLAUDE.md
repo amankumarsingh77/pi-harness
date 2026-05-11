@@ -30,7 +30,7 @@ These are not aesthetic preferences — they're the rules for how work gets done
 - **Apps:** `apps/orchestrator` (Fastify 5 + SSE) and `apps/dashboard` (Next.js 15 App Router + React 19 + Tailwind v4 inline-theme + TanStack Query 5).
 - **Packages:** `@pi-harness/shared` (types + Zod schemas), `@pi-harness/db` (Drizzle ORM, Postgres 16), `@pi-harness/pi-bridge` (wraps `@earendil-works/pi-coding-agent`). The generic `createAgentSession` (`packages/pi-bridge/src/agent-session.ts`) is real; brainstorm uses it. The legacy `createSession` / `runSubagent` paths in `_mock.ts` and `session.ts` still back plan/code/verify until each migrates.
 - **Subagents:** vendored prompts in `subagents/_vendored/` (13 files from rpiv-mono) and `subagents/ours/` (3 originals). Loader at `subagents/index.ts` validates `EXPECTED_OUR_AGENTS` at boot.
-- **Postgres** runs via **podman**, not docker (the user's machine has no docker CLI). The `docker-compose.yml` works under `podman compose`; bring it up with `podman compose up -d postgres` (port `5433`).
+- **Postgres** runs via **podman** (no docker on this machine). Compose file is `compose.yml` (Compose Spec name); bring it up with `pnpm db:up` (which runs `podman compose up -d postgres`, port `54330`). `podman compose` is a thin wrapper that delegates to `podman-compose` when `docker-compose` isn't installed — both `podman` and `podman-compose` must be on PATH. Requires `podman machine start` on macOS before the first `db:up`.
 
 ## Common commands
 

@@ -5,7 +5,7 @@ import { EventStore } from "../src/adapters/event-store.js";
 import { mkEvent } from "../src/domain/events.js";
 import { RunStore } from "../src/adapters/run-store.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:5433/piharness";
+const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
 describe("EventStore", () => {
   const { db, client } = createDb(url);

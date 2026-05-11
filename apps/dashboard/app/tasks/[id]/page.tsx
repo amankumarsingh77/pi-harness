@@ -6,6 +6,8 @@ import { AgentLog } from "@/components/task-detail/agent-log";
 import { RunContext } from "@/components/task-detail/run-context";
 import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
 import { TaskActions } from "@/components/task-detail/task-actions";
+import { TaskCostStrip } from "@/components/task-detail/task-cost-strip";
+import type { Run } from "@pi-harness/shared";
 import { notFound } from "next/navigation";
 import { ApiError } from "@/lib/api";
 import { orchestrator } from "@/lib/server/api";
@@ -74,7 +76,7 @@ export default async function TaskDetailPage({
         branch="main"
       />
 
-      <Head task={task} />
+      <Head task={task} runs={runs} liveRunId={liveRun?.id ?? null} />
       <PhaseRail runs={runs} taskId={task.id} />
 
       <main className="grid min-h-[calc(100vh-48px-64px-100px)] grid-cols-[1fr_320px] gap-0">
@@ -96,7 +98,15 @@ export default async function TaskDetailPage({
   );
 }
 
-function Head({ task }: { task: import("@pi-harness/shared").Task }) {
+function Head({
+  task,
+  runs,
+  liveRunId,
+}: {
+  task: import("@pi-harness/shared").Task;
+  runs: Run[];
+  liveRunId: string | null;
+}) {
   const kind = statusKindFor(task.status);
   return (
     <section className="border-b border-line px-6 pt-[18px] pb-3.5">
@@ -112,6 +122,7 @@ function Head({ task }: { task: import("@pi-harness/shared").Task }) {
         <h1 className="m-0 flex-1 text-[19px] font-semibold tracking-tight text-fg">
           {task.title}
         </h1>
+        <TaskCostStrip initialRuns={runs} liveRunId={liveRunId} />
         <TaskActions task={task} />
       </div>
     </section>
