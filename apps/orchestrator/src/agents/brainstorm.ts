@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { dirname, resolve as resolvePath, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type {
   AgentSession,
   AgentSessionOptions,
@@ -9,6 +8,7 @@ import type {
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
 import type { PhaseModelConfig } from "@pi-harness/shared";
+import { getSubagent } from "@pi-harness/subagents";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
@@ -19,21 +19,6 @@ import {
   makeReplyToUserTool,
   makeSubmitQuestionsTool,
 } from "./brainstorm-tools.js";
-
-// agents/ → src/ → orchestrator/ → apps/ → repo root → subagents/ours/brainstorm.md
-// At dist-runtime: dist/agents → dist → orchestrator → apps → repo root.
-// Both layouts have the same depth (4 levels up).
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BRAINSTORM_PROMPT_PATH = resolvePath(
-  HERE,
-  "..",
-  "..",
-  "..",
-  "..",
-  "subagents",
-  "ours",
-  "brainstorm.md",
-);
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -215,7 +200,7 @@ async function runTurn(
 
   let systemPrompt: string;
   try {
-    systemPrompt = readFileSync(BRAINSTORM_PROMPT_PATH, "utf8");
+    systemPrompt = readFileSync(getSubagent("brainstorm").promptPath, "utf8");
   } catch (err) {
     return zeroUsage({
       ok: false,

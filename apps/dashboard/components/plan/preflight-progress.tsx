@@ -1,18 +1,15 @@
 "use client";
+import { PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import type { PlanJsonlEvent } from "@/lib/api";
 
-// Six subagents the dashboard renders in the strip — five parallel research
-// + claim-verifier (run from mark_ready). Order is fixed so the dot positions
+// Strip = preflight research subagents + the post-plan claim-verifier (run
+// from mark_ready). Order follows registry declaration order so dot positions
 // don't reshuffle between renders.
-export const SUBAGENTS = [
-  "codebase-locator",
-  "codebase-pattern-finder",
-  "codebase-analyzer",
-  "integration-scanner",
-  "precedent-locator",
+export const SUBAGENTS: readonly string[] = [
+  ...PREFLIGHT_SUBAGENTS,
   "claim-verifier",
-] as const;
+];
 
 export type DotKind = "intake" | "progress" | "done" | "blocked";
 

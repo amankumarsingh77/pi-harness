@@ -41,10 +41,10 @@ const baseOpts = (overrides: Partial<Parameters<typeof runPreflight>[0]> = {}) =
   ...overrides,
 });
 
-// Fake createAgentSession factory: returns sessions whose .prompt() writes the
-// expected findings file derived from the user prompt's "Write your findings
-// to `<path>`" line, then resolves with synthetic usage. This lets tests
-// drive 8 parallel subagents without the real SDK.
+// Fake createAgentSession factory: returns sessions whose .prompt() invokes
+// the wired `write_findings` custom tool (mirroring what the real SDK does)
+// to persist a synthetic findings body, then resolves with synthetic usage.
+// This lets tests drive parallel subagents without the real SDK.
 function makeFakeWriter(opts: {
   failSubagents?: Set<string>;
   delayMs?: number;
@@ -52,25 +52,32 @@ function makeFakeWriter(opts: {
 } = {}): (o: AgentSessionOptions) => Promise<AgentSession> {
   return async (sessionOpts) => {
     opts.onCreate?.();
+    const writeFindings = (sessionOpts.customTools ?? []).find(
+      (t) => t.name === "write_findings",
+    ) as
+      | (NonNullable<AgentSessionOptions["customTools"]>[number] & {
+          __subagent: string;
+        })
+      | undefined;
+    if (!writeFindings) {
+      throw new Error("fake session: write_findings custom tool missing from session options");
+    }
+    const subagent = writeFindings.__subagent;
     return {
-      async prompt(text: string) {
-        // Extract findings path from the prompt: matches the `Write your
-        // findings to `<path>`` line that buildSubagentPrompt produces.
-        const match = text.match(/Write your findings to `([^`]+)`/);
-        if (!match) throw new Error("fake session: prompt missing findings path");
-        const rel = match[1]!;
-        const subagent = rel.split("/").pop()!.replace(/\.md$/, "");
-
+      async prompt(_text: string) {
         if (opts.failSubagents?.has(subagent)) {
           throw new Error(`synthetic failure for ${subagent}`);
         }
-
         if (opts.delayMs) {
           await new Promise((r) => setTimeout(r, opts.delayMs));
         }
-
-        const abs = join(sessionOpts.cwd, rel);
-        await writeFile(abs, `# ${subagent} findings\n\nfake findings body\n`);
+        await writeFindings.execute(
+          "test-write",
+          { body: `# ${subagent} findings\n\nfake findings body\n` },
+          undefined,
+          undefined,
+          undefined as never,
+        );
         return { inputTokens: 100, outputTokens: 50, costUsd: 0.01 };
       },
       async abort() {},
@@ -80,7 +87,10 @@ function makeFakeWriter(opts: {
 }
 
 describe("runPreflight", () => {
-  it("dispatches all 7 research subagents in parallel and writes findings", async () => {
+  const N = PREFLIGHT_SUBAGENTS.length;
+  const FIRST = PREFLIGHT_SUBAGENTS[0]!;
+
+  it("dispatches every preflight subagent in parallel and writes findings", async () => {
     const events: PreflightSubagentEvent[] = [];
     const result = await runPreflight(
       baseOpts({
@@ -104,11 +114,8 @@ describe("runPreflight", () => {
       expect(body).toContain(`${sa} findings`);
     }
 
-    // Each subagent emits exactly one started + one ended.
-    const startedKinds = events.filter((e) => e.kind === "started");
-    const endedKinds = events.filter((e) => e.kind === "ended");
-    expect(startedKinds).toHaveLength(5);
-    expect(endedKinds).toHaveLength(5);
+    expect(events.filter((e) => e.kind === "started")).toHaveLength(N);
+    expect(events.filter((e) => e.kind === "ended")).toHaveLength(N);
   });
 
   it("dispatches subagents concurrently (all create() calls fire before any prompt resolves)", async () => {
@@ -129,7 +136,6 @@ describe("runPreflight", () => {
       },
     });
 
-    // Wrap to flip firstResolved when the first prompt completes.
     const wrapped: typeof writer = async (o) => {
       const s = await writer(o);
       const orig = s.prompt.bind(s);
@@ -148,48 +154,42 @@ describe("runPreflight", () => {
       }),
     );
 
-    // All 5 sessions should be created before the first one resolves.
-    expect(peakBeforeFirstResolve.value).toBe(5);
+    expect(peakBeforeFirstResolve.value).toBe(N);
   });
 
   it("one subagent failure leaves the others successful and below the failed threshold", async () => {
     const result = await runPreflight(
       baseOpts({
         createAgentSession: makeFakeWriter({
-          failSubagents: new Set(["codebase-locator"]),
+          failSubagents: new Set([FIRST]),
         }),
       }),
     );
 
-    expect(result.failed).toBe(false); // 1 < 3
-    const locator = result.results.find((r) => r.subagent === "codebase-locator")!;
-    expect(locator.ok).toBe(false);
-    expect(locator.error).toContain("synthetic failure");
-    const others = result.results.filter((r) => r.subagent !== "codebase-locator");
+    expect(result.failed).toBe(false);
+    const failed = result.results.find((r) => r.subagent === FIRST)!;
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain("synthetic failure");
+    const others = result.results.filter((r) => r.subagent !== FIRST);
     expect(others.every((r) => r.ok)).toBe(true);
   });
 
-  it("≥3 subagent failures sets failed=true so caller can fail the phase", async () => {
+  it("a majority of failures sets failed=true so caller can fail the phase", async () => {
+    const majority = Math.floor(N / 2) + 1;
+    const fail = new Set(PREFLIGHT_SUBAGENTS.slice(0, majority));
     const result = await runPreflight(
       baseOpts({
-        createAgentSession: makeFakeWriter({
-          failSubagents: new Set([
-            "codebase-locator",
-            "codebase-pattern-finder",
-            "codebase-analyzer",
-          ]),
-        }),
+        createAgentSession: makeFakeWriter({ failSubagents: fail }),
       }),
     );
     expect(result.failed).toBe(true);
   });
 
   it("re-entry skips subagents whose findings file already exists", async () => {
-    // Pre-seed two findings files.
+    // Pre-seed one findings file.
     const researchDir = join(cwd, ".harness", "T-001", "research");
     await mkdir(researchDir, { recursive: true });
-    await writeFile(join(researchDir, "codebase-locator.md"), "# pre-existing\n");
-    await writeFile(join(researchDir, "precedent-locator.md"), "# pre-existing\n");
+    await writeFile(join(researchDir, `${FIRST}.md`), "# pre-existing\n");
 
     let createCount = 0;
     const events: PreflightSubagentEvent[] = [];
@@ -206,15 +206,43 @@ describe("runPreflight", () => {
       }),
     );
 
-    // Only 3 of 5 should have been dispatched (codebase-locator + precedent-locator skipped).
-    expect(createCount).toBe(3);
-    expect(events.filter((e) => e.kind === "started")).toHaveLength(3);
+    expect(createCount).toBe(N - 1);
+    expect(events.filter((e) => e.kind === "started")).toHaveLength(N - 1);
+    expect(result.results).toHaveLength(N);
+    const skipped = result.results.find((r) => r.subagent === FIRST)!;
+    expect(skipped.ok).toBe(true);
+    expect(skipped.costUsd).toBe(0);
+    expect(skipped.inputTokens).toBe(0);
+  });
 
-    // All 5 still appear in results — the pre-existing ones are reported as ok with zero usage.
-    expect(result.results).toHaveLength(5);
-    const locator = result.results.find((r) => r.subagent === "codebase-locator")!;
-    expect(locator.ok).toBe(true);
-    expect(locator.costUsd).toBe(0);
-    expect(locator.inputTokens).toBe(0);
+  it("inlines the ticket digest, not the full design/spec, into the user prompt", async () => {
+    let captured = "";
+    const writer = makeFakeWriter();
+    const wrapped: typeof writer = async (o) => {
+      const s = await writer(o);
+      const orig = s.prompt.bind(s);
+      s.prompt = async (t) => {
+        if (!captured) captured = t;
+        return orig(t);
+      };
+      return s;
+    };
+
+    const designSentinel = "DESIGN_BODY_SHOULD_NOT_APPEAR_VERBATIM_IN_PROMPT";
+    const designBody = `# Design\n\n## Goals\n\n- Cancel runs cleanly.\n\n## Trade-offs\n\n${designSentinel}\n`;
+    const specBody = `# Spec\n\n## Acceptance criteria\n\n- WHEN /cancel arrives, transition within 2s.\n`;
+
+    await runPreflight(
+      baseOpts({
+        createAgentSession: wrapped,
+        designBody,
+        specBody,
+      }),
+    );
+
+    expect(captured).toContain("Cancel runs cleanly");
+    expect(captured).toContain("WHEN /cancel arrives");
+    expect(captured).not.toContain(designSentinel);
+    expect(captured).toContain("Full context (read on demand)");
   });
 });

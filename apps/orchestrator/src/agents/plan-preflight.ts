@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { dirname, join, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
   AgentSession,
@@ -10,45 +9,13 @@ import type {
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
 import type { PhaseModelConfig } from "@pi-harness/shared";
+import { PREFLIGHT_SUBAGENTS, getSubagent } from "@pi-harness/subagents";
+import { makeWriteFindingsTool } from "./write-findings-tool.js";
+import { SUBAGENT_FOOTER } from "./subagent-footer.js";
+import { buildTicketDigest } from "./ticket-digest.js";
 
-// agents/ → src/ → orchestrator/ → apps/ → repo root → subagents/_vendored/<name>.md
-// Same import.meta.url anchor as brainstorm.ts. Ensures the .md prompts
-// resolve in both src and dist runtimes since the layout depth matches.
-const HERE = dirname(fileURLToPath(import.meta.url));
-const VENDORED_DIR = resolvePath(HERE, "..", "..", "..", "..", "subagents", "_vendored");
-
-// The five research subagents that run in parallel before the planner.
-// claim-verifier is intentionally excluded — it runs from mark_ready (Phase 4),
-// not from preflight, because it operates on the planner's draft plan.md.
-//
-// scope-tracer and test-case-locator were dropped: brainstorm already bounds
-// scope (and gates on user approval), and test-case-locator searches the
-// rpiv-mono `.rpiv/test-cases/` convention which doesn't exist here. Their
-// vendored prompts remain on disk in subagents/_vendored/ for revivability.
-export const PREFLIGHT_SUBAGENTS = [
-  "codebase-locator",
-  "codebase-pattern-finder",
-  "codebase-analyzer",
-  "integration-scanner",
-  "precedent-locator",
-] as const;
-export type PreflightSubagent = (typeof PREFLIGHT_SUBAGENTS)[number];
-
-// One-line task framing the planner-side prompt feeds to each subagent. The
-// vendored system prompt does the heavy lifting; this just tells the agent
-// what *this* ticket needs from it.
-const FRAMINGS: Record<PreflightSubagent, string> = {
-  "codebase-locator":
-    "Locate every file that will be read or modified to deliver this ticket.",
-  "codebase-pattern-finder":
-    "Find existing patterns analogous to what this ticket asks for. Cite file:line references for each example.",
-  "codebase-analyzer":
-    "Trace how the relevant call paths (the touchpoints surfaced by codebase-locator) work today.",
-  "integration-scanner":
-    "Identify inbound and outbound system edges affected by this ticket.",
-  "precedent-locator":
-    "Find past similar changes from git history and what went wrong with each one.",
-};
+export { PREFLIGHT_SUBAGENTS };
+export type PreflightSubagent = string;
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -116,7 +83,7 @@ export type PreflightResult = {
 //
 // Returns once every dispatched subagent has resolved (success or failure).
 // The caller decides whether the failure rate is fatal; preflight itself
-// reports `failed: true` only when ≥3 subagents failed.
+// reports `failed: true` only when a majority of subagents failed.
 export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult> {
   const researchDir = join(opts.cwd, ".harness", opts.taskId, "research");
   await mkdir(researchDir, { recursive: true });
@@ -184,7 +151,7 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
 
   const results = await Promise.all(tasks);
   const failedCount = results.filter((r) => !r.ok).length;
-  return { results, failed: failedCount >= 3 };
+  return { results, failed: failedCount > results.length / 2 };
 }
 
 async function runOneSubagent(args: {
@@ -193,8 +160,8 @@ async function runOneSubagent(args: {
   findingsPath: string;
 }): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
   const { subagent, opts, findingsPath } = args;
-  const promptPath = join(VENDORED_DIR, `${subagent}.md`);
-  const systemPrompt = readFileSync(promptPath, "utf8");
+  const def = getSubagent(subagent);
+  const systemPrompt = `${readFileSync(def.promptPath, "utf8")}\n\n${SUBAGENT_FOOTER}\n`;
   const userPrompt = buildSubagentPrompt({ subagent, opts, findingsPath });
 
   let session: AgentSession;
@@ -206,6 +173,10 @@ async function runOneSubagent(args: {
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
       systemPrompt,
+      tools: [...def.allowedTools],
+      customTools: [
+        makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
+      ],
       onEvent: (e) => opts.onSubagentBridgeEvent?.(subagent, e),
     });
   } catch (err) {
@@ -226,35 +197,28 @@ function buildSubagentPrompt(args: {
   opts: PreflightOpts;
   findingsPath: string;
 }): string {
-  const { subagent, opts, findingsPath } = args;
-  const relFindings = findingsPath.startsWith(opts.cwd)
-    ? findingsPath.slice(opts.cwd.length + 1)
-    : findingsPath;
+  const { subagent, opts } = args;
+  const digest = buildTicketDigest({
+    ticketTitle: opts.ticketTitle,
+    ticketDescription: opts.ticketDescription,
+    designBody: opts.designBody,
+    specBody: opts.specBody,
+  });
   return [
     `You are running inside a git worktree at ${opts.cwd}.`,
     ``,
-    `# Ticket`,
-    ``,
-    `## ${opts.ticketTitle}`,
-    ``,
-    opts.ticketDescription,
-    ``,
-    `# Brainstorm artifacts`,
-    ``,
-    `The brainstorm phase produced two committed artifacts you must read first.`,
-    ``,
-    `## design.md`,
-    ``,
-    opts.designBody,
-    ``,
-    `## spec.md`,
-    ``,
-    opts.specBody,
+    digest,
     ``,
     `# Your job`,
     ``,
-    FRAMINGS[subagent],
+    getSubagent(subagent).framing,
     ``,
-    `Write your findings to \`${relFindings}\`. Keep them focused and citation-grounded per the guidelines in your system prompt.`,
+    `# Output discipline`,
+    ``,
+    `- Findings ≤ 4KB.`,
+    `- File:line refs and short prose.`,
+    `- No code blocks longer than 3 lines. Don't quote whole functions.`,
+    ``,
+    `Persist your findings via the \`write_findings\` tool. Call it exactly once when done.`,
   ].join("\n");
 }
