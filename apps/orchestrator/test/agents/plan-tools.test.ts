@@ -131,7 +131,10 @@ afterEach(async () => {
   await rm(scratch, { recursive: true, force: true });
 });
 
-const noopDispatcher: DispatchClaimVerifier = async () => ({ falsifiedClaims: [] });
+const noopDispatcher: DispatchClaimVerifier = async () => ({
+  falsifiedClaims: [],
+  findingsWritten: true,
+});
 const newState = (): ClaimVerifierState => ({ attempts: 0, cap: 2 });
 
 describe("mark_ready", () => {
@@ -236,6 +239,7 @@ describe("mark_ready", () => {
     await writePlanArtifacts(validPlanBody, validScenariosYaml);
     const dispatcher = vi.fn(async () => ({
       falsifiedClaims: ["pattern at src/foo.ts:42 does not exist"],
+      findingsWritten: true,
     }));
     const tool = makeMarkReadyTool({
       store, bus, cwd, taskId: "T-1",
@@ -249,9 +253,31 @@ describe("mark_ready", () => {
     expect(dispatcher).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects when claim-verifier ends without writing findings (silent-pass guard)", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const dispatcher = vi.fn(async () => ({
+      falsifiedClaims: [],
+      findingsWritten: false,
+    }));
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: dispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("without writing findings");
+
+    const plan = await store.readArtifact(cwd, "T-1", "plan");
+    expect(plan?.fm.status).toBe("draft");
+  });
+
   it("claim-verifier dispatch is capped at 2 attempts per run", async () => {
     await writePlanArtifacts(validPlanBody, validScenariosYaml);
-    const dispatcher = vi.fn(async () => ({ falsifiedClaims: ["c1"] }));
+    const dispatcher = vi.fn(async () => ({
+      falsifiedClaims: ["c1"],
+      findingsWritten: true,
+    }));
     const state = newState();
     const tool = makeMarkReadyTool({
       store, bus, cwd, taskId: "T-1",

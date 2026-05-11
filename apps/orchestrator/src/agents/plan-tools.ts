@@ -58,6 +58,11 @@ export type ClaimVerifierResult = {
   // canonical anchor; the result the runner returns is just whether any
   // claim was Falsified, parsed from that file.
   falsifiedClaims: string[];
+  // True when the subagent actually wrote findings to disk. False means the
+  // session ended without producing a findings file (e.g. the model returned
+  // text only, or hit an error). Treating that as "audit passed" is unsafe —
+  // mark_ready rejects so the planner has to dispatch again.
+  findingsWritten: boolean;
 };
 
 export type DispatchClaimVerifier = (planBody: string) => Promise<ClaimVerifierResult>;
@@ -123,6 +128,11 @@ export function makeMarkReadyTool(deps: {
       });
       if (claimsResult.kind === "exhausted") {
         return reject(claimsResult.message);
+      }
+      if (claimsResult.kind === "no_findings") {
+        return reject(
+          `claim-verifier: subagent ended without writing findings. Call mark_ready again — it will re-dispatch claim-verifier (until the cap of ${claimVerifierState.cap} attempts).`,
+        );
       }
       if (claimsResult.kind === "falsified") {
         return reject(
@@ -222,6 +232,7 @@ function validateScenariosYaml(body: string): string | null {
 type ClaimVerifierOutcome =
   | { kind: "ok" }
   | { kind: "falsified"; claims: string[] }
+  | { kind: "no_findings" }
   | { kind: "exhausted"; message: string };
 
 async function runClaimVerifier(args: {
@@ -255,6 +266,7 @@ async function runClaimVerifier(args: {
   state.attempts += 1;
 
   const result = await dispatchClaimVerifier(planBody);
+  if (!result.findingsWritten) return { kind: "no_findings" };
   if (result.falsifiedClaims.length === 0) return { kind: "ok" };
   return { kind: "falsified", claims: result.falsifiedClaims };
 }
