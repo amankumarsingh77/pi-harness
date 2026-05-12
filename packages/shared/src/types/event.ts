@@ -15,6 +15,21 @@ export type BrainstormOption = {
   description?: string;
 };
 
+export type BrainstormMock = {
+  mockId: string;
+  title: string;
+  summary: string;
+  htmlPath: string;
+  recommended: boolean;
+  createdAt: string;
+  derivedFrom?: string;
+};
+
+export type BrainstormMockManifest = {
+  mocks: BrainstormMock[];
+  selectedMockId: string | null;
+};
+
 export type AgentEvent =
   | (AgentEventBase & { kind: "phase_started"; phase: string })
   | (AgentEventBase & { kind: "phase_ended"; phase: string; status: "succeeded" | "failed" | "cancelled" })
@@ -112,6 +127,25 @@ export type AgentEvent =
       replyId: string;
       message: string;
       inReplyToNudgeId?: string;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_proposed";
+      mock: BrainstormMock;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_revised";
+      mock: BrainstormMock;
+      editRequestId: string;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_selected";
+      mockId: string;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_edit_requested";
+      requestId: string;
+      mockId: string;
+      comment: string;
     })
   // Plan-phase events. Mirrored to <worktree>/.harness/<taskId>/plan.jsonl.
   // The plan phase has two stages — a parallel preflight of 8 research

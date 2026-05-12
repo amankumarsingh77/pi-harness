@@ -17,7 +17,9 @@ import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import {
   makeMarkReadyTool,
   makeReplyToUserTool,
+  makeSubmitMockChoicesTool,
   makeSubmitQuestionsTool,
+  makeWriteMockRevisionTool,
 } from "./brainstorm-tools.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
@@ -60,6 +62,8 @@ type Decision =
   | { kind: "initial"; nudges: PendingNudge[] }
   | { kind: "answers"; prompt: string; nudges: PendingNudge[] }
   | { kind: "revision"; prompt: string; nudges: PendingNudge[] }
+  | { kind: "mock_selection"; prompt: string; nudges: PendingNudge[] }
+  | { kind: "mock_edit"; prompt: string; nudges: PendingNudge[] }
   | { kind: "nudge_only"; nudges: PendingNudge[] };
 
 type HaltReason = "questions" | "ready" | "exhausted";
@@ -126,6 +130,18 @@ async function runTurn(
   let lastWriteWasReady = false;
 
   const submitQuestionsTool = makeSubmitQuestionsTool({ bus: opts.bus });
+  const submitMockChoicesTool = makeSubmitMockChoicesTool({
+    store: opts.store,
+    bus: opts.bus,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
+  const writeMockRevisionTool = makeWriteMockRevisionTool({
+    store: opts.store,
+    bus: opts.bus,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
   const markReadyTool = makeMarkReadyTool({
     store: opts.store,
     bus: opts.bus,
@@ -149,6 +165,8 @@ async function runTurn(
     if (
       (e.kind === "tool_call" || e.kind === "tool_result") &&
       (e.tool === "submit_questions" ||
+        e.tool === "submit_mock_choices" ||
+        e.tool === "write_mock_revision" ||
         e.tool === "mark_ready" ||
         e.tool === "reply_to_user")
     ) {
@@ -185,6 +203,10 @@ async function runTurn(
       haltReason = "questions";
       return;
     }
+    if (e.kind === "tool_call" && e.tool === "submit_mock_choices") {
+      haltReason = "questions";
+      return;
+    }
     if (e.kind === "tool_result" && e.tool === "mark_ready") {
       // The tool's details encodes whether mark_ready was accepted. We watch
       // for ok:true to flip haltReason; a rejection (missing section) leaves
@@ -217,10 +239,16 @@ async function runTurn(
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
-      maxTurns: opts.phaseModel.maxTurns,
+      ...(opts.phaseModel.maxTurns !== undefined ? { maxTurns: opts.phaseModel.maxTurns } : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
-      customTools: [submitQuestionsTool, markReadyTool, replyToUserTool],
+      customTools: [
+        submitQuestionsTool,
+        submitMockChoicesTool,
+        writeMockRevisionTool,
+        markReadyTool,
+        replyToUserTool,
+      ],
       onEvent: handleEvent,
     });
   } catch (err) {
@@ -287,7 +315,7 @@ async function runTurn(
       await opts.bus.publish({
         kind: "brainstorm_system",
         systemKind: "blocked",
-        data: { reason: `maxTurns (${opts.phaseModel.maxTurns}) exceeded` },
+        data: { reason: `maxTurns (${opts.phaseModel.maxTurns ?? "default"}) exceeded` },
       });
       return zeroUsage({
         ok: false,
@@ -372,7 +400,11 @@ function decide(events: JsonlEvent[]): Decision {
 
   const lastAgentIdx = lastIndexWhere(
     events,
-    (e) => e.kind === "brainstorm_question" || e.kind === "brainstorm_system",
+    (e) =>
+      e.kind === "brainstorm_question" ||
+      e.kind === "brainstorm_system" ||
+      e.kind === "brainstorm_mock_proposed" ||
+      e.kind === "brainstorm_mock_revised",
   );
 
   // Revision wins over answers when both postdate the last agent activity:
@@ -386,6 +418,29 @@ function decide(events: JsonlEvent[]): Decision {
     return {
       kind: "revision",
       prompt: buildRevisionPrompt(typeof last["comment"] === "string" ? (last["comment"] as string) : ""),
+      nudges,
+    };
+  }
+
+  const newMockEdits = events
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => e.kind === "brainstorm_mock_edit_requested" && i > lastAgentIdx);
+  if (newMockEdits.length > 0) {
+    return {
+      kind: "mock_edit",
+      prompt: buildMockEditPrompt(newMockEdits.map(({ e }) => e)),
+      nudges,
+    };
+  }
+
+  const newMockSelections = events
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => e.kind === "brainstorm_mock_selected" && i > lastAgentIdx);
+  if (newMockSelections.length > 0) {
+    const last = newMockSelections[newMockSelections.length - 1]!.e;
+    return {
+      kind: "mock_selection",
+      prompt: buildMockSelectionPrompt(String(last["mockId"] ?? "")),
       nudges,
     };
   }
@@ -478,6 +533,28 @@ function buildAnswersDeltaPrompt(answers: JsonlEvent[]): string {
 
 function buildRevisionPrompt(comment: string): string {
   return `User requested revisions: ${comment}\n\nRe-examine the artifacts and ask any clarifying questions you need before revising.`;
+}
+
+function buildMockSelectionPrompt(mockId: string): string {
+  return [
+    `User selected UI mock: ${mockId}`,
+    "",
+    "Read the selected mock from .harness/<taskId>/mocks/, fold the choice into design.md under ## Selected UI direction and spec.md under ## UI acceptance criteria, then continue toward mark_ready.",
+  ].join("\n");
+}
+
+function buildMockEditPrompt(events: JsonlEvent[]): string {
+  const lines = ["User requested mock edit:"];
+  for (const e of events) {
+    lines.push(
+      `- requestId: ${String(e["requestId"] ?? "?")}; mockId: ${String(e["mockId"] ?? "?")}; comment: ${String(e["comment"] ?? "")}`,
+    );
+  }
+  lines.push(
+    "",
+    "Use write_mock_revision to create a derived mock. Do not overwrite the original mock.",
+  );
+  return lines.join("\n");
 }
 
 function hasReadyEvent(events: JsonlEvent[]): boolean {

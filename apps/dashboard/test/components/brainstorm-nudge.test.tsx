@@ -6,11 +6,15 @@ import type { BrainstormJsonlEvent } from "@/lib/api";
 // microtask so the useTransition spinner has a chance to flicker. Tests
 // assert against the mock to verify wiring. vi.hoisted moves the mock fn
 // definition above the hoisted vi.mock() call so the factory can capture it.
-const { submitNudgeMock } = vi.hoisted(() => ({
+const { submitNudgeMock, editMockMock, selectMockMock } = vi.hoisted(() => ({
   submitNudgeMock: vi.fn(async (..._args: unknown[]) => {}),
+  editMockMock: vi.fn(async (..._args: unknown[]) => {}),
+  selectMockMock: vi.fn(async (..._args: unknown[]) => {}),
 }));
 vi.mock("@/app/tasks/[id]/actions", () => ({
   submitBrainstormNudgeAction: submitNudgeMock,
+  submitBrainstormMockEditAction: editMockMock,
+  selectBrainstormMockAction: selectMockMock,
   approveBrainstormAction: vi.fn(),
   requestBrainstormChangesAction: vi.fn(),
   submitBrainstormAnswersAction: vi.fn(),
@@ -37,6 +41,8 @@ vi.mock("next/navigation", () => ({
 
 beforeEach(() => {
   submitNudgeMock.mockClear();
+  editMockMock.mockClear();
+  selectMockMock.mockClear();
   useEventsMock.mockReturnValue({ events: [], connected: false });
   cleanup();
 });
@@ -317,5 +323,84 @@ describe("ChatPanel — nudges in transcript", () => {
       />,
     );
     expect(screen.getByLabelText(/nudge the agent/i)).toBeEnabled();
+  });
+
+  it("renders brainstorm mock cards and wires Edit/Choose actions", async () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-13T00:00:00.000Z",
+        mock: {
+          mockId: "mock-a",
+          title: "Split pane review",
+          summary: "Shows options beside artifacts.",
+          htmlPath: ".harness/t1/mocks/mock-a.html",
+          recommended: true,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+      },
+    ];
+    render(
+      <ChatPanel
+        taskId="t1"
+        runId="r1"
+        initialEvents={events}
+        gate="running"
+        taskStatus="brainstorming"
+      />,
+    );
+
+    expect(screen.getByText("Split pane review")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open mock split pane review/i })).toHaveAttribute(
+      "href",
+      "/tasks/t1/brainstorm/mocks/mock-a",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /edit mock split pane review/i }));
+    fireEvent.change(screen.getByLabelText(/mock edit request/i), {
+      target: { value: "Make the artifact pane narrower." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /submit mock edit/i }));
+    await waitFor(() => expect(editMockMock).toHaveBeenCalledWith(
+      "t1",
+      "mock-a",
+      "Make the artifact pane narrower.",
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: /choose mock split pane review/i }));
+    await waitFor(() => expect(selectMockMock).toHaveBeenCalledWith("t1", "mock-a"));
+  });
+
+  it("marks the selected mock in the transcript", () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-13T00:00:00.000Z",
+        mock: {
+          mockId: "mock-a",
+          title: "Split pane review",
+          summary: "Shows options beside artifacts.",
+          htmlPath: ".harness/t1/mocks/mock-a.html",
+          recommended: false,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+      },
+      {
+        kind: "brainstorm_mock_selected",
+        ts: "2026-05-13T00:00:01.000Z",
+        mockId: "mock-a",
+      },
+    ];
+    render(
+      <ChatPanel
+        taskId="t1"
+        runId="r1"
+        initialEvents={events}
+        gate="running"
+        taskStatus="brainstorming"
+      />,
+    );
+
+    expect(screen.getByText("selected")).toBeInTheDocument();
   });
 });

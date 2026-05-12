@@ -1,6 +1,7 @@
 node_modules
 dist
 .turbo
+.agents/
 *.log
 .env
 .env.local

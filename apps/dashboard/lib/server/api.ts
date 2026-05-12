@@ -70,6 +70,11 @@ export const orchestrator: Api = {
   restartBrainstorm: (taskId, payload) => real.restartBrainstorm(taskId, payload),
   getBrainstormDiff: (taskId, kind) => real.getBrainstormDiff(taskId, kind),
   submitArtifactEdit: (taskId, payload) => real.submitArtifactEdit(taskId, payload),
+  getBrainstormMocks: (taskId) => real.getBrainstormMocks(taskId),
+  getBrainstormMockHtml: (taskId, mockId) => real.getBrainstormMockHtml(taskId, mockId),
+  submitBrainstormMockEdit: (taskId, mockId, payload) =>
+    real.submitBrainstormMockEdit(taskId, mockId, payload),
+  selectBrainstormMock: (taskId, mockId) => real.selectBrainstormMock(taskId, mockId),
   getPlanBundle: (taskId) => real.getPlanBundle(taskId),
   getPlanDiff: (taskId, kind) => real.getPlanDiff(taskId, kind),
   submitPlanArtifactEdit: (taskId, payload) => real.submitPlanArtifactEdit(taskId, payload),

@@ -110,3 +110,77 @@ describe("plan_* AgentEvent variants", () => {
     }
   });
 });
+
+describe("brainstorm mock AgentEvent variants", () => {
+  it("brainstorm_mock_proposed carries the mock card fields", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "brainstorm_mock_proposed",
+      mock: {
+        mockId: "mock-a",
+        title: "Split pane review",
+        summary: "Keeps choices beside the emerging artifacts.",
+        htmlPath: ".harness/T-001/mocks/mock-a.html",
+        recommended: true,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    };
+    if (e.kind === "brainstorm_mock_proposed") {
+      expect(e.mock.mockId).toBe("mock-a");
+      expect(e.mock.recommended).toBe(true);
+    } else {
+      expect.fail("expected brainstorm_mock_proposed");
+    }
+  });
+
+  it("brainstorm_mock_revised carries lineage to the source mock", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "brainstorm_mock_revised",
+      mock: {
+        mockId: "mock-a-rev1",
+        title: "Split pane review refined",
+        summary: "Narrows the artifact pane.",
+        htmlPath: ".harness/T-001/mocks/mock-a-rev1.html",
+        recommended: false,
+        derivedFrom: "mock-a",
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+      editRequestId: "mer_1",
+    };
+    if (e.kind === "brainstorm_mock_revised") {
+      expect(e.mock.derivedFrom).toBe("mock-a");
+      expect(e.editRequestId).toBe("mer_1");
+    } else {
+      expect.fail("expected brainstorm_mock_revised");
+    }
+  });
+
+  it("brainstorm_mock_selected records the chosen mock", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "brainstorm_mock_selected",
+      mockId: "mock-a-rev1",
+    };
+    if (e.kind === "brainstorm_mock_selected") {
+      expect(e.mockId).toBe("mock-a-rev1");
+    } else {
+      expect.fail("expected brainstorm_mock_selected");
+    }
+  });
+
+  it("brainstorm_mock_edit_requested carries a requested change", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "brainstorm_mock_edit_requested",
+      requestId: "mer_1",
+      mockId: "mock-a",
+      comment: "Make the artifact pane narrower.",
+    };
+    if (e.kind === "brainstorm_mock_edit_requested") {
+      expect(e.comment).toContain("narrower");
+    } else {
+      expect.fail("expected brainstorm_mock_edit_requested");
+    }
+  });
+});

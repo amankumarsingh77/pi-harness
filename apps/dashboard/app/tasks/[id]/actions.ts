@@ -91,6 +91,27 @@ export async function submitArtifactEditAction(
   revalidatePath(`/tasks/${taskId}/brainstorm`);
 }
 
+export async function submitBrainstormMockEditAction(
+  taskId: string,
+  mockId: string,
+  comment: string,
+): Promise<void> {
+  const trimmed = comment.trim();
+  if (trimmed.length === 0) return;
+  await orchestrator.submitBrainstormMockEdit(taskId, mockId, { comment: trimmed });
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+  revalidatePath(`/tasks/${taskId}/brainstorm/mocks/${mockId}`);
+}
+
+export async function selectBrainstormMockAction(
+  taskId: string,
+  mockId: string,
+): Promise<void> {
+  await orchestrator.selectBrainstormMock(taskId, mockId);
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+  revalidatePath(`/tasks/${taskId}/brainstorm/mocks/${mockId}`);
+}
+
 // Discard the current brainstorm run and start fresh. Old artifacts archive
 // under runs/<oldRunId>/ on the same task branch; an optional `note` is
 // seeded as the first nudge in the new run.

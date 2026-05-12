@@ -1,9 +1,15 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { BrainstormMock } from "@pi-harness/shared";
 import type { AgentEvent, TaskStatus } from "@pi-harness/shared";
 import type { BrainstormGate, BrainstormJsonlEvent } from "@/lib/api";
 import { useBrainstormEvents } from "@/lib/brainstorm-events-context";
+import {
+  selectBrainstormMockAction,
+  submitBrainstormMockEditAction,
+} from "@/app/tasks/[id]/actions";
 import { QuestionBatch } from "./question-card";
 import { NudgeInput } from "./nudge-input";
 import { ActivityLine, deriveActivity, type ActivityState } from "./activity-line";
@@ -51,7 +57,10 @@ export function ChatPanel({
   const gateRelevantCount = events.filter(
     (e) =>
       (e.kind === "brainstorm_system" && e.systemKind === "status_changed") ||
-      e.kind === "brainstorm_revision_requested",
+      e.kind === "brainstorm_revision_requested" ||
+      e.kind === "brainstorm_mock_proposed" ||
+      e.kind === "brainstorm_mock_revised" ||
+      e.kind === "brainstorm_mock_selected",
   ).length;
   const prevGateCount = useRef(gateRelevantCount);
   useEffect(() => {
@@ -100,6 +109,10 @@ export function ChatPanel({
   type QuestionEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>;
   type NudgeEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_user_nudge" }>;
   type ReplyEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_agent_reply" }>;
+  type MockProposalEvent = Extract<
+    BrainstormJsonlEvent,
+    { kind: "brainstorm_mock_proposed" | "brainstorm_mock_revised" }
+  >;
 
   const batchById = new Map<
     string,
@@ -108,6 +121,7 @@ export function ChatPanel({
   const nudgeById = new Map<string, NudgeEvent>();
   const repliesByNudgeId = new Map<string, ReplyEvent[]>();
   const standaloneReplies: ReplyEvent[] = [];
+  const selectedMockIds = new Set<string>();
 
   for (const e of events) {
     if (e.kind === "brainstorm_question") {
@@ -132,6 +146,8 @@ export function ChatPanel({
       } else {
         standaloneReplies.push(e);
       }
+    } else if (e.kind === "brainstorm_mock_selected") {
+      selectedMockIds.add(e.mockId);
     }
   }
   // A reply whose parent nudge never arrived becomes standalone (otherwise it
@@ -158,7 +174,8 @@ export function ChatPanel({
         nudge: NudgeEvent;
         pairedReplies: ReplyEvent[];
       }
-    | { kind: "reply"; ts: string; reply: ReplyEvent };
+    | { kind: "reply"; ts: string; reply: ReplyEvent }
+    | { kind: "mock"; ts: string; mock: BrainstormMock; editRequestId?: string };
 
   const timeline: TimelineItem[] = [];
   for (const e of events) {
@@ -176,6 +193,15 @@ export function ChatPanel({
       }
     } else if (e.kind === "brainstorm_revision_requested") {
       timeline.push({ kind: "revision", ts: e.ts, comment: e.comment });
+    } else if (e.kind === "brainstorm_mock_proposed") {
+      timeline.push({ kind: "mock", ts: e.ts, mock: e.mock });
+    } else if (e.kind === "brainstorm_mock_revised") {
+      timeline.push({
+        kind: "mock",
+        ts: e.ts,
+        mock: e.mock,
+        editRequestId: e.editRequestId,
+      });
     }
   }
   for (const b of batchById.values()) {
@@ -319,6 +345,17 @@ export function ChatPanel({
               </div>
             );
           }
+          if (item.kind === "mock") {
+            return (
+              <MockCard
+                key={`mock:${item.mock.mockId}:${item.ts}`}
+                taskId={taskId}
+                mock={item.mock}
+                selected={selectedMockIds.has(item.mock.mockId)}
+                editable={taskStatus === "brainstorming"}
+              />
+            );
+          }
           return <ReplyCard key={`r:${item.reply.replyId}`} reply={item.reply} indented={false} />;
         })}
 
@@ -387,6 +424,133 @@ function ReplyCard({
         agent replied
       </div>
       <div className="mt-0.5 whitespace-pre-wrap">{reply.message}</div>
+    </div>
+  );
+}
+
+function MockCard({
+  taskId,
+  mock,
+  selected,
+  editable,
+}: {
+  taskId: string;
+  mock: BrainstormMock;
+  selected: boolean;
+  editable: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [comment, setComment] = useState("");
+  const [pending, start] = useTransition();
+  const canSubmitEdit = comment.trim().length > 0 && !pending;
+
+  const submitEdit = (): void => {
+    if (!canSubmitEdit) return;
+    const next = comment.trim();
+    start(async () => {
+      await submitBrainstormMockEditAction(taskId, mock.mockId, next);
+      setComment("");
+      setEditing(false);
+    });
+  };
+
+  const choose = (): void => {
+    if (selected) return;
+    start(async () => {
+      await selectBrainstormMockAction(taskId, mock.mockId);
+    });
+  };
+
+  return (
+    <div
+      data-testid="brainstorm-mock-card"
+      className={`rounded border bg-card px-3 py-2.5 text-[13px] ${
+        selected ? "border-st-done/60" : "border-line"
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="font-medium text-fg">{mock.title}</span>
+            {mock.recommended && (
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-st-progress">
+                recommended
+              </span>
+            )}
+            {selected && (
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-st-done">
+                selected
+              </span>
+            )}
+          </div>
+          <div className="mt-1 text-[12.5px] leading-[1.45] text-fg-mute">{mock.summary}</div>
+          {mock.derivedFrom && (
+            <div className="mt-1 font-mono text-[10.5px] text-fg-subtle">
+              derived from {mock.derivedFrom}
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Link
+            href={`/tasks/${taskId}/brainstorm/mocks/${mock.mockId}` as never}
+            aria-label={`Open mock ${mock.title}`}
+            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg-body hover:border-line-hover hover:bg-white/[0.03]"
+          >
+            Open
+          </Link>
+          <button
+            type="button"
+            aria-label={`Edit mock ${mock.title}`}
+            disabled={!editable || pending}
+            onClick={() => setEditing((v) => !v)}
+            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg-body hover:border-line-hover hover:bg-white/[0.03] disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            aria-label={`Choose mock ${mock.title}`}
+            disabled={!editable || selected}
+            onClick={choose}
+            className="rounded bg-st-progress px-2.5 py-1 font-mono text-[11px] font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-fg-faint disabled:hover:brightness-100"
+          >
+            {selected ? "Chosen" : "Choose"}
+          </button>
+        </div>
+      </div>
+      {editing && (
+        <div className="mt-2 border-t border-line pt-2">
+          <textarea
+            aria-label="Mock edit request"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            disabled={pending}
+            placeholder="Describe the mock change…"
+            className="min-h-14 w-full resize-none border-0 bg-transparent p-0 text-[12.5px] leading-[1.5] text-fg outline-none placeholder:text-fg-faint"
+          />
+          <div className="mt-2 flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setComment("");
+              }}
+              disabled={pending}
+              className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg-body hover:border-line-hover hover:bg-white/[0.03] disabled:opacity-55"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitEdit}
+              disabled={!canSubmitEdit}
+              className="rounded bg-st-progress px-2.5 py-1 font-mono text-[11px] font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-fg-faint disabled:hover:brightness-100"
+            >
+              {pending ? "Submitting…" : "Submit mock edit"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -473,6 +637,25 @@ function projectAgentEvent(e: AgentEvent): BrainstormJsonlEvent | null {
           ? { inReplyToNudgeId: e.inReplyToNudgeId }
           : {}),
       };
+    case "brainstorm_mock_proposed":
+      return { kind: "brainstorm_mock_proposed", ts, mock: e.mock };
+    case "brainstorm_mock_revised":
+      return {
+        kind: "brainstorm_mock_revised",
+        ts,
+        mock: e.mock,
+        editRequestId: e.editRequestId,
+      };
+    case "brainstorm_mock_selected":
+      return { kind: "brainstorm_mock_selected", ts, mockId: e.mockId };
+    case "brainstorm_mock_edit_requested":
+      return {
+        kind: "brainstorm_mock_edit_requested",
+        ts,
+        requestId: e.requestId,
+        mockId: e.mockId,
+        comment: e.comment,
+      };
     default:
       return null;
   }
@@ -522,6 +705,12 @@ function eventKey(e: BrainstormJsonlEvent): string {
     case "brainstorm_agent_reply":
       // Each reply has a unique replyId.
       return `${e.kind}:${e.replyId}`;
+    case "brainstorm_mock_proposed":
+    case "brainstorm_mock_revised":
+      return `${e.kind}:${e.mock.mockId}:${e.ts}`;
+    case "brainstorm_mock_selected":
+      return `${e.kind}:${e.mockId}:${e.ts}`;
+    case "brainstorm_mock_edit_requested":
+      return `${e.kind}:${e.requestId}`;
   }
 }
-

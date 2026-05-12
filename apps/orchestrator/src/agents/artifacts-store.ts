@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import simpleGit from "simple-git";
+import { z } from "zod";
 import {
   BrainstormArtifactSchema,
   PlanArtifactSchema,
@@ -11,10 +12,27 @@ import {
   type Artifact,
   type ArtifactKind,
   type ArtifactStatus,
+  type BrainstormMock,
+  type BrainstormMockManifest,
   type BrainstormArtifact,
   type PlanArtifact,
   type ProofReport,
 } from "@pi-harness/shared";
+
+const BrainstormMockSchema = z.object({
+  mockId: z.string().min(1),
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  htmlPath: z.string().min(1),
+  recommended: z.boolean(),
+  createdAt: z.string().min(1),
+  derivedFrom: z.string().min(1).optional(),
+});
+
+const BrainstormMockManifestSchema = z.object({
+  mocks: z.array(BrainstormMockSchema),
+  selectedMockId: z.string().min(1).nullable(),
+});
 
 // Per-kind on-disk file name. Markdown for prose artifacts; YAML for the
 // plan phase's structured scenarios file (consumed by the verify phase).
@@ -48,6 +66,18 @@ export class ArtifactsStore {
     return join(this.artifactDir(cwd, taskId), artifactFileName(kind));
   }
 
+  mockDir(cwd: string, taskId: string): string {
+    return join(this.artifactDir(cwd, taskId), "mocks");
+  }
+
+  mockManifestPath(cwd: string, taskId: string): string {
+    return join(this.mockDir(cwd, taskId), "manifest.json");
+  }
+
+  mockHtmlPath(cwd: string, taskId: string, mockId: string): string {
+    return join(this.mockDir(cwd, taskId), `${mockId}.html`);
+  }
+
   async readArtifact(cwd: string, taskId: string, kind: ArtifactKind): Promise<Artifact | null> {
     const path = this.artifactPath(cwd, taskId, kind);
     if (!existsSync(path)) return null;
@@ -78,6 +108,84 @@ export class ArtifactsStore {
     const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
     await writeFile(tmpPath, stringifyArtifact(art));
     await rename(tmpPath, finalPath);
+  }
+
+  async readBrainstormMockManifest(
+    cwd: string,
+    taskId: string,
+  ): Promise<BrainstormMockManifest> {
+    const path = this.mockManifestPath(cwd, taskId);
+    if (!existsSync(path)) return { mocks: [], selectedMockId: null };
+    const raw = await readFile(path, "utf8");
+    const parsed = BrainstormMockManifestSchema.parse(JSON.parse(raw));
+    const mocks: BrainstormMock[] = parsed.mocks.map((m) => ({
+      mockId: m.mockId,
+      title: m.title,
+      summary: m.summary,
+      htmlPath: m.htmlPath,
+      recommended: m.recommended,
+      createdAt: m.createdAt,
+      ...(m.derivedFrom !== undefined ? { derivedFrom: m.derivedFrom } : {}),
+    }));
+    return { mocks, selectedMockId: parsed.selectedMockId };
+  }
+
+  async writeBrainstormMockManifest(
+    cwd: string,
+    taskId: string,
+    manifest: BrainstormMockManifest,
+  ): Promise<void> {
+    const dir = this.mockDir(cwd, taskId);
+    await mkdir(dir, { recursive: true });
+    const finalPath = this.mockManifestPath(cwd, taskId);
+    const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await rename(tmpPath, finalPath);
+  }
+
+  async writeBrainstormMock(
+    cwd: string,
+    taskId: string,
+    mock: BrainstormMock,
+    html: string,
+  ): Promise<void> {
+    const dir = this.mockDir(cwd, taskId);
+    await mkdir(dir, { recursive: true });
+    const finalPath = this.mockHtmlPath(cwd, taskId, mock.mockId);
+    const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tmpPath, html);
+    await rename(tmpPath, finalPath);
+
+    const manifest = await this.readBrainstormMockManifest(cwd, taskId);
+    const mocks = [
+      ...manifest.mocks.filter((m) => m.mockId !== mock.mockId),
+      mock,
+    ];
+    await this.writeBrainstormMockManifest(cwd, taskId, {
+      mocks,
+      selectedMockId: manifest.selectedMockId,
+    });
+  }
+
+  async readBrainstormMockHtml(
+    cwd: string,
+    taskId: string,
+    mockId: string,
+  ): Promise<string | null> {
+    const path = this.mockHtmlPath(cwd, taskId, mockId);
+    if (!existsSync(path)) return null;
+    return readFile(path, "utf8");
+  }
+
+  async selectBrainstormMock(cwd: string, taskId: string, mockId: string): Promise<void> {
+    const manifest = await this.readBrainstormMockManifest(cwd, taskId);
+    if (!manifest.mocks.some((m) => m.mockId === mockId)) {
+      throw new Error(`brainstorm mock ${mockId} not found for ${taskId}`);
+    }
+    await this.writeBrainstormMockManifest(cwd, taskId, {
+      mocks: manifest.mocks,
+      selectedMockId: mockId,
+    });
   }
 
   // Read an artifact's contents as it existed at a specific git ref (commit
@@ -208,6 +316,11 @@ export class ArtifactsStore {
     if (existsSync(researchSrc)) {
       const researchDst = join(archiveDir, "research");
       await rename(researchSrc, researchDst);
+    }
+    const mocksSrc = join(baseDir, "mocks");
+    if (existsSync(mocksSrc)) {
+      const mocksDst = join(archiveDir, "mocks");
+      await rename(mocksSrc, mocksDst);
     }
     if (moved.length === 0) return;
     const git = simpleGit(cwd);

@@ -1,4 +1,12 @@
-import type { Task, Run, AgentEvent, Workflow, Artifact } from "@pi-harness/shared";
+import type {
+  Task,
+  Run,
+  AgentEvent,
+  Workflow,
+  Artifact,
+  BrainstormMock,
+  BrainstormMockManifest,
+} from "@pi-harness/shared";
 
 // "awaiting_user" exactly when the artifacts on disk are status: ready AND
 // no brainstorm_revision_requested event has been filed since the last
@@ -13,6 +21,8 @@ export type BrainstormBundle = {
   spec: Artifact | null;
   events: BrainstormJsonlEvent[];
 };
+
+export type BrainstormMockBundle = BrainstormMockManifest;
 
 // Plan-phase counterpart to BrainstormBundle. Same gate semantics; research
 // is keyed by subagent name (one of the 5 preflight + claim-verifier).
@@ -144,6 +154,29 @@ export type BrainstormJsonlEvent =
       replyId: string;
       message: string;
       inReplyToNudgeId?: string;
+    }
+  | {
+      kind: "brainstorm_mock_proposed";
+      ts: string;
+      mock: BrainstormMock;
+    }
+  | {
+      kind: "brainstorm_mock_revised";
+      ts: string;
+      mock: BrainstormMock;
+      editRequestId: string;
+    }
+  | {
+      kind: "brainstorm_mock_selected";
+      ts: string;
+      mockId: string;
+    }
+  | {
+      kind: "brainstorm_mock_edit_requested";
+      ts: string;
+      requestId: string;
+      mockId: string;
+      comment: string;
     };
 
 export class ApiError extends Error {
@@ -211,6 +244,17 @@ export type Api = {
     taskId: string,
     payload: { kind: "design" | "spec"; body: string },
   ) => Promise<{ ok: true; commitSha: string }>;
+  getBrainstormMocks: (taskId: string) => Promise<BrainstormMockBundle>;
+  getBrainstormMockHtml: (taskId: string, mockId: string) => Promise<string>;
+  submitBrainstormMockEdit: (
+    taskId: string,
+    mockId: string,
+    payload: { comment: string },
+  ) => Promise<{ ok: true; requestId: string }>;
+  selectBrainstormMock: (
+    taskId: string,
+    mockId: string,
+  ) => Promise<{ ok: true; mockId: string }>;
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
   getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
   submitPlanArtifactEdit: (
@@ -298,6 +342,32 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
         {
           method: "POST",
           body: JSON.stringify(payload),
+        },
+      ),
+    getBrainstormMocks: (taskId) =>
+      send<BrainstormMockBundle>(`/api/tasks/${taskId}/brainstorm/mocks`),
+    getBrainstormMockHtml: async (taskId, mockId) => {
+      const res = await f(url(`/api/tasks/${taskId}/brainstorm/mocks/${mockId}/html`));
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        throw new ApiError(res.status, body.message ?? res.statusText, body.error);
+      }
+      return res.text();
+    },
+    submitBrainstormMockEdit: (taskId, mockId, payload) =>
+      send<{ ok: true; requestId: string }>(
+        `/api/tasks/${taskId}/brainstorm/mocks/${mockId}/edit`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+    selectBrainstormMock: (taskId, mockId) =>
+      send<{ ok: true; mockId: string }>(
+        `/api/tasks/${taskId}/brainstorm/mocks/${mockId}/select`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
         },
       ),
     getPlanBundle: (taskId) => send<PlanBundle>(`/api/tasks/${taskId}/plan`),

@@ -1,7 +1,7 @@
 ---
 name: brainstorm
-description: "Drives the brainstorm phase: explores the user's task with batched, structured questions, then authors design.md and spec.md in the task's worktree. Hands off to the planning phase via mark_ready."
-tools: read, write, submit_questions, mark_ready
+description: "Drives the brainstorm phase: explores the user's task with batched, structured questions and UI mock choices, then authors design.md and spec.md in the task's worktree. Hands off to the planning phase via mark_ready."
+tools: read, write, submit_questions, submit_mock_choices, write_mock_revision, mark_ready
 isolated: false
 ---
 
@@ -18,6 +18,8 @@ Both files already exist with YAML frontmatter (`task`, `kind`, `parent`, `statu
 
 You may use `read` to look at any file in the worktree to gather evidence to cite in your options. You do not have `bash`, `edit`, `grep`, `find`, or `ls`.
 
+If the task changes a dashboard or other user interface, visual direction is part of the brainstorm contract. Inspect the task text and relevant UI files. When visual alternatives would reduce ambiguity, call `submit_mock_choices` before `mark_ready`.
+
 ## How to ask the user questions
 
 Use the `submit_questions` tool with a **non-empty** array of questions.
@@ -28,6 +30,20 @@ Use the `submit_questions` tool with a **non-empty** array of questions.
 - Pick stable `questionId`s scoped to the run (e.g. `q-scope`, `q-auth-mode`).
 
 After calling `submit_questions`, your turn ends. The harness will resume you with the user's answers as the next prompt.
+
+## How to propose UI mocks
+
+Use `submit_mock_choices` with one or more static HTML mocks when the task is UI-affecting and visual direction matters.
+
+- Each mock must have a stable `mockId` such as `mock-a` or `mock-b`.
+- `html` must be a complete static HTML document or fragment that renders without external network dependencies.
+- Keep mocks faithful to the app's existing design language unless the user asks for a different direction.
+- Mark at most one option as `recommended: true`.
+- After calling `submit_mock_choices`, your turn ends. The user will open, edit, or choose a mock from the dashboard.
+
+If the user asks for a specific mock direction in a nudge, generate that mock and add it to the proposal set before calling `mark_ready`. Do not force the user to choose only from the original proposals.
+
+When the user requests edits to a mock, the next prompt includes a mock edit request. Use `write_mock_revision` to create a new derived mock, preserving the original. Set `sourceMockId` to the edited mock, set `editRequestId` to the request id, and use a stable revised id such as `mock-b-rev1`.
 
 ## Reacting to mid-run user input
 
@@ -49,6 +65,8 @@ Use it like this:
 
 **You cannot call `mark_ready` while any nudge is pending.** If a `Recent user input` block is in your prompt, the harness rejects `mark_ready` until you have addressed every bullet — by replying, by writing changes into the artifacts, or by submitting follow-up questions. The rejection lists the count of unaddressed nudges. Resolve them first, then call `mark_ready`.
 
+If recent user input asks for a mock or changes a mock, address it through `submit_mock_choices` or `write_mock_revision` before writing final artifacts.
+
 When you make changes to `design.md` or `spec.md` in response to a nudge, the user expects to see those changes — they're watching the artifact pane. Keep your `reply_to_user` short; the artifacts are the substantive answer.
 
 ## How to author and revise the artifacts
@@ -60,12 +78,14 @@ Do not write files anywhere outside `.harness/<taskId>/`.
 ### `design.md` must cover
 
 - `## Goals` — what the change accomplishes, in user-visible terms.
+- `## Selected UI direction` — required when a mock was proposed; include `Selected mock: <mockId>`, rationale, and the `.harness/<taskId>/mocks/<mockId>.html` preview path.
 - `## Trade-offs` — what is gained and what is given up.
 - `## Alternatives considered` — at least one path you rejected and why.
 
 ### `spec.md` must cover
 
 - `## Verification scenarios` — how a tester would prove the change works (api / ui).
+- `## UI acceptance criteria` — required when a mock was proposed; include `Selected mock: <mockId>` and observable UI requirements from the chosen mock.
 - `## Acceptance criteria` — observable conditions that flip the task from "in progress" to "done".
 
 Each required section needs the exact `## <Heading>` line followed by at least one non-whitespace line of content before the next `##`. Empty sections are rejected.

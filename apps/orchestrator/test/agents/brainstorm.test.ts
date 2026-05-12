@@ -235,6 +235,16 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter.state.promptCalls[0]!.text).toContain("Begin brainstorming");
     expect(adapter.state.promptCalls[0]!.text).toContain("Title: Add login");
     expect(adapter.state.promptCalls[0]!.text).toContain(`.harness/${TASK}/design.md`);
+    const toolNames = (adapter.state.createOpts?.customTools ?? []).map((t) => t.name);
+    expect(toolNames).toEqual(
+      expect.arrayContaining([
+        "submit_questions",
+        "submit_mock_choices",
+        "write_mock_revision",
+        "mark_ready",
+        "reply_to_user",
+      ]),
+    );
 
     const jsonl = await readFile(
       join(scratch, ".harness", TASK, "brainstorm.jsonl"),
@@ -322,6 +332,106 @@ describe("runBrainstorm (real-bridge)", () => {
 
     expect(adapter.state.promptCalls[0]!.text).toContain("add a perf section");
     expect(adapter.state.promptCalls[0]!.text).toContain("User requested revisions");
+  });
+
+  it("mock selection: prompt carries the selected mock id", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    await writeFile(
+      jsonlPath,
+      [
+        JSON.stringify({
+          ts: "t1",
+          kind: "brainstorm_mock_proposed",
+          mock: {
+            mockId: "mock-a",
+            title: "A",
+            summary: "A",
+            htmlPath: ".harness/T-1/mocks/mock-a.html",
+            recommended: true,
+            createdAt: "t1",
+          },
+        }),
+        JSON.stringify({ ts: "t2", kind: "brainstorm_mock_selected", mockId: "mock-a" }),
+      ].join("\n") + "\n",
+    );
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    expect(adapter.state.promptCalls[0]!.text).toContain("User selected UI mock: mock-a");
+  });
+
+  it("mock edit request: prompt carries the edit request", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    await writeFile(
+      jsonlPath,
+      [
+        JSON.stringify({
+          ts: "t1",
+          kind: "brainstorm_mock_proposed",
+          mock: {
+            mockId: "mock-a",
+            title: "A",
+            summary: "A",
+            htmlPath: ".harness/T-1/mocks/mock-a.html",
+            recommended: true,
+            createdAt: "t1",
+          },
+        }),
+        JSON.stringify({
+          ts: "t2",
+          kind: "brainstorm_mock_edit_requested",
+          requestId: "mer_1",
+          mockId: "mock-a",
+          comment: "Make it denser.",
+        }),
+      ].join("\n") + "\n",
+    );
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    expect(adapter.state.promptCalls[0]!.text).toContain("User requested mock edit");
+    expect(adapter.state.promptCalls[0]!.text).toContain("mer_1");
+    expect(adapter.state.promptCalls[0]!.text).toContain("Make it denser.");
   });
 
   it("no-op: no new events since last agent activity → no bridge call", async () => {
@@ -939,4 +1049,3 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter.state.abortCalls).toBeGreaterThanOrEqual(1);
   });
 });
-

@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { randomUUID } from "node:crypto";
-import type { Artifact, ArtifactKind } from "@pi-harness/shared";
+import type { Artifact, ArtifactKind, BrainstormMock } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 
@@ -56,9 +56,32 @@ const ReplyToUserParams = Type.Object({
   inReplyToNudgeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 });
 
+const MockChoice = Type.Object({
+  mockId: Type.String({ minLength: 1, maxLength: 80 }),
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.String({ minLength: 1, maxLength: 500 }),
+  html: Type.String({ minLength: 1, maxLength: 250_000 }),
+  recommended: Type.Boolean(),
+});
+
+const SubmitMockChoicesParams = Type.Object({
+  mocks: Type.Array(MockChoice, { minItems: 1, maxItems: 6 }),
+});
+
+const WriteMockRevisionParams = Type.Object({
+  sourceMockId: Type.String({ minLength: 1, maxLength: 80 }),
+  mockId: Type.String({ minLength: 1, maxLength: 80 }),
+  editRequestId: Type.String({ minLength: 1, maxLength: 120 }),
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.String({ minLength: 1, maxLength: 500 }),
+  html: Type.String({ minLength: 1, maxLength: 250_000 }),
+});
+
 export type SubmitQuestionsDetails = { awaiting: string[] };
 export type MarkReadyDetails = { ok: boolean; missing?: string };
 export type ReplyToUserDetails = { replyId: string };
+export type SubmitMockChoicesDetails = { proposed: string[] };
+export type WriteMockRevisionDetails = { revised: string };
 
 export function makeSubmitQuestionsTool(deps: {
   bus: BrainstormEventBus;
@@ -131,6 +154,14 @@ function findMissingSection(kind: BrainstormArtifactKind, body: string): string 
   return null;
 }
 
+function artifactMentionsSelectedMock(
+  artifact: Artifact,
+  mockId: string,
+  requiredHeading: string,
+): boolean {
+  return artifact.body.includes(requiredHeading) && artifact.body.includes(`Selected mock: ${mockId}`);
+}
+
 export function makeMarkReadyTool(deps: {
   store: ArtifactsStore;
   bus: BrainstormEventBus;
@@ -188,6 +219,18 @@ export function makeMarkReadyTool(deps: {
         if (missing) return reject(missing);
       }
 
+      const mockManifest = await store.readBrainstormMockManifest(cwd, taskId);
+      if (mockManifest.mocks.length > 0) {
+        const selected = mockManifest.selectedMockId;
+        const selectedReflected =
+          selected !== null &&
+          artifactMentionsSelectedMock(loaded.design, selected, "## Selected UI direction") &&
+          artifactMentionsSelectedMock(loaded.spec, selected, "## UI acceptance criteria");
+        if (!selectedReflected) {
+          return reject("selected mock missing from design.md and spec.md");
+        }
+      }
+
       const alreadyReady = kinds.every((k) => loaded[k].fm.status === "ready");
       if (alreadyReady) {
         return {
@@ -222,6 +265,81 @@ export function makeMarkReadyTool(deps: {
         content: [{ type: "text", text: "ready" }],
         details: { ok: true },
         terminate: true,
+      };
+    },
+  };
+}
+
+export function makeSubmitMockChoicesTool(deps: {
+  store: ArtifactsStore;
+  bus: BrainstormEventBus;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof SubmitMockChoicesParams, SubmitMockChoicesDetails> {
+  return {
+    name: "submit_mock_choices",
+    label: "Submit mock choices",
+    description:
+      "Write one or more static HTML brainstorm mock choices and publish them for the user to open, edit, or choose. After calling this, halt your turn.",
+    parameters: SubmitMockChoicesParams,
+    async execute(_id, params) {
+      const proposed: string[] = [];
+      for (const input of params.mocks) {
+        const mock: BrainstormMock = {
+          mockId: input.mockId,
+          title: input.title,
+          summary: input.summary,
+          htmlPath: `.harness/${deps.taskId}/mocks/${input.mockId}.html`,
+          recommended: input.recommended,
+          createdAt: new Date().toISOString(),
+        };
+        await deps.store.writeBrainstormMock(deps.cwd, deps.taskId, mock, input.html);
+        await deps.bus.publish({
+          kind: "brainstorm_mock_proposed",
+          mock,
+        });
+        proposed.push(input.mockId);
+      }
+      return {
+        content: [{ type: "text", text: "submitted mock choices" }],
+        details: { proposed },
+        terminate: true,
+      };
+    },
+  };
+}
+
+export function makeWriteMockRevisionTool(deps: {
+  store: ArtifactsStore;
+  bus: BrainstormEventBus;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof WriteMockRevisionParams, WriteMockRevisionDetails> {
+  return {
+    name: "write_mock_revision",
+    label: "Write mock revision",
+    description:
+      "Write a revised static HTML mock after the user requested edits to an existing mock.",
+    parameters: WriteMockRevisionParams,
+    async execute(_id, params) {
+      const mock: BrainstormMock = {
+        mockId: params.mockId,
+        title: params.title,
+        summary: params.summary,
+        htmlPath: `.harness/${deps.taskId}/mocks/${params.mockId}.html`,
+        recommended: false,
+        derivedFrom: params.sourceMockId,
+        createdAt: new Date().toISOString(),
+      };
+      await deps.store.writeBrainstormMock(deps.cwd, deps.taskId, mock, params.html);
+      await deps.bus.publish({
+        kind: "brainstorm_mock_revised",
+        mock,
+        editRequestId: params.editRequestId,
+      });
+      return {
+        content: [{ type: "text", text: "wrote mock revision" }],
+        details: { revised: params.mockId },
       };
     },
   };

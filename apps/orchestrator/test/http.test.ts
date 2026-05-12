@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import simpleGit from "simple-git";
 import { createDb } from "@pi-harness/db";
 import { RunStore } from "../src/adapters/run-store.js";
@@ -544,6 +544,15 @@ describe("http", () => {
     );
     // Pretend the agent persisted a session file too.
     await writeFile(join(worktree, ".harness", t.id, "pi-session.jsonl"), "session\n");
+    const preRestartStore = new ArtifactsStore();
+    await preRestartStore.writeBrainstormMock(worktree, t.id, {
+      mockId: "mock-a",
+      title: "Split pane",
+      summary: "Shows options beside artifacts.",
+      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
+      recommended: true,
+      createdAt: "2026-05-13T00:00:00.000Z",
+    }, "<h1>Mock A</h1>");
 
     const res = await app.inject({
       method: "POST",
@@ -568,6 +577,8 @@ describe("http", () => {
     expect(existsSync(join(archive, "design.md"))).toBe(true);
     expect(existsSync(join(archive, "spec.md"))).toBe(true);
     expect(existsSync(join(archive, "pi-session.jsonl"))).toBe(true);
+    expect(existsSync(join(archive, "mocks", "mock-a.html"))).toBe(true);
+    expect(existsSync(join(archive, "mocks", "manifest.json"))).toBe(true);
 
     // Fresh artifacts re-scaffolded in draft state.
     const restartStore = new ArtifactsStore();
@@ -736,6 +747,113 @@ describe("http", () => {
       payload: { kind: "design", body: "" },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it("GET /api/tasks/:id/brainstorm/mocks returns manifest and selected mock", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, {
+      mockId: "mock-a",
+      title: "Split pane",
+      summary: "Shows options beside artifacts.",
+      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
+      recommended: true,
+      createdAt: "2026-05-13T00:00:00.000Z",
+    }, "<h1>Mock A</h1>");
+    await store.selectBrainstormMock(wt, t.id, "mock-a");
+
+    const res = await app.inject({ method: "GET", url: `/api/tasks/${t.id}/brainstorm/mocks` });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      mocks: [{ mockId: "mock-a", title: "Split pane" }],
+      selectedMockId: "mock-a",
+    });
+  });
+
+  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/html returns mock HTML", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, {
+      mockId: "mock-a",
+      title: "Split pane",
+      summary: "Shows options beside artifacts.",
+      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
+      recommended: true,
+      createdAt: "2026-05-13T00:00:00.000Z",
+    }, "<h1>Mock A</h1>");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/html`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.body).toContain("Mock A");
+  });
+
+  it("POST /api/tasks/:id/brainstorm/mocks/:mockId/edit appends request and enqueues", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const enqueue = vi.fn();
+    const testApp = buildServer({
+      runs,
+      events,
+      runsDir: tmpdir(),
+      scheduler: { enqueue } as never,
+    });
+    const res = await testApp.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/edit`,
+      payload: { comment: "Make the artifact pane narrower." },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().requestId).toMatch(/^mer_/);
+    expect(enqueue).toHaveBeenCalledWith(t.id);
+    const jsonl = await readFile(join(wt, ".harness", t.id, "brainstorm.jsonl"), "utf8");
+    expect(jsonl).toContain("brainstorm_mock_edit_requested");
+  });
+
+  it("POST /api/tasks/:id/brainstorm/mocks/:mockId/select updates manifest and enqueues", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, {
+      mockId: "mock-a",
+      title: "Split pane",
+      summary: "Shows options beside artifacts.",
+      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
+      recommended: true,
+      createdAt: "2026-05-13T00:00:00.000Z",
+    }, "<h1>Mock A</h1>");
+    const enqueue = vi.fn();
+    const testApp = buildServer({
+      runs,
+      events,
+      runsDir: tmpdir(),
+      scheduler: { enqueue } as never,
+    });
+
+    const res = await testApp.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/select`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(enqueue).toHaveBeenCalledWith(t.id);
+    await expect(store.readBrainstormMockManifest(wt, t.id)).resolves.toMatchObject({
+      selectedMockId: "mock-a",
+    });
+    const jsonl = await readFile(join(wt, ".harness", t.id, "brainstorm.jsonl"), "utf8");
+    expect(jsonl).toContain("brainstorm_mock_selected");
   });
 
   it("user_request_brainstorm_changes: 409 when task has no worktree", async () => {
