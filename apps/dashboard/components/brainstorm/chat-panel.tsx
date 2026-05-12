@@ -1,6 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import type { AgentEvent, TaskStatus } from "@pi-harness/shared";
 import type { BrainstormGate, BrainstormJsonlEvent } from "@/lib/api";
 import { useBrainstormEvents } from "@/lib/brainstorm-events-context";
@@ -29,7 +28,6 @@ export function ChatPanel({
   taskStatus: TaskStatus;
 }) {
   const { events: liveEvents } = useBrainstormEvents();
-  const router = useRouter();
 
   // Merge the server-rendered snapshot with the live SSE stream. Bundle
   // events arrive without an envelope; SSE events carry an AgentEventBase
@@ -42,24 +40,6 @@ export function ChatPanel({
       .filter((e): e is BrainstormJsonlEvent => e !== null);
     return mergeEvents(initialEvents, projected);
   }, [initialEvents, liveEvents]);
-
-  // Refresh the page (re-derive the gate server-side) on any event that
-  // could move it: agent flipped artifacts to ready (`status_changed`) OR
-  // the user filed a revision (`brainstorm_revision_requested`). A single
-  // counter over both kinds means we trigger exactly once per change
-  // without double-firing on rapid arrivals.
-  const gateRelevantCount = events.filter(
-    (e) =>
-      (e.kind === "brainstorm_system" && e.systemKind === "status_changed") ||
-      e.kind === "brainstorm_revision_requested",
-  ).length;
-  const prevGateCount = useRef(gateRelevantCount);
-  useEffect(() => {
-    if (gateRelevantCount > prevGateCount.current) {
-      router.refresh();
-    }
-    prevGateCount.current = gateRelevantCount;
-  }, [gateRelevantCount, router]);
 
   const critique = events.find((e) => e.kind === "brainstorm_system" && e.systemKind === "self_critique_passed");
   const ready = events.find((e) => e.kind === "brainstorm_system" && e.systemKind === "status_changed");
@@ -524,4 +504,3 @@ function eventKey(e: BrainstormJsonlEvent): string {
       return `${e.kind}:${e.replyId}`;
   }
 }
-

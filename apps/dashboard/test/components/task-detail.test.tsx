@@ -105,10 +105,116 @@ describe("AgentLog", () => {
     expect(screen.getByLabelText("failed")).toBeInTheDocument();
   });
 
+  it("pairs overlapping same-tool calls by callId", () => {
+    const events: AgentEvent[] = [
+      {
+        id: "1",
+        taskId: "t",
+        runId: "r_abc",
+        ts: new Date("2026-05-08T14:32:01Z"),
+        kind: "tool_call",
+        callId: "call-a",
+        tool: "read",
+        input: { path: "a.ts" },
+      },
+      {
+        id: "2",
+        taskId: "t",
+        runId: "r_abc",
+        ts: new Date("2026-05-08T14:32:02Z"),
+        kind: "tool_call",
+        callId: "call-b",
+        tool: "read",
+        input: { path: "b.ts" },
+      },
+      {
+        id: "3",
+        taskId: "t",
+        runId: "r_abc",
+        ts: new Date("2026-05-08T14:32:03Z"),
+        kind: "tool_result",
+        callId: "call-a",
+        tool: "read",
+        ok: false,
+      },
+    ];
+
+    render(<AgentLog events={events} runId="r_abc" />);
+
+    const rows = screen.getAllByRole("button").filter((row) =>
+      row.textContent?.includes("read("),
+    );
+    expect(rows[0]).toHaveTextContent("read(a.ts)✗");
+    expect(rows[1]).toHaveTextContent("read(b.ts)…");
+  });
+
   it("shows event count and short run id in the header", () => {
     const events: AgentEvent[] = [];
     render(<AgentLog events={events} runId="r_8f3a91c2" />);
     expect(screen.getByText(/r_8f3a/)).toBeInTheDocument();
     expect(screen.getByText(/0 events/)).toBeInTheDocument();
+  });
+
+  it("renders plan lifecycle events with non-empty messages", () => {
+    const events: AgentEvent[] = [
+      {
+        id: "1",
+        taskId: "t",
+        runId: "r_plan",
+        ts: new Date("2026-05-08T14:32:01Z"),
+        kind: "phase_started",
+        phase: "plan",
+      },
+      {
+        id: "2",
+        taskId: "t",
+        runId: "r_plan",
+        ts: new Date("2026-05-08T14:32:02Z"),
+        kind: "plan_system",
+        systemKind: "preflight_started",
+      },
+      {
+        id: "3",
+        taskId: "t",
+        runId: "r_plan",
+        ts: new Date("2026-05-08T14:32:03Z"),
+        kind: "plan_subagent_started",
+        subagent: "repo-cartographer",
+        sessionId: "s_1",
+      },
+      {
+        id: "4",
+        taskId: "t",
+        runId: "r_plan",
+        ts: new Date("2026-05-08T14:32:04Z"),
+        kind: "plan_subagent_ended",
+        subagent: "repo-cartographer",
+        sessionId: "s_1",
+        ok: true,
+        durationMs: 1000,
+        costUsd: 0.001,
+        inputTokens: 100,
+        outputTokens: 20,
+      },
+      {
+        id: "5",
+        taskId: "t",
+        runId: "r_plan",
+        ts: new Date("2026-05-08T14:32:05Z"),
+        kind: "plan_usage",
+        tickIndex: 1,
+        inputTokens: 1000,
+        outputTokens: 200,
+        costUsd: 0.0123,
+        cumulativeInputTokens: 1000,
+        cumulativeOutputTokens: 200,
+        cumulativeCostUsd: 0.0123,
+      },
+    ];
+    render(<AgentLog events={events} runId="r_plan" />);
+    expect(screen.getByText("preflight started")).toBeInTheDocument();
+    expect(screen.getByText("research started · repo-cartographer")).toBeInTheDocument();
+    expect(screen.getByText("research complete · repo-cartographer")).toBeInTheDocument();
+    expect(screen.getByText("usage · 1,000 in / 200 out · $0.0123")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ export type PhaseModelConfig = {
   provider: string;
   model: string;
   thinkingLevel: ThinkingLevel;
+  maxTurns?: number;
 };
 
 // Code-level defaults. Edits require a deploy. Per-task overrides go through

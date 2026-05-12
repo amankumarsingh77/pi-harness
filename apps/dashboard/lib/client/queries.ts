@@ -13,6 +13,9 @@ export const queryKeys = {
   tasks: ["tasks"] as const,
   task: (id: string) => ["tasks", id] as const,
   events: (runId: string) => ["runs", runId, "events"] as const,
+  runFiles: (runId: string) => ["runs", runId, "files"] as const,
+  brainstormBundle: (taskId: string) => ["tasks", taskId, "brainstorm"] as const,
+  planBundle: (taskId: string) => ["tasks", taskId, "plan"] as const,
   artifact: (taskId: string, name: "brainstorm" | "plan" | "proof-report") =>
     ["tasks", taskId, "artifacts", name] as const,
 };
@@ -29,6 +32,18 @@ export const queries = {
   listEvents: (runId: string) => ({
     queryKey: queryKeys.events(runId),
     queryFn: () => proxied.listEvents(runId),
+  }),
+  listRunFiles: (runId: string) => ({
+    queryKey: queryKeys.runFiles(runId),
+    queryFn: () => proxied.listRunFiles(runId),
+  }),
+  getBrainstormBundle: (taskId: string) => ({
+    queryKey: queryKeys.brainstormBundle(taskId),
+    queryFn: () => proxied.getBrainstormBundle(taskId),
+  }),
+  getPlanBundle: (taskId: string) => ({
+    queryKey: queryKeys.planBundle(taskId),
+    queryFn: () => proxied.getPlanBundle(taskId),
   }),
   getArtifact: <T,>(taskId: string, name: "brainstorm" | "plan" | "proof-report") => ({
     queryKey: queryKeys.artifact(taskId, name),

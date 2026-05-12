@@ -247,11 +247,12 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     if (e.kind === "message_delta") {
       event = mkEvent({ ...base, kind: "message_delta", text: e.text, subagent });
     } else if (e.kind === "tool_call") {
-      event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input, subagent });
+      event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input, subagent });
     } else if (e.kind === "tool_result") {
       event = mkEvent({
         ...base,
         kind: "tool_result",
+        callId: e.callId,
         tool: e.tool,
         ok: e.ok,
         ...(e.output !== undefined ? { output: e.output } : {}),
@@ -397,11 +398,12 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       if (e.kind === "message_delta") {
         event = mkEvent({ ...base, kind: "message_delta", text: e.text, subagent });
       } else if (e.kind === "tool_call") {
-        event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input, subagent });
+        event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input, subagent });
       } else if (e.kind === "tool_result") {
         event = mkEvent({
           ...base,
           kind: "tool_result",
+          callId: e.callId,
           tool: e.tool,
           ok: e.ok,
           ...(e.output !== undefined ? { output: e.output } : {}),
@@ -509,11 +511,12 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
         if (e.kind === "message_delta") {
           event = mkEvent({ ...base, kind: "message_delta", text: e.text });
         } else if (e.kind === "tool_call") {
-          event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input });
+          event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input });
         } else if (e.kind === "tool_result") {
           event = mkEvent({
             ...base,
             kind: "tool_result",
+            callId: e.callId,
             tool: e.tool,
             ok: e.ok,
             ...(e.output !== undefined ? { output: e.output } : {}),

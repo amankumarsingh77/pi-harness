@@ -23,13 +23,20 @@ export async function GET(
   ctx: { params: Promise<{ runId: string }> },
 ): Promise<Response> {
   const { runId } = await ctx.params;
-  const url = `${ORCHESTRATOR}/api/runs/${encodeURIComponent(runId)}/events/stream`;
+  const upstreamPath = runId === "dashboard"
+    ? "/api/dashboard/events/stream"
+    : `/api/runs/${encodeURIComponent(runId)}/events/stream`;
+  const url = `${ORCHESTRATOR}${upstreamPath}`;
+  const lastEventId = req.headers.get("last-event-id");
 
   let upstream: Response;
   try {
     upstream = await fetch(url, {
       method: "GET",
-      headers: { accept: "text/event-stream" },
+      headers: {
+        accept: "text/event-stream",
+        ...(lastEventId ? { "last-event-id": lastEventId } : {}),
+      },
       // Propagate browser disconnects upstream — when the EventSource closes
       // (page nav, tab close), the orchestrator's request aborts cleanly
       // instead of being torn down mid-pipe.

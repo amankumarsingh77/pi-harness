@@ -21,16 +21,21 @@ export function registerEventStream(
       });
 
       const send = (e: AgentEvent) => {
-        reply.raw.write(`data: ${JSON.stringify(e)}\n\n`);
+        reply.raw.write(`id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`);
       };
 
-      // Replay everything we have, then subscribe.
-      // (Race: events appended between listForRun and subscribe could be missed.
-      // For v1 this is acceptable; v2 can switch to a SQL cursor for ordering.)
-      const existing = await deps.events.listForRun(runId);
-      for (const e of existing) send(e);
+      const lastEventId = req.headers["last-event-id"];
+      const afterId = typeof lastEventId === "string" && lastEventId.length > 0
+        ? lastEventId
+        : null;
 
+      // Subscribe before replay so an event appended during the initial DB
+      // read is still delivered live. Replayed overlap is acceptable because
+      // clients dedupe by event id.
       const unsub = deps.events.subscribe(runId, send);
+
+      const existing = await deps.events.listForRunAfter(runId, afterId);
+      for (const e of existing) send(e);
 
       // Heartbeat: an SSE comment line every 25s. Dev proxies (Next.js, nginx
       // with default settings) close idle connections after ~30–60s; without

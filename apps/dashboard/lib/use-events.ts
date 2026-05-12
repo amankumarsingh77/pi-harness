@@ -5,6 +5,9 @@ import type { AgentEvent } from "@pi-harness/shared";
 export type UseEventsResult = {
   events: AgentEvent[];
   connected: boolean;
+  lastEventId: string | null;
+  lastEventAt: Date | null;
+  gapDetected: boolean;
 };
 
 // Subscribes to /api/sse/:runId and accumulates events. Reconnects on error
@@ -26,9 +29,20 @@ export function useEvents(
 ): UseEventsResult {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [connected, setConnected] = useState(false);
+  const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const [lastEventAt, setLastEventAt] = useState<Date | null>(null);
+  const [gapDetected, setGapDetected] = useState(false);
   const esRef = useRef<EventSource | null>(null);
+  const seenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    setEvents([]);
+    setConnected(false);
+    setLastEventId(null);
+    setLastEventAt(null);
+    setGapDetected(false);
+    seenRef.current = new Set();
+
     if (!runId) return;
     let attempt = 0;
     let cancelled = false;
@@ -52,9 +66,17 @@ export function useEvents(
       es.onmessage = (ev) => {
         try {
           const parsed = JSON.parse(ev.data) as AgentEvent;
-          setEvents((curr) => [...curr, parsed]);
+          setLastEventId(parsed.id);
+          setLastEventAt(new Date(parsed.ts));
+          setEvents((curr) => {
+            if (seenRef.current.has(parsed.id)) return curr;
+            seenRef.current.add(parsed.id);
+            return [...curr, parsed].sort(
+              (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+            );
+          });
         } catch {
-          // ignore non-JSON keep-alives
+          setGapDetected(true);
         }
       };
       es.onerror = () => {
@@ -77,5 +99,5 @@ export function useEvents(
     };
   }, [runId]);
 
-  return { events, connected };
+  return { events, connected, lastEventId, lastEventAt, gapDetected };
 }

@@ -5,6 +5,8 @@ import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
+import { DashboardEventBus } from "../adapters/dashboard-event-bus.js";
+import type { DashboardEventBus as DashboardEventBusType } from "../adapters/dashboard-event-bus.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
 import { isHarnessError } from "../domain/errors.js";
@@ -16,6 +18,7 @@ import { registerArtifactRoutes } from "./routes/artifacts.js";
 import { registerScreenshotRoutes } from "./routes/screenshots.js";
 import { registerBrainstormRoutes } from "./routes/brainstorm.js";
 import { registerPlanRoutes } from "./routes/plan.js";
+import { registerDashboardEventStream } from "./routes/dashboard-events.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -33,6 +36,7 @@ export type ServerDeps = {
   // for HTTP request logging and per-request `req.log` children. When omitted
   // (tests), Fastify falls back to a quiet warn-level logger.
   pinoLogger?: PinoLogger;
+  dashboardEvents?: DashboardEventBusType;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -69,6 +73,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
+  const dashboardEvents = deps.dashboardEvents ?? new DashboardEventBus();
   registerHealth(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
@@ -79,6 +84,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
   registerRunRoutes(app, { runs: deps.runs, events: deps.events });
   registerEventStream(app, { events: deps.events });
+  registerDashboardEventStream(app, { runs: deps.runs, dashboardEvents });
   registerArtifactRoutes(app, { runsDir: deps.runsDir });
   registerScreenshotRoutes(app, { runsDir: deps.runsDir });
   registerBrainstormRoutes(app, {

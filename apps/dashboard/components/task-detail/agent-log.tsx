@@ -44,7 +44,7 @@ export function AgentLog({
   const { events: liveEvents } = useEvents(subscribeId);
 
   const merged = useMemo(
-    () => mergeById(events, liveEvents).filter((e) => e.kind !== "message_delta"),
+    () => mergeById(events, liveEvents),
     [events, liveEvents],
   );
 
@@ -333,7 +333,7 @@ function mergeById(initial: AgentEvent[], live: AgentEvent[]): AgentEvent[] {
 function enrichEvents(events: AgentEvent[]): EnrichedRow[] {
   let phase: Phase = "intake";
   const rows: EnrichedRow[] = [];
-  const callRowIdx = new Map<string, number>(); // tool name → row index pending result
+  const callRowIdx = new Map<string, number>();
 
   for (const e of events) {
     if (e.kind === "phase_started" && isPhase(e.phase)) phase = e.phase;
@@ -351,12 +351,12 @@ function enrichEvents(events: AgentEvent[]): EnrichedRow[] {
         detail: { input: e.input },
       };
       rows.push(row);
-      callRowIdx.set(e.tool, rows.length - 1);
+      callRowIdx.set(callKey(e), rows.length - 1);
       continue;
     }
 
     if (e.kind === "tool_result") {
-      const idx = callRowIdx.get(e.tool);
+      const idx = callRowIdx.get(callKey(e));
       if (idx !== undefined) {
         const row = rows[idx]!;
         row.statusBadge = e.ok ? "ok" : "fail";
@@ -369,7 +369,7 @@ function enrichEvents(events: AgentEvent[]): EnrichedRow[] {
         // For write/edit, refine the message with deltas if the result carries them.
         const refined = refineMessageFromResult(row.message, e.tool, e.output);
         if (refined) row.message = refined;
-        callRowIdx.delete(e.tool);
+        callRowIdx.delete(callKey(e));
       } else {
         // Orphan result (no preceding call captured) — render as a standalone row.
         rows.push({
@@ -394,6 +394,12 @@ function enrichEvents(events: AgentEvent[]): EnrichedRow[] {
     });
   }
   return rows;
+}
+
+function callKey(
+  e: Extract<AgentEvent, { kind: "tool_call" | "tool_result" }>,
+): string {
+  return e.callId ?? `tool:${e.tool}`;
 }
 
 function isPhase(p: string): p is Phase {
@@ -512,6 +518,18 @@ function renderNonToolMessage(e: AgentEvent): string {
       return renderBrainstormSystem(e);
     case "brainstorm_revision_requested":
       return "revision requested by user";
+    case "plan_system":
+      return renderPlanSystem(e);
+    case "plan_subagent_started":
+      return `research started · ${e.subagent}`;
+    case "plan_subagent_ended":
+      return `research ${e.ok ? "complete" : "failed"} · ${e.subagent}`;
+    case "plan_revision_requested":
+      return "plan revision requested by user";
+    case "plan_usage":
+      return `usage · ${formatTokens(e.inputTokens, e.outputTokens)} · ${formatUsd(e.costUsd)}`;
+    case "plan_artifact_edited":
+      return `${e.artifact} edited · ${formatSigned(e.sizeDelta)} chars`;
     case "message_delta":
       return e.text;
     default:
@@ -536,6 +554,28 @@ function renderBrainstormSystem(
       return `brainstorm blocked · ${data?.reason ?? "unknown reason"}`;
     case "session_reset":
       return `pi session reset · ${data?.reason ?? "unknown reason"}`;
+  }
+}
+
+function renderPlanSystem(
+  e: Extract<AgentEvent, { kind: "plan_system" }>,
+): string {
+  const data = e.data as { reason?: string; status?: string } | undefined;
+  switch (e.systemKind) {
+    case "preflight_started":
+      return "preflight started";
+    case "preflight_complete":
+      return "preflight complete";
+    case "planner_started":
+      return "planner started";
+    case "status_changed":
+      return data?.status === "ready"
+        ? "plan artifacts marked ready"
+        : `plan artifacts status · ${data?.status ?? "unknown"}`;
+    case "blocked":
+      return `plan blocked · ${data?.reason ?? "unknown reason"}`;
+    case "session_reset":
+      return `plan session reset · ${data?.reason ?? "unknown reason"}`;
   }
 }
 
@@ -572,6 +612,18 @@ function summarizeArg(obj: Record<string, unknown>): string | undefined {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+function formatTokens(inputTokens: number, outputTokens: number): string {
+  return `${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out`;
+}
+
+function formatUsd(value: number): string {
+  return `$${value.toFixed(4)}`;
+}
+
+function formatSigned(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
 }
 
 function prettyJson(v: unknown): string {

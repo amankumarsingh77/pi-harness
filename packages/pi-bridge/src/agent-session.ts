@@ -19,6 +19,7 @@ import {
   CROFAI_PROVIDER_CONFIG,
   CROFAI_PROVIDER_NAME,
 } from "./providers/crofai.js";
+import { randomUUID } from "node:crypto";
 
 export { AuthError };
 export type { ThinkingLevel, ToolDefinition };
@@ -29,8 +30,8 @@ export type { ThinkingLevel, ToolDefinition };
 // raw SDK AgentSessionEvent. Variants map 1:1 to the switch arms below.
 export type PiBridgeEvent =
   | { kind: "message_delta"; text: string }
-  | { kind: "tool_call"; tool: string; input: unknown }
-  | { kind: "tool_result"; tool: string; ok: boolean; output?: unknown }
+  | { kind: "tool_call"; callId: string; tool: string; input: unknown }
+  | { kind: "tool_result"; callId: string; tool: string; ok: boolean; output?: unknown }
   | { kind: "log"; level: "info" | "warn" | "error"; text: string }
   | {
       kind: "turn_end";
@@ -158,6 +159,7 @@ export async function createAgentSession(
   };
   let pending: Pending | null = null;
   const maxTurns = opts.maxTurns;
+  const pendingToolCalls = new Map<string, string[]>();
 
   const settle = (fn: (p: Pending) => void): void => {
     if (!pending || pending.settled) return;
@@ -188,12 +190,21 @@ export async function createAgentSession(
         return;
       }
       case "tool_execution_start": {
-        opts.onEvent({ kind: "tool_call", tool: event.toolName, input: event.args });
+        const callId = toolCallId(event) ?? `call_${randomUUID()}`;
+        const pending = pendingToolCalls.get(event.toolName) ?? [];
+        pendingToolCalls.set(event.toolName, [...pending, callId]);
+        opts.onEvent({ kind: "tool_call", callId, tool: event.toolName, input: event.args });
         return;
       }
       case "tool_execution_end": {
+        const pending = pendingToolCalls.get(event.toolName) ?? [];
+        const fallbackCallId = pending[0] ?? `call_${randomUUID()}`;
+        const callId = toolCallId(event) ?? fallbackCallId;
+        if (pending.length <= 1) pendingToolCalls.delete(event.toolName);
+        else pendingToolCalls.set(event.toolName, pending.slice(1));
         opts.onEvent({
           kind: "tool_result",
+          callId,
           tool: event.toolName,
           ok: !event.isError,
           output: event.result,
@@ -246,6 +257,13 @@ export async function createAgentSession(
       sdkSession.dispose();
     },
   };
+}
+
+function toolCallId(event: AgentSessionEvent): string | null {
+  if (!("toolCallId" in event)) return null;
+  return typeof event.toolCallId === "string" && event.toolCallId.length > 0
+    ? event.toolCallId
+    : null;
 }
 
 function resolveModel(spec: { provider: string; model: string }, registry: ModelRegistry) {
