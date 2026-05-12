@@ -21,6 +21,7 @@ const real = api({ baseUrl: ORCHESTRATOR_URL });
  * branch as the corresponding orchestrator endpoint starts emitting real data.
  */
 export const orchestrator: Api = {
+  getModelCatalog: () => real.getModelCatalog(),
   listTasks: () => real.listTasks(),
   createTask: (input) => real.createTask(input),
   transitionTask: (id, action) => real.transitionTask(id, action),

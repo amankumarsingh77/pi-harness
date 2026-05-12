@@ -9,10 +9,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export class RunStore {
   constructor(private readonly db: DbClient) {}
 
-  async createTask(input: { title: string; description?: string }): Promise<Task> {
+  async createTask(input: {
+    title: string;
+    description?: string;
+    phaseModels?: Record<string, unknown>;
+  }): Promise<Task> {
     const [row] = await this.db
       .insert(tasks)
-      .values({ title: input.title, description: input.description ?? "" })
+      .values({
+        title: input.title,
+        description: input.description ?? "",
+        ...(input.phaseModels !== undefined ? { phaseModels: input.phaseModels } : {}),
+      })
       .returning();
     return row as Task;
   }

@@ -1,11 +1,6 @@
 import { z } from "zod";
 import { WORKFLOWS, PHASES, THINKING_LEVELS } from "@pi-harness/shared";
 
-export const CreateTaskSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().max(10_000).optional(),
-});
-
 // Partial<PhaseModelConfig>: every field optional so a patch can flip a single
 // knob (e.g. just thinkingLevel) without restating provider/model/maxTurns.
 const PhaseModelOverrideSchema = z
@@ -23,6 +18,12 @@ const PhaseModelOverrideSchema = z
 export const PhaseModelsPatchSchema = z
   .record(z.enum(PHASES), PhaseModelOverrideSchema)
   .refine((v) => v !== null && typeof v === "object" && !Array.isArray(v));
+
+export const CreateTaskSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(10_000).optional(),
+  phaseModels: PhaseModelsPatchSchema.optional(),
+});
 
 export const UpdateTaskSchema = z
   .object({

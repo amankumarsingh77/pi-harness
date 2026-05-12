@@ -4,6 +4,9 @@ import type {
   AgentEvent,
   Workflow,
   Artifact,
+  ModelCatalog,
+  Phase,
+  PhaseModelConfig,
   BrainstormMock,
   BrainstormMockManifest,
 } from "@pi-harness/shared";
@@ -199,10 +202,15 @@ export type RunFile = {
 };
 
 export type Api = {
+  getModelCatalog: () => Promise<ModelCatalog>;
   listTasks: () => Promise<{ tasks: Task[]; counts: Record<string, number> }>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
-  createTask: (input: { title: string; description?: string }) => Promise<Task>;
+  createTask: (input: {
+    title: string;
+    description?: string;
+    phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
+  }) => Promise<Task>;
   transitionTask: (
     id: string,
     action:
@@ -290,6 +298,7 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
   }
 
   return {
+    getModelCatalog: () => send<ModelCatalog>("/api/model-catalog"),
     listTasks: async () => {
       const r = await send<{ tasks: Task[]; counts: Record<string, number> }>("/api/tasks");
       return { tasks: r.tasks.map(hydrateTask), counts: r.counts };

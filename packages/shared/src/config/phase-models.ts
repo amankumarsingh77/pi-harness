@@ -17,6 +17,34 @@ export type PhaseModelConfig = {
   maxTurns?: number;
 };
 
+export type ModelCost = {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+};
+
+export type ModelCatalogModel = {
+  readonly id: string;
+  readonly name: string;
+  readonly reasoning: boolean;
+  readonly thinkingLevels: ReadonlyArray<ThinkingLevel>;
+  readonly contextWindow: number;
+  readonly maxTokens: number;
+  readonly cost: ModelCost;
+};
+
+export type ModelCatalogProvider = {
+  readonly id: string;
+  readonly name: string;
+  readonly models: ReadonlyArray<ModelCatalogModel>;
+};
+
+export type ModelCatalog = {
+  readonly providers: ReadonlyArray<ModelCatalogProvider>;
+  readonly defaults: Record<Phase, PhaseModelConfig>;
+};
+
 // Code-level defaults. Edits require a deploy. Per-task overrides go through
 // the tasks.phase_models JSONB column and merge into these via mergePhaseModels.
 // All phases use crofai + kimi-k2.6 — CrofAI is registered as a custom provider

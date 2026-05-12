@@ -119,6 +119,51 @@ describe("http", () => {
     expect(body.id).toMatch(/[0-9a-f-]{36}/);
   });
 
+  it("GET /api/model-catalog returns providers and defaults", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/model-catalog" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.providers.length).toBeGreaterThan(0);
+    expect(body.providers.some((p: { id: string }) => p.id === "crofai")).toBe(true);
+    expect(body.defaults.brainstorm).toMatchObject({
+      provider: "crofai",
+      model: "kimi-k2.6",
+    });
+  });
+
+  it("POST /api/tasks persists phaseModels at creation", async () => {
+    const phaseModels = {
+      brainstorm: { provider: "crofai", model: "deepseek-v3.2", thinkingLevel: "off" },
+      plan: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high" },
+      code: { provider: "crofai", model: "deepseek-v4-pro", thinkingLevel: "medium" },
+      verify: { provider: "crofai", model: "glm-4.7", thinkingLevel: "off" },
+      pr: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "off" },
+    };
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "with phase models", phaseModels },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.phaseModels).toEqual(phaseModels);
+  });
+
+  it("POST /api/tasks rejects unknown phase provider/model pairs", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "bad phase model",
+        phaseModels: { brainstorm: { provider: "crofai", model: "not-real" } },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "validation" });
+  });
+
   it("POST /api/tasks rejects empty title", async () => {
     const res = await app.inject({
       method: "POST",

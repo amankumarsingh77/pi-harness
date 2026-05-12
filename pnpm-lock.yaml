@@ -200,6 +200,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: ^0.74.0
         version: 0.74.0(ws@8.20.0)(zod@3.25.76)
+      '@pi-harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1

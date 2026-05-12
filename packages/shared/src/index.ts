@@ -10,6 +10,10 @@ export {
   DEFAULT_PHASE_MODELS,
   THINKING_LEVELS,
   mergePhaseModels,
+  type ModelCatalog,
+  type ModelCatalogModel,
+  type ModelCatalogProvider,
+  type ModelCost,
   type PhaseModelConfig,
   type ThinkingLevel,
 } from "./config/phase-models.js";

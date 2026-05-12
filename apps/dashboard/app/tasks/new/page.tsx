@@ -6,10 +6,14 @@ import { Topbar } from "@/components/topbar";
 import { orchestrator } from "@/lib/server/api";
 import { PriorityPicker } from "@/components/new-task/priority-picker";
 import { TagInput } from "@/components/new-task/tag-input";
+import { PhaseModelPicker } from "@/components/new-task/phase-model-picker";
 import { createTask } from "./actions";
 
 export default async function NewTaskPage() {
-  const { counts } = await orchestrator.listTasks();
+  const [{ counts }, modelCatalog] = await Promise.all([
+    orchestrator.listTasks(),
+    orchestrator.getModelCatalog(),
+  ]);
   const inFlight =
     (counts.brainstorming ?? 0) +
     (counts.planning ?? 0) +
@@ -78,6 +82,10 @@ export default async function NewTaskPage() {
 
             <Field label="Tags" hint="shown on the kanban card · enter or comma to add">
               <TagInput name="tags" />
+            </Field>
+
+            <Field label="Models" hint="provider, model, and thinking per phase">
+              <PhaseModelPicker catalog={modelCatalog} />
             </Field>
 
             <div className="mt-5 flex items-center gap-2.5 border-t border-line pt-4">

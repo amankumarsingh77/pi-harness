@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import { getModelCatalog } from "@pi-harness/pi-bridge";
 import type { Logger as PinoLogger } from "pino";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
@@ -70,6 +71,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
   registerHealth(app);
+  app.get("/api/model-catalog", async () => getModelCatalog());
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,

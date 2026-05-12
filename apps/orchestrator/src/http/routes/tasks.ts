@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import type { Phase, PhaseModelConfig } from "@pi-harness/shared";
+import { DEFAULT_PHASE_MODELS, PHASES, type Phase, type PhaseModelConfig } from "@pi-harness/shared";
+import { getModelCatalog, modelCatalogContains } from "@pi-harness/pi-bridge";
 import type { RunStore } from "../../adapters/run-store.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
@@ -45,9 +46,11 @@ export function registerTaskRoutes(
       if (e instanceof ZodError) throw new ValidationError("invalid task body", { issues: e.issues });
       throw e;
     }
+    validatePhaseModels(parsed.phaseModels ?? {});
     const t = await runs.createTask({
       title: parsed.title,
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
+      ...(parsed.phaseModels !== undefined ? { phaseModels: parsed.phaseModels } : {}),
     });
     reply.code(201);
     return t;
@@ -301,4 +304,37 @@ export function registerTaskRoutes(
       return { task: updated };
     },
   );
+}
+
+type ParsedPhaseModels = Partial<
+  Record<
+    Phase,
+    {
+      provider?: string | undefined;
+      model?: string | undefined;
+      thinkingLevel?: PhaseModelConfig["thinkingLevel"] | undefined;
+      maxTurns?: number | undefined;
+    }
+  >
+>;
+
+function validatePhaseModels(phaseModels: ParsedPhaseModels): void {
+  const catalog = getModelCatalog();
+  const invalid = PHASES
+    .map((phase) => {
+      const defaults = DEFAULT_PHASE_MODELS[phase];
+      const override = phaseModels[phase];
+      return {
+        phase,
+        provider: override?.provider ?? defaults.provider,
+        model: override?.model ?? defaults.model,
+      };
+    })
+    .find(({ provider, model }) => !modelCatalogContains(catalog, provider, model));
+  if (!invalid) return;
+  throw new ValidationError("unknown phase model", {
+    phase: invalid.phase,
+    provider: invalid.provider,
+    model: invalid.model,
+  });
 }

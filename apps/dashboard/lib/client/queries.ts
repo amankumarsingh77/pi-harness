@@ -1,6 +1,7 @@
 "use client";
 
 import { api, type Api } from "@/lib/api";
+import type { Phase, PhaseModelConfig } from "@pi-harness/shared";
 
 // All client requests are rewritten to /api/proxy/* so the orchestrator URL
 // is never exposed to the browser.
@@ -38,8 +39,11 @@ export const queries = {
 
 export const mutations = {
   createTask: () => ({
-    mutationFn: (input: { title: string; description?: string }) =>
-      proxied.createTask(input),
+    mutationFn: (input: {
+      title: string;
+      description?: string;
+      phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
+    }) => proxied.createTask(input),
   }),
   transitionTask: (id: string) => ({
     mutationFn: (action: Parameters<Api["transitionTask"]>[1]) =>
