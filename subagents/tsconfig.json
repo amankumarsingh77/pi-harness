@@ -5,5 +5,5 @@
     "outDir": "./dist",
     "allowImportingTsExtensions": false
   },
-  "include": ["index.ts", "registry.ts"]
+  "include": ["index.ts", "registry.ts", "metadata.ts"]
 }

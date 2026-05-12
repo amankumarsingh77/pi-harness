@@ -1,5 +1,5 @@
 "use client";
-import { PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
+import { PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents/metadata";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import type { PlanJsonlEvent } from "@/lib/api";
 
