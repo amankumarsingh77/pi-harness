@@ -88,7 +88,12 @@ export async function runPlan(opts: PlanOpts): Promise<PlanResult> {
     join(opts.cwd, ".harness", opts.taskId, "plan.jsonl"),
   );
 
-  if (hasReadyEvent(events)) {
+  // Already-ready short-circuit only applies when no revision has been
+  // requested *after* the most-recent ready event. Without this guard,
+  // user_request_plan_changes resets artifacts to draft and writes a
+  // plan_revision_requested event but the run-loop keeps short-circuiting
+  // here on every tick — the planner never re-runs.
+  if (hasReadyEvent(events) && !hasRevisionAfterReady(events)) {
     return zeroUsage({ ok: true, ready: true });
   }
 
@@ -167,6 +172,20 @@ function buildRevisionPrompt(comment: string): string {
 function hasReadyEvent(events: JsonlEvent[]): boolean {
   return events.some(isReadyEvent);
 }
+
+function hasRevisionAfterReady(events: JsonlEvent[]): boolean {
+  const lastReady = lastIndexWhere(events, isReadyEvent);
+  const lastRevision = lastIndexWhere(events, isRevisionEvent);
+  return lastRevision !== -1 && lastRevision > lastReady;
+}
+
+// Test surface: tests assert the dispatch-decision matrix without spinning up
+// a fake pi session. Production code stays internal.
+export const __testing = {
+  hasReadyEvent,
+  hasRevisionAfterReady,
+  decidePlannerPrompt,
+};
 
 function isReadyEvent(e: JsonlEvent): boolean {
   if (e.kind !== "plan_system") return false;
