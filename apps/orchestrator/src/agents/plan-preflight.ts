@@ -173,7 +173,10 @@ async function runOneSubagent(args: {
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
       systemPrompt,
-      tools: [...def.allowedTools],
+      // The SDK's `tools` option is an absolute allowlist that filters custom
+      // tools too — omit `write_findings` here and the model gets back
+      // "Tool write_findings not found" on every call.
+      tools: [...def.allowedTools, "write_findings"],
       customTools: [
         makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
       ],
