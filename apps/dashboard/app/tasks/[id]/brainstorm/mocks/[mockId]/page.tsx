@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Topbar } from "@/components/topbar";
 import { MockPreviewActions } from "@/components/brainstorm/mock-preview-actions";
-import { ApiError } from "@/lib/api";
+import { MockPagePreview } from "@/components/brainstorm/mock-page-preview";
+import { ApiError, type BrainstormJsonlEvent } from "@/lib/api";
 import { orchestrator } from "@/lib/server/api";
 
 export async function generateMetadata({
@@ -21,7 +22,7 @@ export default async function BrainstormMockPreviewPage({
   params: Promise<{ id: string; mockId: string }>;
 }) {
   const { id, mockId } = await params;
-  const [taskResult, manifest, html] = await Promise.all([
+  const [taskResult, manifest, bundle] = await Promise.all([
     orchestrator.getTask(id).catch((e) => {
       if (e instanceof ApiError && e.status === 404) notFound();
       throw e;
@@ -30,16 +31,27 @@ export default async function BrainstormMockPreviewPage({
       if (e instanceof ApiError && e.status === 404) notFound();
       throw e;
     }),
-    orchestrator.getBrainstormMockHtml(id, mockId).catch((e) => {
+    orchestrator.getBrainstormBundle(id).catch((e) => {
       if (e instanceof ApiError && e.status === 404) notFound();
       throw e;
     }),
   ]);
   const mock = manifest.mocks.find((m) => m.mockId === mockId);
   if (!mock) notFound();
+  const pageHtmlEntries = await Promise.all(
+    mock.pages.map(async (page) => {
+      const html = await orchestrator.getBrainstormMockPageHtml(id, mockId, page.pageId).catch((e) => {
+        if (e instanceof ApiError && e.status === 404) notFound();
+        throw e;
+      });
+      return [page.pageId, html] as const;
+    }),
+  );
+  const htmlByPageId = Object.fromEntries(pageHtmlEntries);
 
   const { task } = taskResult;
   const selected = manifest.selectedMockId === mockId;
+  const locked = isMockLocked(bundle.events, mockId);
 
   return (
     <>
@@ -64,17 +76,35 @@ export default async function BrainstormMockPreviewPage({
               selected
             </span>
           )}
-          <MockPreviewActions taskId={task.id} mockId={mock.mockId} selected={selected} />
-        </header>
-        <div className="min-h-0 flex-1 bg-card">
-          <iframe
-            title={`Mock preview ${mock.title}`}
-            srcDoc={html}
-            sandbox=""
-            className="h-full w-full border-0 bg-white"
+          <MockPreviewActions
+            taskId={task.id}
+            mockId={mock.mockId}
+            selected={selected}
+            locked={locked}
           />
-        </div>
+        </header>
+        <MockPagePreview pages={mock.pages} htmlByPageId={htmlByPageId} title={mock.title} />
       </section>
     </>
   );
+}
+
+function isMockLocked(events: ReadonlyArray<BrainstormJsonlEvent>, mockId: string): boolean {
+  const seenMockIds = new Set<string>();
+  for (const event of events) {
+    if (event.kind === "brainstorm_mock_proposed" || event.kind === "brainstorm_mock_revised") {
+      seenMockIds.add(event.mock.mockId);
+    } else if (
+      event.kind === "brainstorm_mock_edit_requested" &&
+      event.mockId === mockId
+    ) {
+      return true;
+    } else if (
+      event.kind === "brainstorm_mock_selected" ||
+      event.kind === "brainstorm_revision_requested"
+    ) {
+      if (seenMockIds.has(mockId)) return true;
+    }
+  }
+  return false;
 }

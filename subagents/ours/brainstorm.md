@@ -33,17 +33,19 @@ After calling `submit_questions`, your turn ends. The harness will resume you wi
 
 ## How to propose UI mocks
 
-Use `submit_mock_choices` with one or more static HTML mocks when the task is UI-affecting and visual direction matters.
+Use `submit_mock_choices` with one or more mock directions when the task is UI-affecting and visual direction matters. A mock direction contains one or more static HTML page previews.
 
 - Each mock must have a stable `mockId` such as `mock-a` or `mock-b`.
-- `html` must be a complete static HTML document or fragment that renders without external network dependencies.
+- Each mock must include `pages`, with stable `pageId`s such as `task-detail` or `brainstorm-review`.
+- Each page's `html` must be a complete static HTML document or fragment that renders without external network dependencies.
+- For tasks spanning multiple frontend surfaces, make every mock direction contain the same page set so the user compares paired ideas.
 - Keep mocks faithful to the app's existing design language unless the user asks for a different direction.
 - Mark at most one option as `recommended: true`.
 - After calling `submit_mock_choices`, your turn ends. The user will open, edit, or choose a mock from the dashboard.
 
 If the user asks for a specific mock direction in a nudge, generate that mock and add it to the proposal set before calling `mark_ready`. Do not force the user to choose only from the original proposals.
 
-When the user requests edits to a mock, the next prompt includes a mock edit request. Use `write_mock_revision` to create a new derived mock, preserving the original. Set `sourceMockId` to the edited mock, set `editRequestId` to the request id, and use a stable revised id such as `mock-b-rev1`.
+When the user requests edits to a mock, the next prompt includes a mock edit request. Use `write_mock_revision` to create a new derived mock direction, preserving the original. Set `sourceMockId` to the edited mock and `editRequestId` to the request id. The harness assigns the final `-revN` id from the existing manifest; pass the source id as `mockId`. Re-submit the complete revised page set, not only the edited page.
 
 ## Reacting to mid-run user input
 
@@ -78,14 +80,14 @@ Do not write files anywhere outside `.harness/<taskId>/`.
 ### `design.md` must cover
 
 - `## Goals` — what the change accomplishes, in user-visible terms.
-- `## Selected UI direction` — required when a mock was proposed; include `Selected mock: <mockId>`, rationale, and the `.harness/<taskId>/mocks/<mockId>.html` preview path.
+- `## Selected UI direction` — required when a mock was proposed; include `Selected mock: <mockId>`, rationale, and every selected page preview path under `.harness/<taskId>/mocks/<mockId>/<pageId>.html`.
 - `## Trade-offs` — what is gained and what is given up.
 - `## Alternatives considered` — at least one path you rejected and why.
 
 ### `spec.md` must cover
 
 - `## Verification scenarios` — how a tester would prove the change works (api / ui).
-- `## UI acceptance criteria` — required when a mock was proposed; include `Selected mock: <mockId>` and observable UI requirements from the chosen mock.
+- `## UI acceptance criteria` — required when a mock was proposed; include `Selected mock: <mockId>` and observable UI requirements from every chosen mock page.
 - `## Acceptance criteria` — observable conditions that flip the task from "in progress" to "done".
 
 Each required section needs the exact `## <Heading>` line followed by at least one non-whitespace line of content before the next `##`. Empty sections are rejected.

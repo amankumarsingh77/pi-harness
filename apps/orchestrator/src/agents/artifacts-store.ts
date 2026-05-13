@@ -19,20 +19,51 @@ import {
   type ProofReport,
 } from "@pi-harness/shared";
 
+const SafeSlugSchema = z.string().min(1).max(80).regex(/^[a-z0-9][a-z0-9-]*$/);
+
+const BrainstormMockPageSchema = z.object({
+  pageId: SafeSlugSchema,
+  title: z.string().min(1),
+  summary: z.string().min(1).optional(),
+  htmlPath: z.string().min(1),
+});
+
 const BrainstormMockSchema = z.object({
-  mockId: z.string().min(1),
+  mockId: SafeSlugSchema,
   title: z.string().min(1),
   summary: z.string().min(1),
-  htmlPath: z.string().min(1),
   recommended: z.boolean(),
   createdAt: z.string().min(1),
   derivedFrom: z.string().min(1).optional(),
+  pages: z.array(BrainstormMockPageSchema).min(1).max(6),
 });
 
 const BrainstormMockManifestSchema = z.object({
   mocks: z.array(BrainstormMockSchema),
   selectedMockId: z.string().min(1).nullable(),
 });
+
+const BrainstormMockPageHtmlSchema = z.object({
+  pageId: SafeSlugSchema,
+  html: z.string().min(1),
+});
+
+function toBrainstormMock(value: z.infer<typeof BrainstormMockSchema>): BrainstormMock {
+  return {
+    mockId: value.mockId,
+    title: value.title,
+    summary: value.summary,
+    recommended: value.recommended,
+    createdAt: value.createdAt,
+    ...(value.derivedFrom !== undefined ? { derivedFrom: value.derivedFrom } : {}),
+    pages: value.pages.map((page) => ({
+      pageId: page.pageId,
+      title: page.title,
+      ...(page.summary !== undefined ? { summary: page.summary } : {}),
+      htmlPath: page.htmlPath,
+    })),
+  };
+}
 
 // Per-kind on-disk file name. Markdown for prose artifacts; YAML for the
 // plan phase's structured scenarios file (consumed by the verify phase).
@@ -74,8 +105,12 @@ export class ArtifactsStore {
     return join(this.mockDir(cwd, taskId), "manifest.json");
   }
 
-  mockHtmlPath(cwd: string, taskId: string, mockId: string): string {
-    return join(this.mockDir(cwd, taskId), `${mockId}.html`);
+  mockPageDir(cwd: string, taskId: string, mockId: string): string {
+    return join(this.mockDir(cwd, taskId), mockId);
+  }
+
+  mockPageHtmlPath(cwd: string, taskId: string, mockId: string, pageId: string): string {
+    return join(this.mockPageDir(cwd, taskId, mockId), `${pageId}.html`);
   }
 
   async readArtifact(cwd: string, taskId: string, kind: ArtifactKind): Promise<Artifact | null> {
@@ -118,15 +153,7 @@ export class ArtifactsStore {
     if (!existsSync(path)) return { mocks: [], selectedMockId: null };
     const raw = await readFile(path, "utf8");
     const parsed = BrainstormMockManifestSchema.parse(JSON.parse(raw));
-    const mocks: BrainstormMock[] = parsed.mocks.map((m) => ({
-      mockId: m.mockId,
-      title: m.title,
-      summary: m.summary,
-      htmlPath: m.htmlPath,
-      recommended: m.recommended,
-      createdAt: m.createdAt,
-      ...(m.derivedFrom !== undefined ? { derivedFrom: m.derivedFrom } : {}),
-    }));
+    const mocks: BrainstormMock[] = parsed.mocks.map(toBrainstormMock);
     return { mocks, selectedMockId: parsed.selectedMockId };
   }
 
@@ -147,19 +174,23 @@ export class ArtifactsStore {
     cwd: string,
     taskId: string,
     mock: BrainstormMock,
-    html: string,
+    pageHtml: ReadonlyArray<{ pageId: string; html: string }>,
   ): Promise<void> {
-    const dir = this.mockDir(cwd, taskId);
+    const validatedMock = toBrainstormMock(BrainstormMockSchema.parse(mock));
+    const validatedPageHtml = z.array(BrainstormMockPageHtmlSchema).parse(pageHtml);
+    const dir = this.mockPageDir(cwd, taskId, validatedMock.mockId);
     await mkdir(dir, { recursive: true });
-    const finalPath = this.mockHtmlPath(cwd, taskId, mock.mockId);
-    const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(tmpPath, html);
-    await rename(tmpPath, finalPath);
+    for (const page of validatedPageHtml) {
+      const finalPath = this.mockPageHtmlPath(cwd, taskId, validatedMock.mockId, page.pageId);
+      const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+      await writeFile(tmpPath, page.html);
+      await rename(tmpPath, finalPath);
+    }
 
     const manifest = await this.readBrainstormMockManifest(cwd, taskId);
     const mocks = [
-      ...manifest.mocks.filter((m) => m.mockId !== mock.mockId),
-      mock,
+      ...manifest.mocks.filter((m) => m.mockId !== validatedMock.mockId),
+      validatedMock,
     ];
     await this.writeBrainstormMockManifest(cwd, taskId, {
       mocks,
@@ -171,8 +202,9 @@ export class ArtifactsStore {
     cwd: string,
     taskId: string,
     mockId: string,
+    pageId: string,
   ): Promise<string | null> {
-    const path = this.mockHtmlPath(cwd, taskId, mockId);
+    const path = this.mockPageHtmlPath(cwd, taskId, mockId, pageId);
     if (!existsSync(path)) return null;
     return readFile(path, "utf8");
   }

@@ -56,12 +56,25 @@ const ReplyToUserParams = Type.Object({
   inReplyToNudgeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 });
 
+const SafeSlug = Type.String({
+  minLength: 1,
+  maxLength: 80,
+  pattern: "^[a-z0-9][a-z0-9-]*$",
+});
+
+const MockPageChoice = Type.Object({
+  pageId: SafeSlug,
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+  html: Type.String({ minLength: 1, maxLength: 250_000 }),
+});
+
 const MockChoice = Type.Object({
-  mockId: Type.String({ minLength: 1, maxLength: 80 }),
+  mockId: SafeSlug,
   title: Type.String({ minLength: 1, maxLength: 120 }),
   summary: Type.String({ minLength: 1, maxLength: 500 }),
-  html: Type.String({ minLength: 1, maxLength: 250_000 }),
   recommended: Type.Boolean(),
+  pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
 });
 
 const SubmitMockChoicesParams = Type.Object({
@@ -69,12 +82,12 @@ const SubmitMockChoicesParams = Type.Object({
 });
 
 const WriteMockRevisionParams = Type.Object({
-  sourceMockId: Type.String({ minLength: 1, maxLength: 80 }),
-  mockId: Type.String({ minLength: 1, maxLength: 80 }),
+  sourceMockId: SafeSlug,
+  mockId: SafeSlug,
   editRequestId: Type.String({ minLength: 1, maxLength: 120 }),
   title: Type.String({ minLength: 1, maxLength: 120 }),
   summary: Type.String({ minLength: 1, maxLength: 500 }),
-  html: Type.String({ minLength: 1, maxLength: 250_000 }),
+  pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
 });
 
 export type SubmitQuestionsDetails = { awaiting: string[] };
@@ -82,6 +95,26 @@ export type MarkReadyDetails = { ok: boolean; missing?: string };
 export type ReplyToUserDetails = { replyId: string };
 export type SubmitMockChoicesDetails = { proposed: string[] };
 export type WriteMockRevisionDetails = { revised: string };
+
+function baseMockId(mockId: string): string {
+  return mockId.replace(/-rev\d+$/, "");
+}
+
+function nextRevisionMockId(sourceMockId: string, existingMockIds: ReadonlyArray<string>): string {
+  const base = baseMockId(sourceMockId);
+  const revisionPattern = new RegExp(`^${escapeRegExp(base)}-rev(\\d+)$`);
+  const latestRevision = existingMockIds.reduce((latest, mockId) => {
+    const match = revisionPattern.exec(mockId);
+    if (!match) return latest;
+    const revision = Number(match[1]);
+    return Number.isInteger(revision) ? Math.max(latest, revision) : latest;
+  }, 0);
+  return `${base}-rev${latestRevision + 1}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export function makeSubmitQuestionsTool(deps: {
   bus: BrainstormEventBus;
@@ -289,11 +322,21 @@ export function makeSubmitMockChoicesTool(deps: {
           mockId: input.mockId,
           title: input.title,
           summary: input.summary,
-          htmlPath: `.harness/${deps.taskId}/mocks/${input.mockId}.html`,
           recommended: input.recommended,
           createdAt: new Date().toISOString(),
+          pages: input.pages.map((page) => ({
+            pageId: page.pageId,
+            title: page.title,
+            ...(page.summary !== undefined ? { summary: page.summary } : {}),
+            htmlPath: `.harness/${deps.taskId}/mocks/${input.mockId}/${page.pageId}.html`,
+          })),
         };
-        await deps.store.writeBrainstormMock(deps.cwd, deps.taskId, mock, input.html);
+        await deps.store.writeBrainstormMock(
+          deps.cwd,
+          deps.taskId,
+          mock,
+          input.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
+        );
         await deps.bus.publish({
           kind: "brainstorm_mock_proposed",
           mock,
@@ -322,16 +365,31 @@ export function makeWriteMockRevisionTool(deps: {
       "Write a revised static HTML mock after the user requested edits to an existing mock.",
     parameters: WriteMockRevisionParams,
     async execute(_id, params) {
+      const manifest = await deps.store.readBrainstormMockManifest(deps.cwd, deps.taskId);
+      const mockId = nextRevisionMockId(
+        params.sourceMockId,
+        manifest.mocks.map((mock) => mock.mockId),
+      );
       const mock: BrainstormMock = {
-        mockId: params.mockId,
+        mockId,
         title: params.title,
         summary: params.summary,
-        htmlPath: `.harness/${deps.taskId}/mocks/${params.mockId}.html`,
         recommended: false,
         derivedFrom: params.sourceMockId,
         createdAt: new Date().toISOString(),
+        pages: params.pages.map((page) => ({
+          pageId: page.pageId,
+          title: page.title,
+          ...(page.summary !== undefined ? { summary: page.summary } : {}),
+          htmlPath: `.harness/${deps.taskId}/mocks/${mockId}/${page.pageId}.html`,
+        })),
       };
-      await deps.store.writeBrainstormMock(deps.cwd, deps.taskId, mock, params.html);
+      await deps.store.writeBrainstormMock(
+        deps.cwd,
+        deps.taskId,
+        mock,
+        params.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
+      );
       await deps.bus.publish({
         kind: "brainstorm_mock_revised",
         mock,
@@ -339,7 +397,7 @@ export function makeWriteMockRevisionTool(deps: {
       });
       return {
         content: [{ type: "text", text: "wrote mock revision" }],
-        details: { revised: params.mockId },
+        details: { revised: mockId },
       };
     },
   };

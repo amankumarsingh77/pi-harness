@@ -349,9 +349,15 @@ describe("runBrainstorm (real-bridge)", () => {
             mockId: "mock-a",
             title: "A",
             summary: "A",
-            htmlPath: ".harness/T-1/mocks/mock-a.html",
             recommended: true,
             createdAt: "t1",
+            pages: [
+              {
+                pageId: "task-detail",
+                title: "Task detail",
+                htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+              },
+            ],
           },
         }),
         JSON.stringify({ ts: "t2", kind: "brainstorm_mock_selected", mockId: "mock-a" }),
@@ -395,9 +401,15 @@ describe("runBrainstorm (real-bridge)", () => {
             mockId: "mock-a",
             title: "A",
             summary: "A",
-            htmlPath: ".harness/T-1/mocks/mock-a.html",
             recommended: true,
             createdAt: "t1",
+            pages: [
+              {
+                pageId: "task-detail",
+                title: "Task detail",
+                htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+              },
+            ],
           },
         }),
         JSON.stringify({

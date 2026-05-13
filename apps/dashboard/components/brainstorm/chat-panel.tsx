@@ -122,6 +122,11 @@ export function ChatPanel({
   const repliesByNudgeId = new Map<string, ReplyEvent[]>();
   const standaloneReplies: ReplyEvent[] = [];
   const selectedMockIds = new Set<string>();
+  const lockedMockIds = new Set<string>();
+  const mockEventById = new Map<
+    string,
+    { ts: string; mock: BrainstormMock; editRequestId?: string }
+  >();
 
   for (const e of events) {
     if (e.kind === "brainstorm_question") {
@@ -148,6 +153,22 @@ export function ChatPanel({
       }
     } else if (e.kind === "brainstorm_mock_selected") {
       selectedMockIds.add(e.mockId);
+    }
+  }
+  for (const e of events) {
+    if (e.kind === "brainstorm_mock_proposed" || e.kind === "brainstorm_mock_revised") {
+      mockEventById.set(e.mock.mockId, {
+        ts: e.ts,
+        mock: e.mock,
+        ...(e.kind === "brainstorm_mock_revised" ? { editRequestId: e.editRequestId } : {}),
+      });
+    } else if (e.kind === "brainstorm_mock_edit_requested") {
+      lockedMockIds.add(e.mockId);
+    } else if (
+      e.kind === "brainstorm_mock_selected" ||
+      e.kind === "brainstorm_revision_requested"
+    ) {
+      for (const mockId of mockEventById.keys()) lockedMockIds.add(mockId);
     }
   }
   // A reply whose parent nudge never arrived becomes standalone (otherwise it
@@ -193,16 +214,10 @@ export function ChatPanel({
       }
     } else if (e.kind === "brainstorm_revision_requested") {
       timeline.push({ kind: "revision", ts: e.ts, comment: e.comment });
-    } else if (e.kind === "brainstorm_mock_proposed") {
-      timeline.push({ kind: "mock", ts: e.ts, mock: e.mock });
-    } else if (e.kind === "brainstorm_mock_revised") {
-      timeline.push({
-        kind: "mock",
-        ts: e.ts,
-        mock: e.mock,
-        editRequestId: e.editRequestId,
-      });
     }
+  }
+  for (const mockEvent of mockEventById.values()) {
+    timeline.push({ kind: "mock", ...mockEvent });
   }
   for (const b of batchById.values()) {
     timeline.push({ kind: "batch", ts: b.ts, batchId: b.batchId, questions: b.questions });
@@ -352,7 +367,9 @@ export function ChatPanel({
                 taskId={taskId}
                 mock={item.mock}
                 selected={selectedMockIds.has(item.mock.mockId)}
-                editable={taskStatus === "brainstorming"}
+                editable={
+                  taskStatus === "brainstorming" && !lockedMockIds.has(item.mock.mockId)
+                }
               />
             );
           }
@@ -484,6 +501,19 @@ function MockCard({
             )}
           </div>
           <div className="mt-1 text-[12.5px] leading-[1.45] text-fg-mute">{mock.summary}</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {mock.pages.map((page) => (
+              <span
+                key={page.pageId}
+                className="rounded border border-line bg-white/[0.02] px-2 py-0.5 font-mono text-[10.5px] text-fg-subtle"
+              >
+                {page.title}
+              </span>
+            ))}
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-fg-subtle">
+            {mock.pages.length} {mock.pages.length === 1 ? "page" : "pages"}
+          </div>
           {mock.derivedFrom && (
             <div className="mt-1 font-mono text-[10.5px] text-fg-subtle">
               derived from {mock.derivedFrom}

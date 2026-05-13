@@ -341,10 +341,16 @@ describe("makeMarkReadyTool", () => {
       mockId: "mock-a",
       title: "Split pane",
       summary: "Shows options beside artifacts.",
-      htmlPath: ".harness/T-1/mocks/mock-a.html",
       recommended: true,
       createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+        },
+      ],
+    }, [{ pageId: "task-detail", html: "<h1>Mock A</h1>" }]);
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
     const tool = makeMarkReadyTool({
@@ -370,10 +376,16 @@ describe("makeMarkReadyTool", () => {
       mockId: "mock-a",
       title: "Split pane",
       summary: "Shows options beside artifacts.",
-      htmlPath: ".harness/T-1/mocks/mock-a.html",
       recommended: true,
       createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+        },
+      ],
+    }, [{ pageId: "task-detail", html: "<h1>Mock A</h1>" }]);
     await store.selectBrainstormMock(cwd, TASK, "mock-a");
     await writeArtifactFile(
       store,

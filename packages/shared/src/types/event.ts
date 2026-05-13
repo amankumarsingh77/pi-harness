@@ -15,14 +15,21 @@ export type BrainstormOption = {
   description?: string;
 };
 
+export type BrainstormMockPage = {
+  pageId: string;
+  title: string;
+  summary?: string;
+  htmlPath: string;
+};
+
 export type BrainstormMock = {
   mockId: string;
   title: string;
   summary: string;
-  htmlPath: string;
   recommended: boolean;
   createdAt: string;
   derivedFrom?: string;
+  pages: BrainstormMockPage[];
 };
 
 export type BrainstormMockManifest = {

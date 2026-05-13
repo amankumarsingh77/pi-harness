@@ -42,6 +42,33 @@ function makeBus() {
   return { bus, eventAppends, jsonlAppends };
 }
 
+function makeMock(mockId = "mock-a") {
+  return {
+    mockId,
+    title: "Split pane",
+    summary: "Shows options beside artifacts.",
+    recommended: true,
+    createdAt: "2026-05-13T00:00:00.000Z",
+    pages: [
+      {
+        pageId: "task-detail",
+        title: "Task detail",
+        htmlPath: `.harness/T-1/mocks/${mockId}/task-detail.html`,
+      },
+      {
+        pageId: "brainstorm-review",
+        title: "Brainstorm review",
+        htmlPath: `.harness/T-1/mocks/${mockId}/brainstorm-review.html`,
+      },
+    ],
+  };
+}
+
+const MOCK_HTML = [
+  { pageId: "task-detail", html: "<!doctype html><h1>Task detail</h1>" },
+  { pageId: "brainstorm-review", html: "<!doctype html><h1>Brainstorm review</h1>" },
+];
+
 async function fakeExecute<P, D>(
   tool: {
     execute: (
@@ -60,18 +87,16 @@ async function fakeExecute<P, D>(
 describe("brainstorm mock artifact storage", () => {
   it("writes mock HTML and updates the manifest without selecting it", async () => {
     const store = new ArtifactsStore();
-    const mock = {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: ".harness/T-1/mocks/mock-a.html",
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    };
+    const mock = makeMock();
 
-    await store.writeBrainstormMock(cwd, TASK, mock, "<!doctype html><h1>Mock A</h1>");
+    await store.writeBrainstormMock(cwd, TASK, mock, MOCK_HTML);
 
-    await expect(store.readBrainstormMockHtml(cwd, TASK, "mock-a")).resolves.toContain("Mock A");
+    await expect(
+      store.readBrainstormMockHtml(cwd, TASK, "mock-a", "task-detail"),
+    ).resolves.toContain("Task detail");
+    await expect(
+      store.readBrainstormMockHtml(cwd, TASK, "mock-a", "brainstorm-review"),
+    ).resolves.toContain("Brainstorm review");
     await expect(store.readBrainstormMockManifest(cwd, TASK)).resolves.toEqual({
       mocks: [mock],
       selectedMockId: null,
@@ -80,15 +105,8 @@ describe("brainstorm mock artifact storage", () => {
 
   it("selects an existing mock in the manifest", async () => {
     const store = new ArtifactsStore();
-    const mock = {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: ".harness/T-1/mocks/mock-a.html",
-      recommended: false,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    };
-    await store.writeBrainstormMock(cwd, TASK, mock, "<h1>Mock A</h1>");
+    const mock = makeMock();
+    await store.writeBrainstormMock(cwd, TASK, mock, MOCK_HTML);
 
     await store.selectBrainstormMock(cwd, TASK, "mock-a");
 
@@ -111,8 +129,20 @@ describe("brainstorm mock tools", () => {
           mockId: "mock-a",
           title: "Split pane",
           summary: "Shows options beside artifacts.",
-          html: "<h1>Mock A</h1>",
           recommended: true,
+          pages: [
+            {
+              pageId: "task-detail",
+              title: "Task detail",
+              html: "<h1>Task detail</h1>",
+            },
+            {
+              pageId: "brainstorm-review",
+              title: "Brainstorm review",
+              summary: "Review page",
+              html: "<h1>Brainstorm review</h1>",
+            },
+          ],
         },
       ],
     });
@@ -124,25 +154,43 @@ describe("brainstorm mock tools", () => {
       kind: "brainstorm_mock_proposed",
       mock: {
         mockId: "mock-a",
-        htmlPath: ".harness/T-1/mocks/mock-a.html",
         recommended: true,
+        pages: [
+          {
+            pageId: "task-detail",
+            htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+          },
+          {
+            pageId: "brainstorm-review",
+            htmlPath: ".harness/T-1/mocks/mock-a/brainstorm-review.html",
+          },
+        ],
       },
     });
-    await expect(store.readBrainstormMockHtml(cwd, TASK, "mock-a")).resolves.toContain("Mock A");
+    await expect(
+      store.readBrainstormMockHtml(cwd, TASK, "mock-a", "task-detail"),
+    ).resolves.toContain("Task detail");
   });
 
   it("write_mock_revision creates a derived mock revision and publishes it", async () => {
     const store = new ArtifactsStore();
     const { bus, eventAppends } = makeBus();
     const tool = makeWriteMockRevisionTool({ store, bus, cwd, taskId: TASK });
+    await store.writeBrainstormMock(cwd, TASK, makeMock(), MOCK_HTML);
 
     const result = await fakeExecute(tool, {
       sourceMockId: "mock-a",
-      mockId: "mock-a-rev1",
+      mockId: "mock-a",
       editRequestId: "mer_1",
       title: "Split pane refined",
       summary: "Narrows the artifact pane.",
-      html: "<h1>Mock A revised</h1>",
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          html: "<h1>Mock A revised</h1>",
+        },
+      ],
     });
 
     expect(result.details).toEqual({ revised: "mock-a-rev1" });
@@ -155,8 +203,51 @@ describe("brainstorm mock tools", () => {
         derivedFrom: "mock-a",
       },
     });
-    await expect(store.readBrainstormMockHtml(cwd, TASK, "mock-a-rev1")).resolves.toContain(
-      "revised",
-    );
+    await expect(
+      store.readBrainstormMockHtml(cwd, TASK, "mock-a-rev1", "task-detail"),
+    ).resolves.toContain("revised");
+  });
+
+  it("write_mock_revision allocates the next revision id for repeated edits", async () => {
+    const store = new ArtifactsStore();
+    const { bus, eventAppends } = makeBus();
+    const tool = makeWriteMockRevisionTool({ store, bus, cwd, taskId: TASK });
+    await store.writeBrainstormMock(cwd, TASK, makeMock(), MOCK_HTML);
+    await store.writeBrainstormMock(cwd, TASK, {
+      ...makeMock("mock-a-rev1"),
+      mockId: "mock-a-rev1",
+      title: "Split pane refined",
+      summary: "Narrows the artifact pane.",
+      recommended: false,
+      createdAt: "2026-05-13T00:00:01.000Z",
+      derivedFrom: "mock-a",
+    }, [{ pageId: "task-detail", html: "<h1>Mock A rev1</h1>" }]);
+
+    const result = await fakeExecute(tool, {
+      sourceMockId: "mock-a",
+      mockId: "mock-a",
+      editRequestId: "mer_2",
+      title: "Split pane refined again",
+      summary: "Further narrows the artifact pane.",
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          html: "<h1>Mock A rev2</h1>",
+        },
+      ],
+    });
+
+    expect(result.details).toEqual({ revised: "mock-a-rev2" });
+    expect(eventAppends[0]).toMatchObject({
+      kind: "brainstorm_mock_revised",
+      mock: {
+        mockId: "mock-a-rev2",
+        derivedFrom: "mock-a",
+      },
+    });
+    await expect(
+      store.readBrainstormMockHtml(cwd, TASK, "mock-a-rev2", "task-detail"),
+    ).resolves.toContain("rev2");
   });
 });

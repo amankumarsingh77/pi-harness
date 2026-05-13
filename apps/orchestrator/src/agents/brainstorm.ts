@@ -539,7 +539,7 @@ function buildMockSelectionPrompt(mockId: string): string {
   return [
     `User selected UI mock: ${mockId}`,
     "",
-    "Read the selected mock from .harness/<taskId>/mocks/, fold the choice into design.md under ## Selected UI direction and spec.md under ## UI acceptance criteria, then continue toward mark_ready.",
+    "Read the selected mock direction from .harness/<taskId>/mocks/, fold every selected page into design.md under ## Selected UI direction and spec.md under ## UI acceptance criteria, then continue toward mark_ready.",
   ].join("\n");
 }
 
@@ -552,7 +552,7 @@ function buildMockEditPrompt(events: JsonlEvent[]): string {
   }
   lines.push(
     "",
-    "Use write_mock_revision to create a derived mock. Do not overwrite the original mock.",
+    "Use write_mock_revision to create a derived mock direction with a complete replacement page set. Do not overwrite the original mock.",
   );
   return lines.join("\n");
 }

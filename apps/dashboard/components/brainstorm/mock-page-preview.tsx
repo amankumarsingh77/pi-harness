@@ -1,0 +1,56 @@
+"use client";
+
+import { useState } from "react";
+import type { BrainstormMockPage } from "@pi-harness/shared";
+
+export function MockPagePreview({
+  pages,
+  htmlByPageId,
+  title,
+}: {
+  pages: ReadonlyArray<BrainstormMockPage>;
+  htmlByPageId: Readonly<Record<string, string>>;
+  title: string;
+}) {
+  const firstPage = pages[0];
+  const [activePageId, setActivePageId] = useState(firstPage?.pageId ?? "");
+  const activePage = pages.find((page) => page.pageId === activePageId) ?? firstPage;
+  const html = activePage ? htmlByPageId[activePage.pageId] : "";
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-card">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-bg px-6 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+          {pages.map((page) => {
+            const active = page.pageId === activePage?.pageId;
+            return (
+              <button
+                key={page.pageId}
+                type="button"
+                onClick={() => setActivePageId(page.pageId)}
+                className={`shrink-0 rounded border px-2.5 py-1 text-left font-mono text-[11px] ${
+                  active
+                    ? "border-st-progress/70 bg-st-progress/12 text-st-progress"
+                    : "border-line text-fg-body hover:border-line-hover hover:bg-white/[0.03]"
+                }`}
+              >
+                {page.title}
+              </button>
+            );
+          })}
+        </div>
+        {activePage?.summary && (
+          <span className="hidden max-w-sm truncate text-[12px] text-fg-mute lg:block">
+            {activePage.summary}
+          </span>
+        )}
+      </div>
+      <iframe
+        title={`Mock preview ${title} — ${activePage?.title ?? "page"}`}
+        srcDoc={html}
+        sandbox=""
+        className="min-h-0 flex-1 border-0 bg-white"
+      />
+    </div>
+  );
+}

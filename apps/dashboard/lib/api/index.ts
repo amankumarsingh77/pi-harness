@@ -245,7 +245,11 @@ export type Api = {
     payload: { kind: "design" | "spec"; body: string },
   ) => Promise<{ ok: true; commitSha: string }>;
   getBrainstormMocks: (taskId: string) => Promise<BrainstormMockBundle>;
-  getBrainstormMockHtml: (taskId: string, mockId: string) => Promise<string>;
+  getBrainstormMockPageHtml: (
+    taskId: string,
+    mockId: string,
+    pageId: string,
+  ) => Promise<string>;
   submitBrainstormMockEdit: (
     taskId: string,
     mockId: string,
@@ -346,8 +350,10 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       ),
     getBrainstormMocks: (taskId) =>
       send<BrainstormMockBundle>(`/api/tasks/${taskId}/brainstorm/mocks`),
-    getBrainstormMockHtml: async (taskId, mockId) => {
-      const res = await f(url(`/api/tasks/${taskId}/brainstorm/mocks/${mockId}/html`));
+    getBrainstormMockPageHtml: async (taskId, mockId, pageId) => {
+      const res = await f(
+        url(`/api/tasks/${taskId}/brainstorm/mocks/${mockId}/pages/${pageId}/html`),
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
         throw new ApiError(res.status, body.message ?? res.statusText, body.error);

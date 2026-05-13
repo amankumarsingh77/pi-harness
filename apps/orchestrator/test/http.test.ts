@@ -48,6 +48,25 @@ async function makeDraftWorktree(taskId: string): Promise<string> {
   return wt;
 }
 
+function makePagedMock(taskId: string, mockId = "mock-a") {
+  return {
+    mockId,
+    title: "Split pane",
+    summary: "Shows options beside artifacts.",
+    recommended: true,
+    createdAt: "2026-05-13T00:00:00.000Z",
+    pages: [
+      {
+        pageId: "task-detail",
+        title: "Task detail",
+        htmlPath: `.harness/${taskId}/mocks/${mockId}/task-detail.html`,
+      },
+    ],
+  };
+}
+
+const PAGED_MOCK_HTML = [{ pageId: "task-detail", html: "<h1>Mock A</h1>" }];
+
 async function makeReadyWorktree(taskId: string): Promise<string> {
   const wt = await mkdtemp(join(tmpdir(), "pi-harness-bs-"));
   const git = simpleGit(wt);
@@ -545,14 +564,12 @@ describe("http", () => {
     // Pretend the agent persisted a session file too.
     await writeFile(join(worktree, ".harness", t.id, "pi-session.jsonl"), "session\n");
     const preRestartStore = new ArtifactsStore();
-    await preRestartStore.writeBrainstormMock(worktree, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await preRestartStore.writeBrainstormMock(
+      worktree,
+      t.id,
+      makePagedMock(t.id),
+      PAGED_MOCK_HTML,
+    );
 
     const res = await app.inject({
       method: "POST",
@@ -577,7 +594,7 @@ describe("http", () => {
     expect(existsSync(join(archive, "design.md"))).toBe(true);
     expect(existsSync(join(archive, "spec.md"))).toBe(true);
     expect(existsSync(join(archive, "pi-session.jsonl"))).toBe(true);
-    expect(existsSync(join(archive, "mocks", "mock-a.html"))).toBe(true);
+    expect(existsSync(join(archive, "mocks", "mock-a", "task-detail.html"))).toBe(true);
     expect(existsSync(join(archive, "mocks", "manifest.json"))).toBe(true);
 
     // Fresh artifacts re-scaffolded in draft state.
@@ -754,14 +771,7 @@ describe("http", () => {
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
     const store = new ArtifactsStore();
-    await store.writeBrainstormMock(wt, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
     await store.selectBrainstormMock(wt, t.id, "mock-a");
 
     const res = await app.inject({ method: "GET", url: `/api/tasks/${t.id}/brainstorm/mocks` });
@@ -773,23 +783,16 @@ describe("http", () => {
     });
   });
 
-  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/html returns mock HTML", async () => {
+  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/pages/:pageId/html returns page HTML", async () => {
     const t = await runs.createTask({ title: "mock task" });
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
     const store = new ArtifactsStore();
-    await store.writeBrainstormMock(wt, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
 
     const res = await app.inject({
       method: "GET",
-      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/html`,
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/pages/task-detail/html`,
     });
 
     expect(res.statusCode).toBe(200);
@@ -801,6 +804,8 @@ describe("http", () => {
     const t = await runs.createTask({ title: "mock task" });
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
     const enqueue = vi.fn();
     const testApp = buildServer({
       runs,
@@ -821,19 +826,33 @@ describe("http", () => {
     expect(jsonl).toContain("brainstorm_mock_edit_requested");
   });
 
+  it("POST /api/tasks/:id/brainstorm/mocks/:mockId/select rejects a mock with a submitted edit", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    const mock = makePagedMock(t.id);
+    await store.writeBrainstormMock(wt, t.id, mock, PAGED_MOCK_HTML);
+    await writeFile(
+      join(wt, ".harness", t.id, "brainstorm.jsonl"),
+      `${JSON.stringify({ ts: "2026-05-13T00:00:00.000Z", kind: "brainstorm_mock_proposed", mock })}\n${JSON.stringify({ ts: "2026-05-13T00:00:01.000Z", kind: "brainstorm_mock_edit_requested", requestId: "mer_1", mockId: "mock-a", comment: "Narrow it." })}\n`,
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/select`,
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("mock_edit_already_submitted");
+  });
+
   it("POST /api/tasks/:id/brainstorm/mocks/:mockId/select updates manifest and enqueues", async () => {
     const t = await runs.createTask({ title: "mock task" });
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
     const store = new ArtifactsStore();
-    await store.writeBrainstormMock(wt, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
     const enqueue = vi.fn();
     const testApp = buildServer({
       runs,

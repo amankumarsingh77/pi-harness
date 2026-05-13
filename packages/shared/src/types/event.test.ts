@@ -120,9 +120,15 @@ describe("brainstorm mock AgentEvent variants", () => {
         mockId: "mock-a",
         title: "Split pane review",
         summary: "Keeps choices beside the emerging artifacts.",
-        htmlPath: ".harness/T-001/mocks/mock-a.html",
         recommended: true,
         createdAt: "2026-05-13T00:00:00.000Z",
+        pages: [
+          {
+            pageId: "task-detail",
+            title: "Task detail",
+            htmlPath: ".harness/T-001/mocks/mock-a/task-detail.html",
+          },
+        ],
       },
     };
     if (e.kind === "brainstorm_mock_proposed") {
@@ -141,10 +147,16 @@ describe("brainstorm mock AgentEvent variants", () => {
         mockId: "mock-a-rev1",
         title: "Split pane review refined",
         summary: "Narrows the artifact pane.",
-        htmlPath: ".harness/T-001/mocks/mock-a-rev1.html",
         recommended: false,
         derivedFrom: "mock-a",
         createdAt: "2026-05-13T00:00:00.000Z",
+        pages: [
+          {
+            pageId: "task-detail",
+            title: "Task detail",
+            htmlPath: ".harness/T-001/mocks/mock-a-rev1/task-detail.html",
+          },
+        ],
       },
       editRequestId: "mer_1",
     };

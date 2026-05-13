@@ -9,10 +9,12 @@ export function MockPreviewActions({
   taskId,
   mockId,
   selected,
+  locked,
 }: {
   taskId: string;
   mockId: string;
   selected: boolean;
+  locked: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState("");
@@ -34,7 +36,7 @@ export function MockPreviewActions({
       <button
         type="button"
         onClick={() => setEditing((v) => !v)}
-        disabled={pending}
+        disabled={locked || pending}
         className="rounded border border-line px-2.5 py-1 font-mono text-[11px] text-fg-body hover:border-line-hover hover:bg-white/[0.03] disabled:opacity-55"
       >
         Edit
@@ -61,12 +63,12 @@ export function MockPreviewActions({
       <button
         type="button"
         onClick={() => {
-          if (selected || pending) return;
+          if (locked || selected || pending) return;
           start(async () => {
             await selectBrainstormMockAction(taskId, mockId);
           });
         }}
-        disabled={selected || pending}
+        disabled={locked || selected || pending}
         className="rounded bg-st-progress px-3 py-1 font-mono text-[11px] font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-fg-faint"
       >
         {selected ? "Chosen" : "Choose"}
