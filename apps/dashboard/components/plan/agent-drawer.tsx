@@ -38,6 +38,7 @@ export function AgentDrawer({
   );
 
   const totals = useMemo(() => deriveTotals(events, subagent), [events, subagent]);
+  const attempt = useMemo(() => deriveAttemptMeta(events, subagent), [events, subagent]);
 
   const findingsAvailable = findingsBody !== null;
   const [tab, setTab] = useState<"timeline" | "findings">("timeline");
@@ -97,6 +98,11 @@ export function AgentDrawer({
             </span>
           )}
           {totals.costUsd > 0 && <span>${totals.costUsd.toFixed(4)}</span>}
+          {attempt && (
+            <span>
+              attempt {attempt.count} · {attempt.sessionId.slice(-8)}
+            </span>
+          )}
         </div>
       </header>
 
@@ -204,6 +210,26 @@ type Totals = {
   outputTokens: number;
   durationMs: number;
 };
+
+type AttemptMeta = {
+  count: number;
+  sessionId: string;
+};
+
+function deriveAttemptMeta(events: AgentEvent[], subagent: string): AttemptMeta | null {
+  let count = 0;
+  let sessionId: string | null = null;
+  for (const e of events) {
+    if (e.kind === "plan_subagent_started" && e.subagent === subagent) {
+      count += 1;
+      sessionId = e.sessionId;
+    }
+    if (e.kind === "plan_subagent_ended" && e.subagent === subagent && sessionId === null) {
+      sessionId = e.sessionId;
+    }
+  }
+  return sessionId ? { count: Math.max(1, count), sessionId } : null;
+}
 
 function deriveTotals(events: AgentEvent[], subagent: string): Totals {
   let started: number | null = null;

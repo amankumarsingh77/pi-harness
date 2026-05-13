@@ -1,5 +1,4 @@
 "use client";
-import { PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import type { PlanJsonlEvent } from "@/lib/api";
 
@@ -7,7 +6,9 @@ import type { PlanJsonlEvent } from "@/lib/api";
 // from mark_ready). Order follows registry declaration order so dot positions
 // don't reshuffle between renders.
 export const SUBAGENTS: readonly string[] = [
-  ...PREFLIGHT_SUBAGENTS,
+  "codebase-scout",
+  "integration-scanner",
+  "precedent-locator",
   "claim-verifier",
 ];
 
@@ -24,18 +25,23 @@ export function deriveKind(
   events: PlanJsonlEvent[],
 ): DotKind {
   if (research[subagent]) return "done";
-  let started = false;
-  let endedOk: boolean | null = null;
+  let latest: { sessionId: string; ended: boolean } | null = null;
   for (const e of events) {
-    if (e.kind === "plan_subagent_started" && e.subagent === subagent) started = true;
-    if (e.kind === "plan_subagent_ended" && e.subagent === subagent) endedOk = e.ok;
+    if (e.kind === "plan_subagent_started" && e.subagent === subagent) {
+      latest = { sessionId: e.sessionId, ended: false };
+    }
+    if (e.kind === "plan_subagent_ended" && e.subagent === subagent) {
+      latest = { sessionId: e.sessionId, ended: true };
+    }
   }
-  if (endedOk === false) return "blocked";
-  if (started) return "progress";
-  return "intake";
+  if (!latest) return "intake";
+  if (!latest.ended) return "progress";
+  // A finished attempt without a findings file violated the preflight
+  // contract, even when the model session itself ended cleanly.
+  return "blocked";
 }
 
-// Strip-of-six progress indicator for the plan-phase preflight. Each dot is
+// Progress indicator for the plan-phase preflight. Each dot is
 // a clickable button: clicking opens the per-agent drawer for that subagent.
 // Collapses to a one-line summary when every subagent is `done`.
 // Status-icon SVGs only — no Unicode shapes (project rule 3).

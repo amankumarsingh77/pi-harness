@@ -49,6 +49,7 @@ function makeFakeWriter(opts: {
   failSubagents?: Set<string>;
   delayMs?: number;
   onCreate?: () => void;
+  mode?: "write" | "skip-write" | "empty-write";
 } = {}): (o: AgentSessionOptions) => Promise<AgentSession> {
   return async (sessionOpts) => {
     opts.onCreate?.();
@@ -71,16 +72,47 @@ function makeFakeWriter(opts: {
         if (opts.delayMs) {
           await new Promise((r) => setTimeout(r, opts.delayMs));
         }
-        await writeFindings.execute(
-          "test-write",
-          { body: `# ${subagent} findings\n\nfake findings body\n` },
-          undefined,
-          undefined,
-          undefined as never,
-        );
+        if (opts.mode !== "skip-write") {
+          await writeFindings.execute(
+            "test-write",
+            {
+              body: opts.mode === "empty-write"
+                ? " \n"
+                : `# ${subagent} findings\n\nfake findings body\n`,
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+        }
         return { inputTokens: 100, outputTokens: 50, costUsd: 0.01 };
       },
       async abort() {},
+      async close() {},
+    } satisfies AgentSession;
+  };
+}
+
+function makeHangingWriter(opts: {
+  onAbort?: () => void;
+  rejectOnAbort?: boolean;
+  onCreate?: () => void;
+} = {}): (o: AgentSessionOptions) => Promise<AgentSession> {
+  return async () => {
+    opts.onCreate?.();
+    let rejectPrompt: ((err: Error) => void) | null = null;
+    return {
+      async prompt() {
+        return new Promise((_, reject) => {
+          rejectPrompt = reject;
+        });
+      },
+      async abort() {
+        opts.onAbort?.();
+        if (opts.rejectOnAbort) {
+          rejectPrompt?.(new Error("aborted"));
+        }
+      },
       async close() {},
     } satisfies AgentSession;
   };
@@ -157,7 +189,7 @@ describe("runPreflight", () => {
     expect(peakBeforeFirstResolve.value).toBe(N);
   });
 
-  it("one subagent failure leaves the others successful and below the failed threshold", async () => {
+  it("one required subagent failure makes preflight fail", async () => {
     const result = await runPreflight(
       baseOpts({
         createAgentSession: makeFakeWriter({
@@ -166,7 +198,7 @@ describe("runPreflight", () => {
       }),
     );
 
-    expect(result.failed).toBe(false);
+    expect(result.failed).toBe(true);
     const failed = result.results.find((r) => r.subagent === FIRST)!;
     expect(failed.ok).toBe(false);
     expect(failed.error).toContain("synthetic failure");
@@ -174,15 +206,91 @@ describe("runPreflight", () => {
     expect(others.every((r) => r.ok)).toBe(true);
   });
 
-  it("a majority of failures sets failed=true so caller can fail the phase", async () => {
-    const majority = Math.floor(N / 2) + 1;
-    const fail = new Set(PREFLIGHT_SUBAGENTS.slice(0, majority));
+  it("a session that returns without write_findings fails the subagent", async () => {
     const result = await runPreflight(
       baseOpts({
-        createAgentSession: makeFakeWriter({ failSubagents: fail }),
+        createAgentSession: makeFakeWriter({ mode: "skip-write" }),
       }),
     );
+
     expect(result.failed).toBe(true);
+    expect(result.results.every((r) => !r.ok)).toBe(true);
+    expect(result.results[0]?.error).toContain("completed without writing findings");
+  });
+
+  it("an empty findings file fails the subagent", async () => {
+    const result = await runPreflight(
+      baseOpts({
+        createAgentSession: makeFakeWriter({ mode: "empty-write" }),
+      }),
+    );
+
+    expect(result.failed).toBe(true);
+    expect(result.results.every((r) => !r.ok)).toBe(true);
+    expect(result.results[0]?.error).toContain("completed without writing findings");
+  });
+
+  it("passes maxTurns to each preflight session", async () => {
+    const maxTurns: number[] = [];
+    const writer = makeFakeWriter({
+      onCreate: () => {},
+    });
+    await runPreflight(
+      baseOpts({
+        createAgentSession: async (o) => {
+          maxTurns.push(o.maxTurns ?? 0);
+          return writer(o);
+        },
+      }),
+    );
+
+    expect(maxTurns).toEqual(Array.from({ length: N }, () => 12));
+  });
+
+  it("times out hanging subagents and aborts their sessions", async () => {
+    let aborts = 0;
+    const result = await runPreflight(
+      baseOpts({
+        createAgentSession: makeHangingWriter({
+          onAbort: () => {
+            aborts += 1;
+          },
+        }),
+        subagentTimeoutMs: 5,
+      }),
+    );
+
+    expect(result.failed).toBe(true);
+    expect(aborts).toBe(N);
+    expect(result.results.every((r) => r.error?.includes("timed out"))).toBe(true);
+  });
+
+  it("parent abort signal cancels in-flight subagents", async () => {
+    const controller = new AbortController();
+    let created = 0;
+    let aborts = 0;
+    const resultPromise = runPreflight(
+      baseOpts({
+        createAgentSession: makeHangingWriter({
+          rejectOnAbort: true,
+          onCreate: () => {
+            created += 1;
+            if (created === N) {
+              setTimeout(() => controller.abort(), 0);
+            }
+          },
+          onAbort: () => {
+            aborts += 1;
+          },
+        }),
+        signal: controller.signal,
+        subagentTimeoutMs: 1000,
+      }),
+    );
+
+    const result = await resultPromise;
+    expect(result.failed).toBe(true);
+    expect(aborts).toBe(N);
   });
 
   it("re-entry skips subagents whose findings file already exists", async () => {
@@ -213,6 +321,28 @@ describe("runPreflight", () => {
     expect(skipped.ok).toBe(true);
     expect(skipped.costUsd).toBe(0);
     expect(skipped.inputTokens).toBe(0);
+  });
+
+  it("re-entry reruns subagents whose findings file is empty", async () => {
+    const researchDir = join(cwd, ".harness", "T-001", "research");
+    await mkdir(researchDir, { recursive: true });
+    await writeFile(join(researchDir, `${FIRST}.md`), " \n");
+
+    let createCount = 0;
+    const result = await runPreflight(
+      baseOpts({
+        createAgentSession: makeFakeWriter({
+          onCreate: () => {
+            createCount += 1;
+          },
+        }),
+      }),
+    );
+
+    expect(result.failed).toBe(false);
+    expect(createCount).toBe(N);
+    const body = await readFile(join(researchDir, `${FIRST}.md`), "utf8");
+    expect(body).toContain(`${FIRST} findings`);
   });
 
   it("inlines the ticket digest, not the full design/spec, into the user prompt", async () => {

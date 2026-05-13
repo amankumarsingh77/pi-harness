@@ -17,6 +17,9 @@ import { buildTicketDigest } from "./ticket-digest.js";
 export { PREFLIGHT_SUBAGENTS };
 export type PreflightSubagent = string;
 
+export const PREFLIGHT_SUBAGENT_MAX_TURNS = 12;
+export const PREFLIGHT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
 export type PreflightSubagentEvent =
@@ -55,6 +58,7 @@ export type PreflightOpts = {
   // tool_result events surface in the existing Agent Log on /tasks/[id].
   onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
   signal?: AbortSignal;
+  subagentTimeoutMs?: number;
 };
 
 export type PreflightSubagentResult = {
@@ -82,8 +86,8 @@ export type PreflightResult = {
 // whose file is already on disk.
 //
 // Returns once every dispatched subagent has resolved (success or failure).
-// The caller decides whether the failure rate is fatal; preflight itself
-// reports `failed: true` only when a majority of subagents failed.
+// The caller treats any missing required findings file as fatal. A subagent
+// only succeeds when its session ends and a non-empty findings file exists.
 export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult> {
   const researchDir = join(opts.cwd, ".harness", opts.taskId, "research");
   await mkdir(researchDir, { recursive: true });
@@ -93,7 +97,7 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
     // Cache hit: a previous tick already wrote this subagent's findings.
     // Skip silently — emit no started/ended events so the dashboard's
     // strip doesn't double-count.
-    if (existsSync(findingsPath)) {
+    if (hasNonEmptyFindings(findingsPath)) {
       return {
         subagent,
         ok: true,
@@ -151,7 +155,7 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
 
   const results = await Promise.all(tasks);
   const failedCount = results.filter((r) => !r.ok).length;
-  return { results, failed: failedCount > results.length / 2 };
+  return { results, failed: failedCount > 0 };
 }
 
 async function runOneSubagent(args: {
@@ -174,6 +178,7 @@ async function runOneSubagent(args: {
         : {}),
       systemPrompt,
       tools: [...def.allowedTools],
+      maxTurns: PREFLIGHT_SUBAGENT_MAX_TURNS,
       customTools: [
         makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
       ],
@@ -184,12 +189,44 @@ async function runOneSubagent(args: {
     throw err;
   }
 
+  const timeoutMs = opts.subagentTimeoutMs ?? PREFLIGHT_SUBAGENT_TIMEOUT_MS;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let promptPromise: Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> | undefined;
+  const onAbort = (): void => {
+    void session.abort().catch(() => {});
+  };
+
   try {
-    const usage = await session.prompt(userPrompt);
+    if (opts.signal?.aborted) {
+      await session.abort().catch(() => {});
+      throw new Error(`preflight subagent ${subagent} aborted`);
+    }
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        void session.abort().catch(() => {});
+        reject(new Error(`preflight subagent ${subagent} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
+    promptPromise = session.prompt(userPrompt);
+    const usage = await Promise.race([promptPromise, timeoutPromise]);
+    if (!hasNonEmptyFindings(findingsPath)) {
+      throw new Error(`preflight subagent ${subagent} completed without writing findings`);
+    }
     return usage;
   } finally {
+    if (timeout) clearTimeout(timeout);
+    opts.signal?.removeEventListener("abort", onAbort);
+    void promptPromise?.catch(() => {});
     await session.close().catch(() => {});
   }
+}
+
+function hasNonEmptyFindings(path: string): boolean {
+  if (!existsSync(path)) return false;
+  return readFileSync(path, "utf8").trim().length > 0;
 }
 
 function buildSubagentPrompt(args: {

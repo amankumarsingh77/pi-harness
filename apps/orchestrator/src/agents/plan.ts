@@ -186,10 +186,16 @@ function lastIndexWhere<T>(arr: T[], pred: (e: T) => boolean): number {
 }
 
 function isPreflightComplete(cwd: string, taskId: string): boolean {
+  return missingPreflightFindings(cwd, taskId).length === 0;
+}
+
+function missingPreflightFindings(cwd: string, taskId: string): string[] {
   const researchDir = join(cwd, ".harness", taskId, "research");
-  return PREFLIGHT_SUBAGENTS.every((sa) =>
-    existsSync(join(researchDir, `${sa}.md`)),
-  );
+  return PREFLIGHT_SUBAGENTS.filter((sa) => {
+    const path = join(researchDir, `${sa}.md`);
+    if (!existsSync(path)) return true;
+    return readFileSync(path, "utf8").trim().length === 0;
+  });
 }
 
 async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
@@ -305,15 +311,39 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
   }
 
   if (result.failed) {
+    const failed = result.results.filter((r) => !r.ok).map((r) => r.subagent);
     await opts.bus.publish({
       kind: "plan_system",
       systemKind: "blocked",
-      data: { reason: "preflight: ≥3 subagents failed" },
+      data: {
+        reason: `preflight: required findings missing or failed (${failed.join(", ")})`,
+        subagents: failed,
+      },
     });
     return {
       ok: false,
       ready: false,
-      error: "plan preflight: too many subagent failures",
+      error: `plan preflight: required findings missing or failed (${failed.join(", ")})`,
+      inputTokens,
+      outputTokens,
+      costUsd,
+    };
+  }
+
+  const missing = missingPreflightFindings(opts.cwd, opts.taskId);
+  if (missing.length > 0) {
+    await opts.bus.publish({
+      kind: "plan_system",
+      systemKind: "blocked",
+      data: {
+        reason: `preflight: missing findings (${missing.join(", ")})`,
+        subagents: missing,
+      },
+    });
+    return {
+      ok: false,
+      ready: false,
+      error: `plan preflight: missing findings (${missing.join(", ")})`,
       inputTokens,
       outputTokens,
       costUsd,
