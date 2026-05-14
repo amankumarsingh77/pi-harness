@@ -49,6 +49,16 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("API change")).toBeInTheDocument();
   });
 
+  it("makes the whole task card a task detail link", () => {
+    const tasks = [baseTask({ id: "open-me", title: "Open the whole card", status: "executing" })];
+    render(<KanbanBoard tasks={tasks} counts={{ executing: 1 }} />);
+
+    expect(screen.getByRole("link", { name: "Open Open the whole card" })).toHaveAttribute(
+      "href",
+      "/tasks/open-me",
+    );
+  });
+
   it("active executing card surfaces branch name in mono meta", () => {
     const tasks = [
       baseTask({

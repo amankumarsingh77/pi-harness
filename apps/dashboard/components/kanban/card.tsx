@@ -70,55 +70,62 @@ export function TaskCard({
         pending && "opacity-60",
       )}
     >
-      <div className="flex items-center gap-2 font-mono text-[11px] tracking-[0.01em] text-fg-mute">
-        <StatusIcon kind={kind} live={live} />
-        <span className="text-fg-mute">#{task.id.slice(0, 4).toUpperCase()}</span>
-        {task.priority !== "none" && (
-          <span className="inline-flex items-center gap-1 text-fg-body">
-            <PriorityIcon value={task.priority} />
-            {PRIORITY_LABELS[task.priority]}
-          </span>
-        )}
-        <span className="ml-auto text-fg-faint">{age}</span>
-      </div>
-
       <Link
         href={`/tasks/${task.id}` as Route}
-        className={clsx(
-          "mt-2 block line-clamp-2 text-[13.5px] font-medium leading-[1.4] tracking-[-0.012em]",
-          "outline-none hover:text-fg focus-visible:rounded focus-visible:ring-1 focus-visible:ring-line-hover",
-          task.status === "done" ? "text-fg-mute" : "text-fg",
+        aria-label={`Open ${task.title}`}
+        className="absolute inset-0 z-10 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-line-hover"
+      />
+
+      <div className="pointer-events-none relative z-20">
+        <div className="flex items-center gap-2 font-mono text-[11px] tracking-[0.01em] text-fg-mute">
+          <StatusIcon kind={kind} live={live} />
+          <span className="text-fg-mute">#{task.id.slice(0, 4).toUpperCase()}</span>
+          {task.priority !== "none" && (
+            <span className="inline-flex items-center gap-1 text-fg-body">
+              <PriorityIcon value={task.priority} />
+              {PRIORITY_LABELS[task.priority]}
+            </span>
+          )}
+          <span className="ml-auto text-fg-faint">{age}</span>
+        </div>
+
+        <div
+          className={clsx(
+            "mt-2 line-clamp-2 text-[13.5px] font-medium leading-[1.4] tracking-[-0.012em]",
+            "transition-colors group-hover:text-fg",
+            task.status === "done" ? "text-fg-mute" : "text-fg",
+          )}
+        >
+          {task.title}
+        </div>
+
+        {task.tags.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {task.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded border border-line bg-white/[0.025] px-1.5 py-[1px] font-mono text-[10.5px] tracking-[0.01em] text-fg-mute"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
         )}
-      >
-        {task.title}
-      </Link>
 
-      {task.tags.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {task.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-line bg-white/[0.025] px-1.5 py-[1px] font-mono text-[10.5px] tracking-[0.01em] text-fg-mute"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {meta.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-0 font-mono text-[11.5px] tracking-[0.01em] text-fg-mute">
-          {meta.map((part, i) => (
-            <span key={i} className={clsx("inline-flex items-center", part.tone && TONE_CLASS[part.tone])}>
-              {i > 0 && <span className="px-[7px] text-fg-faint">·</span>}
-              {part.text}
-            </span>
-          ))}
-        </div>
-      )}
+        {meta.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-0 font-mono text-[11.5px] tracking-[0.01em] text-fg-mute">
+            {meta.map((part, i) => (
+              <span key={i} className={clsx("inline-flex items-center", part.tone && TONE_CLASS[part.tone])}>
+                {i > 0 && <span className="px-[7px] text-fg-faint">·</span>}
+                {part.text}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       {actions.length > 0 && (
-        <div className="mt-2 flex items-center gap-1.5 border-t border-line pt-2">
+        <div className="relative z-30 mt-2 flex items-center gap-1.5 border-t border-line pt-2">
           {actions.map((action) => (
             <button
               key={action.label}
