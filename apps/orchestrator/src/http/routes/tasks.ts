@@ -48,6 +48,8 @@ export function registerTaskRoutes(
     const t = await runs.createTask({
       title: parsed.title,
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
+      priority: parsed.priority,
+      tags: parsed.tags,
     });
     reply.code(201);
     return t;
@@ -79,6 +81,8 @@ export function registerTaskRoutes(
     const updated = await runs.updateTask(task.id, {
       ...(patch.title !== undefined ? { title: patch.title } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+      ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
       // Zod's .partial().strict() infers each field as `T | undefined`, but
       // Task.phaseModels' Partial<PhaseModelConfig> shape (under exactOptionalPropertyTypes)
       // wants `T` only. The values are structurally identical at runtime.

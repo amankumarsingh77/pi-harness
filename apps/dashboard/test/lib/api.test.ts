@@ -23,14 +23,24 @@ describe("api", () => {
 
   it("createTask POSTs body", async () => {
     const fetchSpy = vi.fn(async () =>
-      Response.json({ id: "1", status: "backlog", title: "t", description: "" }, { status: 201 }),
+      Response.json({
+        id: "1",
+        status: "backlog",
+        title: "t",
+        description: "",
+        priority: "urgent",
+        tags: ["bugfix"],
+      }, { status: 201 }),
     );
     const a = api({ baseUrl: "http://x", fetch: fetchSpy });
 
-    await a.createTask({ title: "t" });
+    await a.createTask({ title: "t", priority: "urgent", tags: ["bugfix"] });
     expect(fetchSpy).toHaveBeenCalledWith(
       "http://x/api/tasks",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ title: "t" }) }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "t", priority: "urgent", tags: ["bugfix"] }),
+      }),
     );
   });
 });

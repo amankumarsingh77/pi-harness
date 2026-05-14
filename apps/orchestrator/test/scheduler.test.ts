@@ -18,6 +18,8 @@ const TASK = (id: string) =>
     worktreePath: null,
     branchName: null,
     retryCount: 0,
+    priority: "none",
+    tags: [],
     awaitingApproval: false,
     phaseModels: {},
     createdAt: new Date(),

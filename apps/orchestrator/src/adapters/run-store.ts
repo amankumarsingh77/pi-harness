@@ -1,6 +1,6 @@
 import { eq, asc, desc, and, inArray } from "drizzle-orm";
 import { tasks, runs, type DbClient } from "@pi-harness/db";
-import type { Task, TaskStatus, Run, Phase } from "@pi-harness/shared";
+import type { Task, TaskStatus, Run, Phase, TaskPriority } from "@pi-harness/shared";
 import { TASK_STATUSES } from "@pi-harness/shared";
 import { NotFoundError } from "../domain/errors.js";
 
@@ -9,10 +9,20 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export class RunStore {
   constructor(private readonly db: DbClient) {}
 
-  async createTask(input: { title: string; description?: string }): Promise<Task> {
+  async createTask(input: {
+    title: string;
+    description?: string;
+    priority?: TaskPriority;
+    tags?: readonly string[];
+  }): Promise<Task> {
     const [row] = await this.db
       .insert(tasks)
-      .values({ title: input.title, description: input.description ?? "" })
+      .values({
+        title: input.title,
+        description: input.description ?? "",
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        ...(input.tags !== undefined ? { tags: [...input.tags] } : {}),
+      })
       .returning();
     return row as Task;
   }
@@ -29,9 +39,14 @@ export class RunStore {
   }
 
   async updateTask(id: string, patch: Partial<Task>): Promise<Task> {
+    const { tags, ...rest } = patch;
     const [row] = await this.db
       .update(tasks)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({
+        ...rest,
+        ...(tags !== undefined ? { tags: [...tags] } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(tasks.id, id))
       .returning();
     if (!row) throw new NotFoundError("task", id);

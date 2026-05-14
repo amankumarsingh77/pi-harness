@@ -130,12 +130,28 @@ describe("http", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { title: "from http", description: "x" },
+      payload: {
+        title: "from http",
+        description: "x",
+        priority: "urgent",
+        tags: ["Bug Fix", "bug-fix", "Needs Design", "  "],
+      },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.status).toBe("backlog");
     expect(body.id).toMatch(/[0-9a-f-]{36}/);
+    expect(body.priority).toBe("urgent");
+    expect(body.tags).toEqual(["bug-fix", "needs-design"]);
+  });
+
+  it("POST /api/tasks rejects invalid priority", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "bad priority", priority: "highest" },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it("POST /api/tasks rejects empty title", async () => {

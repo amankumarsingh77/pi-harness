@@ -202,7 +202,10 @@ export type Api = {
   listTasks: () => Promise<{ tasks: Task[]; counts: Record<string, number> }>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
-  createTask: (input: { title: string; description?: string }) => Promise<Task>;
+  createTask: (
+    input: Pick<Task, "title"> &
+      Partial<Pick<Task, "description" | "priority" | "tags">>,
+  ) => Promise<Task>;
   transitionTask: (
     id: string,
     action:
@@ -405,7 +408,13 @@ function toDate(v: unknown): Date {
 }
 
 function hydrateTask(t: Task): Task {
-  return { ...t, createdAt: toDate(t.createdAt), updatedAt: toDate(t.updatedAt) };
+  return {
+    ...t,
+    priority: t.priority ?? "none",
+    tags: t.tags ?? [],
+    createdAt: toDate(t.createdAt),
+    updatedAt: toDate(t.updatedAt),
+  };
 }
 
 function hydrateRun(r: Run): Run {

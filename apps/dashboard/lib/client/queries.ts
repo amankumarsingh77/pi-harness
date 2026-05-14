@@ -38,7 +38,7 @@ export const queries = {
 
 export const mutations = {
   createTask: () => ({
-    mutationFn: (input: { title: string; description?: string }) =>
+    mutationFn: (input: Parameters<Api["createTask"]>[0]) =>
       proxied.createTask(input),
   }),
   transitionTask: (id: string) => ({

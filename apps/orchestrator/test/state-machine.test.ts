@@ -12,6 +12,8 @@ function mkTask(status: Task["status"], overrides: Partial<Task> = {}): Task {
     worktreePath: null,
     branchName: null,
     retryCount: 0,
+    priority: "none",
+    tags: [],
     phaseModels: {},
     createdAt: new Date(),
     updatedAt: new Date(),

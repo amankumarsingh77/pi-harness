@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { Task } from "@pi-harness/shared";
 import { clsx } from "clsx";
+import { PriorityIcon, PRIORITY_LABELS } from "@/components/new-task/priority-icon";
+import type { BoardTransition } from "./board";
 import { StatusIcon, statusKindFor } from "./status-icon";
 import { formatRelativeCompact } from "@/lib/format";
 
@@ -22,52 +24,87 @@ const FAILED_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "verification_failed",
 ]);
 
-export function TaskCard({ task }: { task: Task }) {
+export function TaskCard({
+  task,
+  pending,
+  onDragStart,
+  onDragEnd,
+  onTransition,
+}: {
+  task: Task;
+  pending: boolean;
+  onDragStart: (taskId: string) => void;
+  onDragEnd: () => void;
+  onTransition: BoardTransition;
+}) {
   const kind = statusKindFor(task.status);
   const live = LIVE_STATUSES.has(task.status);
   const attention = FAILED_STATUSES.has(task.status);
   const age = formatRelativeCompact(task.updatedAt ?? task.createdAt);
   const meta = metaLineFor(task);
+  const draggable = task.status === "backlog";
+  const actions = actionsFor(task);
 
   return (
-    <Link
-      href={`/tasks/${task.id}` as Route}
+    <article
+      data-testid={`task-card-${task.id}`}
+      draggable={draggable}
+      onDragStart={(event) => {
+        if (!draggable) return;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("application/x-pi-task-id", task.id);
+        onDragStart(task.id);
+      }}
+      onMouseDown={() => {
+        if (draggable) onDragStart(task.id);
+      }}
+      onMouseUp={onDragEnd}
+      onDragEnd={onDragEnd}
       className={clsx(
-        "group relative block rounded-md border px-3 py-2.5",
+        "group relative rounded-md border px-3 py-2.5",
         "transition-colors duration-150",
         attention
           ? "border-st-blocked/60 bg-card hover:border-st-blocked hover:bg-card-hover"
           : "border-line bg-card hover:border-line-hover hover:bg-card-hover",
+        draggable && "cursor-grab active:cursor-grabbing",
+        pending && "opacity-60",
       )}
     >
       <div className="flex items-center gap-2 font-mono text-[11px] tracking-[0.01em] text-fg-mute">
         <StatusIcon kind={kind} live={live} />
         <span className="text-fg-mute">#{task.id.slice(0, 4).toUpperCase()}</span>
+        {task.priority !== "none" && (
+          <span className="inline-flex items-center gap-1 text-fg-body">
+            <PriorityIcon value={task.priority} />
+            {PRIORITY_LABELS[task.priority]}
+          </span>
+        )}
         <span className="ml-auto text-fg-faint">{age}</span>
-        <span
-          className={clsx(
-            "-mr-1 inline-flex h-[22px] w-[22px] items-center justify-center rounded text-fg-faint",
-            "opacity-0 transition-opacity duration-150 hover:bg-white/[0.06] hover:text-fg",
-            "group-hover:opacity-100",
-          )}
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14">
-            <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.2" fill="currentColor" />
-            <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
-          </svg>
-        </span>
       </div>
 
-      <div
+      <Link
+        href={`/tasks/${task.id}` as Route}
         className={clsx(
-          "mt-2 line-clamp-2 text-[13.5px] font-medium leading-[1.4] tracking-[-0.012em]",
+          "mt-2 block line-clamp-2 text-[13.5px] font-medium leading-[1.4] tracking-[-0.012em]",
+          "outline-none hover:text-fg focus-visible:rounded focus-visible:ring-1 focus-visible:ring-line-hover",
           task.status === "done" ? "text-fg-mute" : "text-fg",
         )}
       >
         {task.title}
-      </div>
+      </Link>
+
+      {task.tags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {task.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded border border-line bg-white/[0.025] px-1.5 py-[1px] font-mono text-[10.5px] tracking-[0.01em] text-fg-mute"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
 
       {meta.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-0 font-mono text-[11.5px] tracking-[0.01em] text-fg-mute">
@@ -79,7 +116,32 @@ export function TaskCard({ task }: { task: Task }) {
           ))}
         </div>
       )}
-    </Link>
+
+      {actions.length > 0 && (
+        <div className="mt-2 flex items-center gap-1.5 border-t border-line pt-2">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              disabled={pending}
+              aria-label={action.ariaLabel(task.title)}
+              onClick={() => onTransition(task.id, action.action)}
+              className={clsx(
+                "inline-flex h-6 items-center rounded border px-2 text-[11.5px] transition-colors",
+                action.variant === "danger"
+                  ? "border-line text-st-blocked hover:border-st-blocked hover:bg-white/[0.03]"
+                  : action.variant === "review"
+                    ? "border-line text-st-review hover:border-st-review hover:bg-white/[0.03]"
+                    : "border-line text-fg-body hover:border-line-hover hover:bg-white/[0.03]",
+                pending && "cursor-wait opacity-60",
+              )}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -140,5 +202,62 @@ function metaLineFor(task: Task): MetaPart[] {
       break;
   }
   if (task.branchName) parts.push({ text: task.branchName });
+  if (task.workflow) parts.push({ text: task.workflow });
   return parts;
+}
+
+type CardAction = {
+  label: string;
+  variant: "neutral" | "danger" | "review";
+  action: Parameters<BoardTransition>[1];
+  ariaLabel: (title: string) => string;
+};
+
+function actionsFor(task: Task): CardAction[] {
+  switch (task.status) {
+    case "backlog":
+      return [
+        {
+          label: "Start",
+          variant: "neutral",
+          action: { type: "user_start_brainstorm", workflow: "backend-feature" },
+          ariaLabel: (title) => `Start brainstorm for ${title}`,
+        },
+      ];
+    case "brainstorm_failed":
+    case "plan_failed":
+    case "code_failed":
+    case "verification_failed":
+    case "pr_failed":
+      return [
+        {
+          label: "Retry",
+          variant: "review",
+          action: { type: "user_retry_failed" },
+          ariaLabel: (title) => `Retry ${title}`,
+        },
+        {
+          label: "Cancel",
+          variant: "danger",
+          action: { type: "user_cancel" },
+          ariaLabel: (title) => `Cancel ${title}`,
+        },
+      ];
+    case "brainstorming":
+    case "planning":
+    case "executing":
+    case "verifying":
+    case "ready_to_ship":
+      return [
+        {
+          label: "Cancel",
+          variant: "danger",
+          action: { type: "user_cancel" },
+          ariaLabel: (title) => `Cancel ${title}`,
+        },
+      ];
+    case "done":
+    case "cancelled":
+      return [];
+  }
 }

@@ -24,6 +24,8 @@ export const MOCK_TASK: Task = {
   worktreePath: ".harness/runs/r_8f3a/",
   branchName: "pi/T-093",
   retryCount: 2,
+  priority: "high",
+  tags: ["bugfix", "auth"],
   phaseModels: {},
   createdAt: fromMinutesAgo(21, 2),
   updatedAt: fromMinutesAgo(0, 18),

@@ -1,5 +1,16 @@
+"use client";
+
 import type { Task, TaskStatus } from "@pi-harness/shared";
+import { useState } from "react";
+import type { Api } from "@/lib/api";
+import { mutations } from "@/lib/client/queries";
 import { KanbanColumn } from "./column";
+
+export type BoardTransitionAction = Parameters<Api["transitionTask"]>[1];
+export type BoardTransition = (
+  taskId: string,
+  action: BoardTransitionAction,
+) => Promise<void>;
 
 const COLUMN_ORDER: TaskStatus[] = [
   "backlog",
@@ -31,10 +42,16 @@ function bucketStatus(status: TaskStatus): TaskStatus {
 export function KanbanBoard({
   tasks,
   counts,
+  onTransition,
 }: {
   tasks: Task[];
   counts: Partial<Record<TaskStatus, number>>;
+  onTransition?: BoardTransition;
 }) {
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
+  const transitionTask = onTransition ?? createDefaultTransition();
+
   const byStatus: Record<string, Task[]> = {};
   for (const t of tasks) (byStatus[bucketStatus(t.status)] ??= []).push(t);
   // Fold counts the same way the tasks are bucketed so the column header
@@ -60,6 +77,19 @@ export function KanbanBoard({
               status={status}
               tasks={byStatus[status] ?? []}
               count={bucketedCounts[status] ?? 0}
+              draggedTaskId={draggedTaskId}
+              pendingTaskId={pendingTaskId}
+              onDragStart={setDraggedTaskId}
+              onDragEnd={() => setDraggedTaskId(null)}
+              onTransition={async (taskId, action) => {
+                setPendingTaskId(taskId);
+                try {
+                  await transitionTask(taskId, action);
+                } finally {
+                  setPendingTaskId(null);
+                  setDraggedTaskId(null);
+                }
+              }}
             />
           ))}
         </div>
@@ -71,4 +101,11 @@ export function KanbanBoard({
       />
     </main>
   );
+}
+
+function createDefaultTransition(): BoardTransition {
+  return async (taskId, action) => {
+    await mutations.transitionTask(taskId).mutationFn(action);
+    window.location.reload();
+  };
 }

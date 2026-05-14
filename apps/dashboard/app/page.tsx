@@ -19,32 +19,52 @@ export default async function HomePage() {
   return (
     <>
       <Topbar runningCount={running} blockedCount={blocked} doneTodayCount={doneToday} branch="main" />
-      <FilterBar total={tasks.length} />
+      <BoardSummary
+        total={tasks.length}
+        backlog={counts.backlog ?? 0}
+        running={running}
+        blocked={blocked}
+      />
       <KanbanBoard tasks={tasks} counts={counts} />
     </>
   );
 }
 
-function FilterBar({ total }: { total: number }) {
+function BoardSummary({
+  total,
+  backlog,
+  running,
+  blocked,
+}: {
+  total: number;
+  backlog: number;
+  running: number;
+  blocked: number;
+}) {
   return (
-    <div className="flex h-10 items-center gap-1.5 border-b border-line px-5 text-[12px] text-fg-mute">
-      <span className="inline-flex items-center gap-1.5 rounded border border-line-strong bg-white/[0.03] px-2 py-1 text-[11.5px] text-fg-body">
-        Status: any
-      </span>
-      <FilterChip>+ Phase</FilterChip>
-      <FilterChip>+ Branch</FilterChip>
-      <FilterChip>+ Updated</FilterChip>
-      <span className="mx-2 text-fg-faint">|</span>
-      <FilterChip>Group by phase</FilterChip>
+    <div className="flex h-10 items-center gap-3 border-b border-line px-5 text-[12px] text-fg-mute">
+      <span className="font-medium text-fg-body">Phase board</span>
+      <SummaryMetric label="backlog" value={backlog} />
+      <SummaryMetric label="running" value={running} />
+      <SummaryMetric label="blocked" value={blocked} tone={blocked > 0 ? "blocked" : "default"} />
       <span className="ml-auto font-mono text-[11px] text-fg-subtle">{total} tasks</span>
     </div>
   );
 }
 
-function FilterChip({ children }: { children: React.ReactNode }) {
+function SummaryMetric({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "blocked";
+}) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded border border-dashed border-line px-2 py-1 text-[11.5px] text-fg-mute transition-colors hover:border-line-hover hover:bg-white/[0.02] hover:text-fg-body">
-      {children}
+    <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle">
+      <span className={tone === "blocked" ? "text-st-blocked" : "text-fg-body"}>{value}</span>
+      {label}
     </span>
   );
 }

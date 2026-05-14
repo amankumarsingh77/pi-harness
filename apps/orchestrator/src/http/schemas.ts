@@ -1,9 +1,27 @@
 import { z } from "zod";
-import { WORKFLOWS, PHASES, THINKING_LEVELS } from "@pi-harness/shared";
+import { WORKFLOWS, PHASES, THINKING_LEVELS, TASK_PRIORITIES } from "@pi-harness/shared";
+
+const MAX_TAGS = 8;
+
+function normalizeTag(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function normalizeTags(rawTags: readonly string[]): string[] {
+  const unique = new Set<string>();
+  for (const raw of rawTags) {
+    const tag = normalizeTag(raw);
+    if (tag.length > 0) unique.add(tag);
+    if (unique.size >= MAX_TAGS) break;
+  }
+  return [...unique];
+}
 
 export const CreateTaskSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(10_000).optional(),
+  priority: z.enum(TASK_PRIORITIES).default("none"),
+  tags: z.array(z.string().max(40)).max(16).optional().transform((tags) => normalizeTags(tags ?? [])),
 });
 
 // Partial<PhaseModelConfig>: every field optional so a patch can flip a single
@@ -28,6 +46,8 @@ export const UpdateTaskSchema = z
   .object({
     title: z.string().min(1).max(200).optional(),
     description: z.string().max(10_000).optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    tags: z.array(z.string().max(40)).max(16).optional().transform((tags) => tags === undefined ? undefined : normalizeTags(tags)),
     phaseModels: PhaseModelsPatchSchema.optional(),
   })
   .strict();
