@@ -21,6 +21,13 @@ import {
   makeSubmitQuestionsTool,
   makeWriteMockRevisionTool,
 } from "./brainstorm-tools.js";
+import {
+  brainstormResearchPath,
+  makeSearXNGFetchTool,
+  makeSearXNGSearchTool,
+  makeWriteBrainstormResearchFindingsTool,
+  shouldRunWebResearch,
+} from "./web-research-tools.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -87,6 +94,10 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
     return zeroUsage({ ok: true, ready: false });
   }
 
+  const research = decision.kind === "initial"
+    ? await ensureWebResearch(opts)
+    : { digest: readWebResearchDigest(opts.cwd, opts.taskId), usage: zeroPromptUsage() };
+
   // Mark every pending nudge as consumed *before* the prompt fires. This is
   // the durable record that the agent has now seen them — even if the prompt
   // fails or is aborted later, the next tick won't re-fold the same comments.
@@ -104,6 +115,7 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
       ? buildInitialPrompt({
           taskId: opts.taskId,
           cwd: opts.cwd,
+          ...(research.digest !== undefined ? { researchDigest: research.digest } : {}),
           ...(opts.ticketTitle !== undefined ? { title: opts.ticketTitle } : {}),
           ...(opts.ticketDescription !== undefined
             ? { description: opts.ticketDescription }
@@ -117,7 +129,13 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
     ? `${buildNudgeBlock(decision.nudges)}\n\n${basePrompt}`
     : basePrompt;
 
-  return runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
+  const turn = await runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
+  return {
+    ...turn,
+    costUsd: turn.costUsd + research.usage.costUsd,
+    inputTokens: turn.inputTokens + research.usage.inputTokens,
+    outputTokens: turn.outputTokens + research.usage.outputTokens,
+  };
 }
 
 async function runTurn(
@@ -242,12 +260,15 @@ async function runTurn(
       ...(opts.phaseModel.maxTurns !== undefined ? { maxTurns: opts.phaseModel.maxTurns } : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
+      tools: ["read", "write"],
       customTools: [
         submitQuestionsTool,
         submitMockChoicesTool,
         writeMockRevisionTool,
         markReadyTool,
         replyToUserTool,
+        makeSearXNGSearchTool(),
+        makeSearXNGFetchTool(),
       ],
       onEvent: handleEvent,
     });
@@ -485,6 +506,166 @@ function pendingNudges(events: JsonlEvent[]): PendingNudge[] {
   return out;
 }
 
+async function ensureWebResearch(opts: BrainstormOpts): Promise<{
+  digest: string | undefined;
+  usage: { costUsd: number; inputTokens: number; outputTokens: number };
+}> {
+  const existingDigest = readWebResearchDigest(opts.cwd, opts.taskId);
+  if (existingDigest) return { digest: existingDigest, usage: zeroPromptUsage() };
+
+  if (!shouldRunWebResearch({
+    ...(opts.ticketTitle !== undefined ? { title: opts.ticketTitle } : {}),
+    ...(opts.ticketDescription !== undefined ? { description: opts.ticketDescription } : {}),
+  })) {
+    return { digest: undefined, usage: zeroPromptUsage() };
+  }
+
+  await opts.bus.publish({
+    kind: "brainstorm_system",
+    systemKind: "probe_complete",
+    data: { kind: "web_research", status: "started" },
+  });
+
+  const usage = await runWebResearchSubagent(opts);
+  const digest = readWebResearchDigest(opts.cwd, opts.taskId);
+  await opts.bus.publish({
+    kind: "brainstorm_system",
+    systemKind: "probe_complete",
+    data: {
+      kind: "web_research",
+      status: digest ? "complete" : "unavailable",
+      path: `.harness/${opts.taskId}/brainstorm-research/web-search-researcher.md`,
+    },
+  });
+  return { digest, usage };
+}
+
+async function runWebResearchSubagent(
+  opts: BrainstormOpts,
+): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
+  const subagent = "web-search-researcher";
+  const def = getSubagent(subagent);
+  const systemPrompt = readFileSync(def.promptPath, "utf8");
+  const prompt = buildWebResearchPrompt(opts);
+
+  try {
+    const session = await opts.createAgentSession({
+      cwd: opts.cwd,
+      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+      ...(opts.phaseModel.thinkingLevel !== "off"
+        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+        : {}),
+      maxTurns: 12,
+      systemPrompt,
+      tools: [...def.allowedTools],
+      customTools: [
+        makeSearXNGSearchTool(),
+        makeSearXNGFetchTool(),
+        makeWriteBrainstormResearchFindingsTool({
+          cwd: opts.cwd,
+          taskId: opts.taskId,
+          subagent,
+        }),
+      ],
+      onEvent: (e) => forwardResearchEvent({
+        event: e,
+        eventStore: opts.eventStore,
+        runId: opts.runId,
+        taskId: opts.taskId,
+        subagent,
+      }),
+    });
+    try {
+      return await session.prompt(prompt);
+    } finally {
+      await session.close().catch(() => {});
+    }
+  } catch (err) {
+    await opts.eventStore.append(
+      mkEvent({
+        runId: opts.runId,
+        taskId: opts.taskId,
+        kind: "log",
+        level: "warn",
+        text: `web research unavailable: ${(err as Error).message}`,
+        subagent,
+      }),
+    );
+    return zeroPromptUsage();
+  }
+}
+
+function forwardResearchEvent(input: {
+  event: PiBridgeEvent;
+  eventStore: EventStore;
+  runId: string;
+  taskId: string;
+  subagent: string;
+}): void {
+  const base = {
+    runId: input.runId,
+    taskId: input.taskId,
+    subagent: input.subagent,
+  };
+  const e = input.event;
+  if (e.kind === "message_delta") {
+    void input.eventStore.append(mkEvent({ ...base, kind: "message_delta", text: e.text })).catch(() => {});
+    return;
+  }
+  if (e.kind === "tool_call") {
+    void input.eventStore.append(mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input })).catch(() => {});
+    return;
+  }
+  if (e.kind === "tool_result") {
+    void input.eventStore.append(
+      mkEvent({
+        ...base,
+        kind: "tool_result",
+        tool: e.tool,
+        ok: e.ok,
+        ...(e.output !== undefined ? { output: e.output } : {}),
+      }),
+    ).catch(() => {});
+    return;
+  }
+  if (e.kind === "log") {
+    void input.eventStore.append(
+      mkEvent({ ...base, kind: "log", level: e.level, text: e.text }),
+    ).catch(() => {});
+    return;
+  }
+  if (e.kind === "error") {
+    void input.eventStore.append(
+      mkEvent({ ...base, kind: "log", level: "warn", text: e.text }),
+    ).catch(() => {});
+  }
+}
+
+function buildWebResearchPrompt(opts: BrainstormOpts): string {
+  return [
+    "Research external context for this brainstorm task before the main brainstorm agent asks the user questions.",
+    opts.ticketTitle ? `Title: ${opts.ticketTitle}` : "",
+    opts.ticketDescription ? `Description: ${opts.ticketDescription}` : "",
+    "",
+    "Use searxng_search for discovery and searxng_fetch for the most relevant primary sources.",
+    "Prioritize official docs, release notes, package/repo pages, pricing pages, and credible comparisons.",
+    "Write concise findings with source links, maturity signals, and recommended fallback choices.",
+    "Persist findings through write_findings exactly once.",
+  ].filter((line) => line.length > 0).join("\n");
+}
+
+function readWebResearchDigest(cwd: string, taskId: string): string | undefined {
+  const path = brainstormResearchPath(cwd, taskId);
+  if (!existsSync(path)) return undefined;
+  const raw = readFileSync(path, "utf8").trim();
+  if (raw.length === 0) return undefined;
+  return raw.length <= 4_000 ? raw : `${raw.slice(0, 4_000)}\n… (truncated)`;
+}
+
+function zeroPromptUsage(): { costUsd: number; inputTokens: number; outputTokens: number } {
+  return { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+}
+
 function buildNudgeBlock(nudges: PendingNudge[]): string {
   const lines = nudges.map((n) => `- [nudgeId: ${n.nudgeId}] ${n.comment}`).join("\n");
   return `Recent user input (consider before asking your next question):\n${lines}\n\nWhen you call reply_to_user, set inReplyToNudgeId to the bracketed id of the nudge you are responding to.`;
@@ -495,6 +676,7 @@ function buildInitialPrompt(opts: {
   cwd: string;
   title?: string;
   description?: string;
+  researchDigest?: string;
 }): string {
   const parts: string[] = [];
   parts.push(`Begin brainstorming this task.`);
@@ -504,6 +686,12 @@ function buildInitialPrompt(opts: {
   parts.push(
     `Artifacts to author: .harness/${opts.taskId}/design.md and .harness/${opts.taskId}/spec.md.`,
   );
+  if (opts.researchDigest) {
+    parts.push(
+      `External research is available at .harness/${opts.taskId}/brainstorm-research/web-search-researcher.md.`,
+    );
+    parts.push(`Research digest:\n${opts.researchDigest}`);
+  }
   parts.push(
     `Use submit_questions to ask the user everything you need before you start writing. After they answer, fill the artifacts and call mark_ready.`,
   );
@@ -558,12 +746,26 @@ function buildMockEditPrompt(events: JsonlEvent[]): string {
 }
 
 function hasReadyEvent(events: JsonlEvent[]): boolean {
-  return events.some(
-    (e) =>
-      e.kind === "brainstorm_system" &&
-      e["systemKind"] === "status_changed" &&
-      ((e["data"] as { status?: string } | undefined)?.status === "ready"),
+  const latestRevisionIndex = lastIndexWhere(
+    events,
+    (e) => e.kind === "brainstorm_revision_requested",
   );
+  return events.some((e, index) => index > latestRevisionIndex && isReadyStatusEvent(e));
+}
+
+function isReadyStatusEvent(e: JsonlEvent): boolean {
+  return (
+    e.kind === "brainstorm_system" &&
+    e["systemKind"] === "status_changed" &&
+    objectStringField(e["data"], "status") === "ready"
+  );
+}
+
+function objectStringField(value: unknown, key: string): string | null {
+  if (typeof value !== "object" || value === null) return null;
+  const entry = Object.entries(value).find(([entryKey]) => entryKey === key);
+  const fieldValue = entry?.[1];
+  return typeof fieldValue === "string" ? fieldValue : null;
 }
 
 function numField(e: JsonlEvent, key: string): number | null {

@@ -1,5 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Artifact, ArtifactKind, BrainstormMock } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
@@ -69,11 +71,48 @@ const MockPageChoice = Type.Object({
   html: Type.String({ minLength: 1, maxLength: 250_000 }),
 });
 
+const MockMiniature = Type.Union([
+  Type.Object({
+    kind: Type.Literal("rows"),
+    rows: Type.Array(
+      Type.Object({
+        status: Type.Union([
+          Type.Literal("pass"),
+          Type.Literal("fail"),
+          Type.Literal("muted"),
+        ]),
+        label: Type.String({ minLength: 1, maxLength: 80 }),
+        sub: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+        action: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })),
+      }),
+      { minItems: 1, maxItems: 8 },
+    ),
+  }),
+  Type.Object({
+    kind: Type.Literal("grid+drawer"),
+    cells: Type.Array(
+      Type.Object({
+        status: Type.Union([Type.Literal("pass"), Type.Literal("fail")]),
+      }),
+      { minItems: 1, maxItems: 8 },
+    ),
+    drawerTitle: Type.String({ minLength: 1, maxLength: 80 }),
+    diffLines: Type.Array(
+      Type.Object({
+        kind: Type.Union([Type.Literal("plus"), Type.Literal("minus")]),
+      }),
+      { minItems: 1, maxItems: 8 },
+    ),
+    confirm: Type.String({ minLength: 1, maxLength: 40 }),
+  }),
+]);
+
 const MockChoice = Type.Object({
   mockId: SafeSlug,
   title: Type.String({ minLength: 1, maxLength: 120 }),
   summary: Type.String({ minLength: 1, maxLength: 500 }),
   recommended: Type.Boolean(),
+  miniature: Type.Optional(MockMiniature),
   pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
 });
 
@@ -87,6 +126,7 @@ const WriteMockRevisionParams = Type.Object({
   editRequestId: Type.String({ minLength: 1, maxLength: 120 }),
   title: Type.String({ minLength: 1, maxLength: 120 }),
   summary: Type.String({ minLength: 1, maxLength: 500 }),
+  miniature: Type.Optional(MockMiniature),
   pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
 });
 
@@ -252,6 +292,10 @@ export function makeMarkReadyTool(deps: {
         if (missing) return reject(missing);
       }
 
+      if (hasWebResearch(cwd, taskId) && !loaded.design.body.includes("## External research")) {
+        return reject("design.md missing: ## External research");
+      }
+
       const mockManifest = await store.readBrainstormMockManifest(cwd, taskId);
       if (mockManifest.mocks.length > 0) {
         const selected = mockManifest.selectedMockId;
@@ -303,6 +347,12 @@ export function makeMarkReadyTool(deps: {
   };
 }
 
+function hasWebResearch(cwd: string, taskId: string): boolean {
+  return existsSync(
+    join(cwd, ".harness", taskId, "brainstorm-research", "web-search-researcher.md"),
+  );
+}
+
 export function makeSubmitMockChoicesTool(deps: {
   store: ArtifactsStore;
   bus: BrainstormEventBus;
@@ -324,6 +374,7 @@ export function makeSubmitMockChoicesTool(deps: {
           summary: input.summary,
           recommended: input.recommended,
           createdAt: new Date().toISOString(),
+          ...(input.miniature !== undefined ? { miniature: input.miniature } : {}),
           pages: input.pages.map((page) => ({
             pageId: page.pageId,
             title: page.title,
@@ -377,6 +428,7 @@ export function makeWriteMockRevisionTool(deps: {
         recommended: false,
         derivedFrom: params.sourceMockId,
         createdAt: new Date().toISOString(),
+        ...(params.miniature !== undefined ? { miniature: params.miniature } : {}),
         pages: params.pages.map((page) => ({
           pageId: page.pageId,
           title: page.title,

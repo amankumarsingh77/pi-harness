@@ -49,6 +49,13 @@ function makeMock(mockId = "mock-a") {
     summary: "Shows options beside artifacts.",
     recommended: true,
     createdAt: "2026-05-13T00:00:00.000Z",
+    miniature: {
+      kind: "rows" as const,
+      rows: [
+        { status: "fail" as const, label: "phase rail spacing", action: "promote" },
+        { status: "pass" as const, label: "artifact links" },
+      ],
+    },
     pages: [
       {
         pageId: "task-detail",
@@ -130,6 +137,13 @@ describe("brainstorm mock tools", () => {
           title: "Split pane",
           summary: "Shows options beside artifacts.",
           recommended: true,
+          miniature: {
+            kind: "rows",
+            rows: [
+              { status: "fail", label: "phase rail spacing", action: "promote" },
+              { status: "pass", label: "artifact links" },
+            ],
+          },
           pages: [
             {
               pageId: "task-detail",
@@ -155,6 +169,13 @@ describe("brainstorm mock tools", () => {
       mock: {
         mockId: "mock-a",
         recommended: true,
+        miniature: {
+          kind: "rows",
+          rows: [
+            { status: "fail", label: "phase rail spacing", action: "promote" },
+            { status: "pass", label: "artifact links" },
+          ],
+        },
         pages: [
           {
             pageId: "task-detail",
@@ -184,6 +205,13 @@ describe("brainstorm mock tools", () => {
       editRequestId: "mer_1",
       title: "Split pane refined",
       summary: "Narrows the artifact pane.",
+      miniature: {
+        kind: "grid+drawer",
+        cells: [{ status: "fail" }, { status: "pass" }],
+        drawerTitle: "Promote fix",
+        diffLines: [{ kind: "minus" }, { kind: "plus" }],
+        confirm: "Apply",
+      },
       pages: [
         {
           pageId: "task-detail",
@@ -201,6 +229,10 @@ describe("brainstorm mock tools", () => {
       mock: {
         mockId: "mock-a-rev1",
         derivedFrom: "mock-a",
+        miniature: {
+          kind: "grid+drawer",
+          confirm: "Apply",
+        },
       },
     });
     await expect(

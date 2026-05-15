@@ -35,6 +35,7 @@ export const OURS_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "ours") : "";
 
 export type SubagentRole =
   | "phase-driver"
+  | "brainstorm-research"
   | "preflight-research"
   | "post-plan-audit";
 
@@ -91,6 +92,16 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
       "Scout the codebase end-to-end for this ticket. Produce a single findings doc with three sections: Files (every file to be read or modified), Patterns (analogous code with file:line cites), Call paths (how the relevant flows work today).",
     description: "One-pass codebase research: files + patterns + call paths",
   },
+  "web-search-researcher": {
+    name: "web-search-researcher",
+    role: "brainstorm-research",
+    promptPath: resolve(VENDORED_DIR, "web-search-researcher.md"),
+    allowedTools: ["read", "grep", "find", "ls"],
+    invokedBy: ["brainstorm"],
+    framing:
+      "Research external libraries, APIs, pricing, recent approaches, and source-backed alternatives before brainstorm asks the user questions.",
+    description: "Searches the web for current external context",
+  },
   "integration-scanner": {
     name: "integration-scanner",
     role: "preflight-research",
@@ -129,7 +140,6 @@ export const RETIRED_PROMPTS = [
   "test-case-locator",
   "thoughts-analyzer",
   "thoughts-locator",
-  "web-search-researcher",
   "peer-comparator",
   "diff-auditor",
   "proof-capture",

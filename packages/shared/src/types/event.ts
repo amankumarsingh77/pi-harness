@@ -22,6 +22,24 @@ export type BrainstormMockPage = {
   htmlPath: string;
 };
 
+export type BrainstormMockMiniature =
+  | {
+      kind: "rows";
+      rows: ReadonlyArray<{
+        status: "pass" | "fail" | "muted";
+        label: string;
+        sub?: string;
+        action?: string;
+      }>;
+    }
+  | {
+      kind: "grid+drawer";
+      cells: ReadonlyArray<{ status: "pass" | "fail" }>;
+      drawerTitle: string;
+      diffLines: ReadonlyArray<{ kind: "plus" | "minus" }>;
+      confirm: string;
+    };
+
 export type BrainstormMock = {
   mockId: string;
   title: string;
@@ -29,6 +47,7 @@ export type BrainstormMock = {
   recommended: boolean;
   createdAt: string;
   derivedFrom?: string;
+  miniature?: BrainstormMockMiniature;
   pages: BrainstormMockPage[];
 };
 

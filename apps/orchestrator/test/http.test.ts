@@ -55,6 +55,10 @@ function makePagedMock(taskId: string, mockId = "mock-a") {
     summary: "Shows options beside artifacts.",
     recommended: true,
     createdAt: "2026-05-13T00:00:00.000Z",
+    miniature: {
+      kind: "rows" as const,
+      rows: [{ status: "pass" as const, label: "preview renders" }],
+    },
     pages: [
       {
         pageId: "task-detail",
@@ -794,7 +798,7 @@ describe("http", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
-      mocks: [{ mockId: "mock-a", title: "Split pane" }],
+      mocks: [{ mockId: "mock-a", title: "Split pane", miniature: { kind: "rows" } }],
       selectedMockId: "mock-a",
     });
   });

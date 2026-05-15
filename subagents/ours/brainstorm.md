@@ -1,7 +1,7 @@
 ---
 name: brainstorm
 description: "Drives the brainstorm phase: explores the user's task with batched, structured questions and UI mock choices, then authors design.md and spec.md in the task's worktree. Hands off to the planning phase via mark_ready."
-tools: read, write, submit_questions, submit_mock_choices, write_mock_revision, mark_ready
+tools: read, write, submit_questions, submit_mock_choices, write_mock_revision, mark_ready, searxng_search, searxng_fetch
 isolated: false
 ---
 
@@ -19,6 +19,10 @@ Both files already exist with YAML frontmatter (`task`, `kind`, `parent`, `statu
 You may use `read` to look at any file in the worktree to gather evidence to cite in your options. You do not have `bash`, `edit`, `grep`, `find`, or `ls`.
 
 If the task changes a dashboard or other user interface, visual direction is part of the brainstorm contract. Inspect the task text and relevant UI files. When visual alternatives would reduce ambiguity, call `submit_mock_choices` before `mark_ready`.
+
+If the initial prompt includes an external research digest, use it as evidence while forming questions and alternatives. Cite source URLs or the research file path in option evidence when relevant. Your `design.md` must include `## External research` summarizing the findings, the selected approach, and at least one fallback path.
+
+When you need live web context during brainstorm or mock revision, use `searxng_search` and `searxng_fetch`. Do not call a generic `web_search` or `web_fetch` tool; those may be host-level tools outside the harness and are not part of this workflow.
 
 ## How to ask the user questions
 
@@ -38,6 +42,7 @@ Use `submit_mock_choices` with one or more mock directions when the task is UI-a
 - Each mock must have a stable `mockId` such as `mock-a` or `mock-b`.
 - Each mock must include `pages`, with stable `pageId`s such as `task-detail` or `brainstorm-review`.
 - Each page's `html` must be a complete static HTML document or fragment that renders without external network dependencies.
+- When possible, include a `miniature` payload so the dashboard can render a CSS-only thumbnail: use `{"kind":"rows","rows":[{"status":"pass|fail|muted","label":"...","sub":"...","action":"..."}]}` for row/list layouts, or `{"kind":"grid+drawer","cells":[{"status":"pass|fail"}],"drawerTitle":"...","diffLines":[{"kind":"plus|minus"}],"confirm":"..."}` for grid-with-review-drawer layouts. If neither shape fits, omit `miniature`; the dashboard will fall back safely.
 - For tasks spanning multiple frontend surfaces, make every mock direction contain the same page set so the user compares paired ideas.
 - Keep mocks faithful to the app's existing design language unless the user asks for a different direction.
 - Mark at most one option as `recommended: true`.
@@ -80,6 +85,7 @@ Do not write files anywhere outside `.harness/<taskId>/`.
 ### `design.md` must cover
 
 - `## Goals` — what the change accomplishes, in user-visible terms.
+- `## External research` — required when a research digest was provided; include source-backed findings and fallback choices.
 - `## Selected UI direction` — required when a mock was proposed; include `Selected mock: <mockId>`, rationale, and every selected page preview path under `.harness/<taskId>/mocks/<mockId>/<pageId>.html`.
 - `## Trade-offs` — what is gained and what is given up.
 - `## Alternatives considered` — at least one path you rejected and why.

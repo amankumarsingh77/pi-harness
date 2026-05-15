@@ -28,6 +28,30 @@ const BrainstormMockPageSchema = z.object({
   htmlPath: z.string().min(1),
 });
 
+const BrainstormMockMiniatureSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("rows"),
+    rows: z
+      .array(
+        z.object({
+          status: z.enum(["pass", "fail", "muted"]),
+          label: z.string().min(1),
+          sub: z.string().min(1).optional(),
+          action: z.string().min(1).optional(),
+        }),
+      )
+      .min(1)
+      .max(8),
+  }),
+  z.object({
+    kind: z.literal("grid+drawer"),
+    cells: z.array(z.object({ status: z.enum(["pass", "fail"]) })).min(1).max(8),
+    drawerTitle: z.string().min(1),
+    diffLines: z.array(z.object({ kind: z.enum(["plus", "minus"]) })).min(1).max(8),
+    confirm: z.string().min(1),
+  }),
+]);
+
 const BrainstormMockSchema = z.object({
   mockId: SafeSlugSchema,
   title: z.string().min(1),
@@ -35,6 +59,7 @@ const BrainstormMockSchema = z.object({
   recommended: z.boolean(),
   createdAt: z.string().min(1),
   derivedFrom: z.string().min(1).optional(),
+  miniature: BrainstormMockMiniatureSchema.optional(),
   pages: z.array(BrainstormMockPageSchema).min(1).max(6),
 });
 
@@ -49,6 +74,8 @@ const BrainstormMockPageHtmlSchema = z.object({
 });
 
 function toBrainstormMock(value: z.infer<typeof BrainstormMockSchema>): BrainstormMock {
+  const miniature =
+    value.miniature === undefined ? undefined : toBrainstormMiniature(value.miniature);
   return {
     mockId: value.mockId,
     title: value.title,
@@ -56,12 +83,36 @@ function toBrainstormMock(value: z.infer<typeof BrainstormMockSchema>): Brainsto
     recommended: value.recommended,
     createdAt: value.createdAt,
     ...(value.derivedFrom !== undefined ? { derivedFrom: value.derivedFrom } : {}),
+    ...(miniature !== undefined ? { miniature } : {}),
     pages: value.pages.map((page) => ({
       pageId: page.pageId,
       title: page.title,
       ...(page.summary !== undefined ? { summary: page.summary } : {}),
       htmlPath: page.htmlPath,
     })),
+  };
+}
+
+function toBrainstormMiniature(
+  value: z.infer<typeof BrainstormMockMiniatureSchema>,
+): NonNullable<BrainstormMock["miniature"]> {
+  if (value.kind === "rows") {
+    return {
+      kind: "rows",
+      rows: value.rows.map((row) => ({
+        status: row.status,
+        label: row.label,
+        ...(row.sub !== undefined ? { sub: row.sub } : {}),
+        ...(row.action !== undefined ? { action: row.action } : {}),
+      })),
+    };
+  }
+  return {
+    kind: "grid+drawer",
+    cells: value.cells.map((cell) => ({ status: cell.status })),
+    drawerTitle: value.drawerTitle,
+    diffLines: value.diffLines.map((line) => ({ kind: line.kind })),
+    confirm: value.confirm,
   };
 }
 

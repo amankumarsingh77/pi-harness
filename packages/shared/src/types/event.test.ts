@@ -122,6 +122,13 @@ describe("brainstorm mock AgentEvent variants", () => {
         summary: "Keeps choices beside the emerging artifacts.",
         recommended: true,
         createdAt: "2026-05-13T00:00:00.000Z",
+        miniature: {
+          kind: "rows",
+          rows: [
+            { status: "fail", label: "phase rail spacing", action: "promote" },
+            { status: "pass", label: "artifact links" },
+          ],
+        },
         pages: [
           {
             pageId: "task-detail",
@@ -134,6 +141,7 @@ describe("brainstorm mock AgentEvent variants", () => {
     if (e.kind === "brainstorm_mock_proposed") {
       expect(e.mock.mockId).toBe("mock-a");
       expect(e.mock.recommended).toBe(true);
+      expect(e.mock.miniature?.kind).toBe("rows");
     } else {
       expect.fail("expected brainstorm_mock_proposed");
     }

@@ -127,6 +127,14 @@ async function waitForPrompt(adapter: FakeAgentSdkAdapter): Promise<void> {
   throw new Error("bridge never called sdkSession.prompt");
 }
 
+async function waitForPromptCount(adapter: FakeAgentSdkAdapter, count: number): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    if (adapter.state.promptCalls.length >= count) return;
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  throw new Error(`bridge never reached ${count} prompt calls`);
+}
+
 async function driveSubmitQuestions(
   adapter: FakeAgentSdkAdapter,
   questions: { questionId: string; prompt: string; options: { id: string; label: string; recommended: boolean; evidence: string[] }[]; sectionTarget: { artifact: "design" | "spec"; section: string } }[],
@@ -236,6 +244,7 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter.state.promptCalls[0]!.text).toContain("Title: Add login");
     expect(adapter.state.promptCalls[0]!.text).toContain(`.harness/${TASK}/design.md`);
     const toolNames = (adapter.state.createOpts?.customTools ?? []).map((t) => t.name);
+    expect(adapter.state.createOpts?.tools).toEqual(expect.arrayContaining(["read", "write"]));
     expect(toolNames).toEqual(
       expect.arrayContaining([
         "submit_questions",
@@ -243,6 +252,8 @@ describe("runBrainstorm (real-bridge)", () => {
         "write_mock_revision",
         "mark_ready",
         "reply_to_user",
+        "searxng_search",
+        "searxng_fetch",
       ]),
     );
 
@@ -252,6 +263,105 @@ describe("runBrainstorm (real-bridge)", () => {
     );
     const events = jsonl.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(events.filter((e) => e.kind === "brainstorm_question")).toHaveLength(1);
+  });
+
+  it("initial tick: library task runs web research before brainstorm and forwards subagent tool logs", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore, eventStoreAppends } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+      ticketTitle: "Compare auth libraries",
+      ticketDescription: "Research current OAuth library alternatives",
+    });
+
+    await waitForPromptCount(adapter, 1);
+    const researchTools = (adapter.state.createOpts?.customTools ?? []) as Array<{
+      name: string;
+      execute: (
+        id: string,
+        params: unknown,
+        signal: AbortSignal | undefined,
+        onUpdate: undefined,
+        ctx: never,
+      ) => Promise<unknown>;
+    }>;
+    const writeFindings = researchTools.find((t) => t.name === "write_findings");
+    if (!writeFindings) throw new Error("write_findings tool not registered");
+
+    adapter.emit({
+      type: "tool_execution_start",
+      toolName: "searxng_search",
+      args: { query: "oauth libraries node" },
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "tool_execution_end",
+      toolName: "searxng_search",
+      isError: false,
+      result: {
+        details: {
+          ok: true,
+          provider: "searxng",
+          providerUrl: "http://localhost:8888",
+          query: "oauth libraries node",
+          results: [{ title: "OAuth", url: "https://example.com", snippet: "", source: "test" }],
+        },
+      },
+    } as AgentSessionEvent);
+    await writeFindings.execute(
+      "wf1",
+      { body: "## Summary\nUse library A.\n\n## Sources\n- https://example.com" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(4, 4, 0.0002)],
+    } as AgentSessionEvent);
+
+    await waitForPromptCount(adapter, 2);
+    expect(adapter.state.promptCalls[1]!.text).toContain("Research digest");
+    expect(adapter.state.promptCalls[1]!.text).toContain("Use library A");
+
+    await driveSubmitQuestions(adapter, [
+      {
+        questionId: "q-library",
+        prompt: "Pick a library",
+        options: [
+          { id: "a", label: "Library A", recommended: true, evidence: ["https://example.com"] },
+          { id: "b", label: "Library B", recommended: false, evidence: [] },
+        ],
+        sectionTarget: { artifact: "design", section: "External research" },
+      },
+    ]);
+
+    const r = await promise;
+    expect(r.ok).toBe(true);
+    expect(eventStoreAppends).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "tool_call",
+          tool: "searxng_search",
+          subagent: "web-search-researcher",
+        }),
+        expect.objectContaining({
+          kind: "tool_result",
+          tool: "searxng_search",
+          subagent: "web-search-researcher",
+        }),
+      ]),
+    );
   });
 
   it("answers delta: prompt contains every new answer", async () => {
@@ -331,6 +441,50 @@ describe("runBrainstorm (real-bridge)", () => {
     await promise;
 
     expect(adapter.state.promptCalls[0]!.text).toContain("add a perf section");
+    expect(adapter.state.promptCalls[0]!.text).toContain("User requested revisions");
+  });
+
+  it("revision: ready status before the request does not suppress the revision turn", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    const seed = [
+      {
+        ts: "t1",
+        kind: "brainstorm_system",
+        systemKind: "status_changed",
+        data: { status: "ready" },
+      },
+      {
+        ts: "t2",
+        kind: "brainstorm_revision_requested",
+        comment: "add another mock direction",
+      },
+    ];
+    await writeFile(jsonlPath, seed.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+    const adapter = createFakeAdapter();
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+    await waitForPrompt(adapter);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+    await promise;
+
+    expect(adapter.state.promptCalls[0]!.text).toContain("add another mock direction");
     expect(adapter.state.promptCalls[0]!.text).toContain("User requested revisions");
   });
 

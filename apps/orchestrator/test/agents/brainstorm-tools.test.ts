@@ -226,6 +226,21 @@ describe("makeMarkReadyTool", () => {
     expect(result.terminate).toBeUndefined();
   });
 
+  it("requires External research section when brainstorm web research exists", async () => {
+    const { bus } = makeBus();
+    const store = makeStore();
+    await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
+    await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
+    const researchDir = join(cwd, ".harness", TASK, "brainstorm-research");
+    await mkdir(researchDir, { recursive: true });
+    await writeFile(join(researchDir, "web-search-researcher.md"), "findings");
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
+
+    const result = await fakeExecute(tool, {});
+
+    expect(result.details).toEqual({ ok: false, missing: "design.md missing: ## External research" });
+  });
+
   it("reports missing when section heading is present but body is whitespace-only", async () => {
     const { bus } = makeBus();
     const store = makeStore();
