@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { PhaseRail } from "@/components/task-detail/phase-rail";
 import { AgentLog } from "@/components/task-detail/agent-log";
-import type { AgentEvent, Run } from "@pi-harness/shared";
+import {
+  deriveTaskIntervention,
+  TaskInterventionStrip,
+} from "@/components/task-detail/task-intervention";
+import type { BrainstormJsonlEvent } from "@/lib/api";
+import type { AgentEvent, Run, Task } from "@pi-harness/shared";
 
 describe("PhaseRail", () => {
   it("renders all 7 rail steps (Intake + 5 phases + Done)", () => {
@@ -161,3 +166,167 @@ describe("AgentLog", () => {
     expect(screen.getByText(/0 events/)).toBeInTheDocument();
   });
 });
+
+describe("TaskIntervention", () => {
+  it("routes unanswered brainstorm questions to the brainstorm phase page", () => {
+    const intervention = deriveTaskIntervention({
+      task: task({ status: "brainstorming" }),
+      brainstorm: {
+        gate: "running",
+        events: [
+          question({ questionId: "q1", batchId: "b1", prompt: "Choose a workflow" }),
+        ],
+      },
+    });
+
+    expect(intervention).toMatchObject({
+      phase: "brainstorm",
+      title: "Brainstorm needs your answers",
+      href: "/tasks/T-1/brainstorm",
+      cta: "Answer questions",
+    });
+  });
+
+  it("routes unselected brainstorm mocks to the brainstorm phase page", () => {
+    const intervention = deriveTaskIntervention({
+      task: task({ status: "brainstorming" }),
+      brainstorm: {
+        gate: "running",
+        events: [
+          {
+            kind: "brainstorm_mock_proposed",
+            ts: "2026-05-08T14:32:01Z",
+            mock: {
+              mockId: "mock-a",
+              title: "Focused command",
+              summary: "Thin intervention strip",
+              recommended: true,
+              createdAt: "2026-05-08T14:32:01Z",
+              pages: [],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(intervention).toMatchObject({
+      phase: "brainstorm",
+      title: "Brainstorm needs a mock selection",
+      href: "/tasks/T-1/brainstorm",
+      cta: "Select mock",
+    });
+  });
+
+  it("routes brainstorm approval to the brainstorm phase page", () => {
+    const intervention = deriveTaskIntervention({
+      task: task({ status: "brainstorming" }),
+      brainstorm: { gate: "awaiting_user", events: [] },
+    });
+
+    expect(intervention).toMatchObject({
+      phase: "brainstorm",
+      title: "Brainstorm is ready for review",
+      href: "/tasks/T-1/brainstorm",
+      cta: "Review brainstorm",
+    });
+  });
+
+  it("routes plan approval to the plan phase page", () => {
+    const intervention = deriveTaskIntervention({
+      task: task({ status: "planning" }),
+      plan: { gate: "awaiting_user" },
+    });
+
+    expect(intervention).toMatchObject({
+      phase: "plan",
+      title: "Plan is ready for review",
+      href: "/tasks/T-1/plan",
+      cta: "Review plan",
+    });
+  });
+
+  it("routes phase failures to their dedicated phase pages when available", () => {
+    const intervention = deriveTaskIntervention({
+      task: task({ status: "plan_failed" }),
+    });
+
+    expect(intervention).toMatchObject({
+      phase: "plan",
+      title: "Plan needs attention",
+      href: "/tasks/T-1/plan",
+      cta: "Open plan",
+    });
+  });
+
+  it("does not render an intervention for normal running states without required input", () => {
+    expect(
+      deriveTaskIntervention({
+        task: task({ status: "executing" }),
+      }),
+    ).toBeNull();
+  });
+
+  it("renders navigation without workflow mutation buttons", () => {
+    render(
+      <TaskInterventionStrip
+        intervention={{
+          phase: "plan",
+          title: "Plan is ready for review",
+          detail: "Review and approve from the dedicated phase page.",
+          href: "/tasks/T-1/plan",
+          cta: "Review plan",
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Review plan" })).toHaveAttribute(
+      "href",
+      "/tasks/T-1/plan",
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    for (const label of ["Approve", "Cancel", "Retry", "Restart"]) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
+  });
+});
+
+function task(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "T-1",
+    title: "Auth redirect after login on mobile",
+    description: "Preserve the requested URL after login.",
+    status: "executing",
+    workflow: "backend-feature",
+    worktreePath: ".harness/worktrees/T-1",
+    branchName: "pi/T-1",
+    retryCount: 0,
+    priority: "medium",
+    tags: [],
+    phaseModels: {},
+    createdAt: new Date("2026-05-08T14:00:00Z"),
+    updatedAt: new Date("2026-05-08T14:30:00Z"),
+    ...overrides,
+  };
+}
+
+function question(
+  overrides: Partial<Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>>,
+): Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }> {
+  return {
+    kind: "brainstorm_question",
+    ts: "2026-05-08T14:32:01Z",
+    questionId: "q1",
+    batchId: "b1",
+    prompt: "Choose a workflow",
+    options: [
+      {
+        id: "recommended",
+        label: "Backend feature",
+        recommended: true,
+        evidence: ["Existing workflow"],
+      },
+    ],
+    sectionTarget: { artifact: "design", section: "Workflow" },
+    ...overrides,
+  };
+}
