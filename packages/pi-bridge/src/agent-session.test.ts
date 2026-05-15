@@ -218,7 +218,7 @@ describe("createAgentSession", () => {
     expect(usage.costUsd).toBe(0.001);
   });
 
-  it("maxTurns enforced: rejects in-flight prompt and aborts the SDK session", async () => {
+  it("legacy maxTurns option does not abort an in-flight prompt", async () => {
     const adapter = createFakeAdapter();
     const events: PiBridgeEvent[] = [];
     const session = await createAgentSession(
@@ -229,9 +229,14 @@ describe("createAgentSession", () => {
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
-    await expect(p).rejects.toThrow(/maxTurns exceeded/);
-    expect(adapter.state.abortCalls).toBeGreaterThanOrEqual(1);
-    expect(events.some((e) => e.kind === "error")).toBe(true);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(2, 3, 0.001)],
+    } as AgentSessionEvent);
+
+    await expect(p).resolves.toEqual({ inputTokens: 2, outputTokens: 3, costUsd: 0.001 });
+    expect(adapter.state.abortCalls).toBe(0);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
   });
 
   it("auth missing: throws AuthError when SDK rejects on missing credential", async () => {

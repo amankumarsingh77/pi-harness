@@ -44,7 +44,7 @@ describe("schema round-trip", () => {
   });
 
   it("round-trips phase_models with a partial brainstorm override", async () => {
-    const overrides = { brainstorm: { thinkingLevel: "high", maxTurns: 50 } };
+    const overrides = { brainstorm: { thinkingLevel: "high" } };
     const [t] = await db
       .insert(tasks)
       .values({ title: "pm-override", phaseModels: overrides })

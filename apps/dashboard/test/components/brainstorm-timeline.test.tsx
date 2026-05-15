@@ -31,7 +31,7 @@ describe("useBrainstormTimeline", () => {
         kind: "brainstorm_system",
         ts: "2026-05-15T10:00:02.000Z",
         systemKind: "blocked",
-        data: { reason: "max turns" },
+        data: { reason: "provider unavailable" },
       },
     ];
     const live: AgentEvent[] = [

@@ -230,21 +230,21 @@ describe("runPreflight", () => {
     expect(result.results[0]?.error).toContain("completed without writing findings");
   });
 
-  it("passes maxTurns to each preflight session", async () => {
-    const maxTurns: number[] = [];
+  it("does not pass a turn cap to preflight sessions", async () => {
+    const maxTurns: Array<number | undefined> = [];
     const writer = makeFakeWriter({
       onCreate: () => {},
     });
     await runPreflight(
       baseOpts({
         createAgentSession: async (o) => {
-          maxTurns.push(o.maxTurns ?? 0);
+          maxTurns.push(o.maxTurns);
           return writer(o);
         },
       }),
     );
 
-    expect(maxTurns).toEqual(Array.from({ length: N }, () => 12));
+    expect(maxTurns).toEqual(Array.from({ length: N }, () => undefined));
   });
 
   it("times out hanging subagents and aborts their sessions", async () => {

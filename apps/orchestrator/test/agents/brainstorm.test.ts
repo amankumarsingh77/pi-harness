@@ -28,7 +28,6 @@ const PHASE_MODEL: PhaseModelConfig = {
   provider: "anthropic",
   model: "claude-sonnet-4-6",
   thinkingLevel: "medium",
-  maxTurns: 30,
 };
 
 let scratch: string;
@@ -731,12 +730,13 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter2.state.createOpts?.sessionPath).toBe(sessionPath());
   });
 
-  it("maxTurns exceeded → ok:false with structured error", async () => {
+  it("does not fail brainstorm when a legacy maxTurns override is present", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
     const { eventStore } = makeFakes();
     const bus = makeBus(eventStore);
 
     const adapter = createFakeAdapter();
+    const legacyPhaseModel = { ...PHASE_MODEL, maxTurns: 1 };
     const promise = runBrainstorm({
       taskId: TASK,
       runId: "r1",
@@ -744,18 +744,23 @@ describe("runBrainstorm (real-bridge)", () => {
       store,
       bus,
       eventStore: eventStore as never,
-      phaseModel: { ...PHASE_MODEL, maxTurns: 1 },
+      phaseModel: legacyPhaseModel,
       sessionPath: sessionPath(),
       createAgentSession: wireAgentSession(adapter),
     });
     await waitForPrompt(adapter);
-    // Drive two turns: the second exceeds maxTurns=1 and the bridge aborts.
+    // Historical configs may still include maxTurns, but turn count must not
+    // block the agent anymore.
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
 
     const r = await promise;
-    expect(r.ok).toBe(false);
-    expect(r.error).toBe("brainstorm: maxTurns exceeded");
+    expect(r.ok).toBe(true);
+    expect(r.error).toBe("brainstorm: agent ended turn without questions or ready");
   });
 
   it("AuthError → ok:false with provider-tagged error and phase_blocked event", async () => {

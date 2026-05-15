@@ -44,6 +44,8 @@ export type AgentSessionOptions = {
   cwd: string;
   model: { provider: string; model: string };
   thinkingLevel?: ThinkingLevel;
+  // Deprecated no-op. Kept so older orchestrator callers do not break, but
+  // turn-count caps are no longer enforced anywhere in the pipeline.
   maxTurns?: number;
   systemPrompt?: string;
   customTools?: ToolDefinition[];
@@ -167,7 +169,6 @@ export async function createAgentSession(
     settled: boolean;
   };
   let pending: Pending | null = null;
-  const maxTurns = opts.maxTurns;
 
   const settle = (fn: (p: Pending) => void): void => {
     if (!pending || pending.settled) return;
@@ -182,11 +183,6 @@ export async function createAgentSession(
       case "turn_start": {
         if (!pending) return;
         pending.turnCount += 1;
-        if (maxTurns !== undefined && pending.turnCount > maxTurns) {
-          opts.onEvent({ kind: "error", text: "maxTurns exceeded" });
-          void sdkSession.abort().catch(() => {});
-          settle((p) => p.reject(new Error("maxTurns exceeded")));
-        }
         return;
       }
       case "message_update": {

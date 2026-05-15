@@ -995,6 +995,16 @@ describe("http", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("PATCH /api/tasks/:id rejects maxTurns phase model overrides", async () => {
+    const t = await runs.createTask({ title: "pm-max-turns" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload: { phaseModels: { brainstorm: { maxTurns: 50 } } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("PATCH /api/tasks/:id partial override persists exactly as sent", async () => {
     const t = await runs.createTask({ title: "pm-partial" });
     const payload = { phaseModels: { brainstorm: { thinkingLevel: "high" as const } } };

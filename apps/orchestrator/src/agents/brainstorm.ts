@@ -257,7 +257,6 @@ async function runTurn(
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
-      ...(opts.phaseModel.maxTurns !== undefined ? { maxTurns: opts.phaseModel.maxTurns } : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
       tools: ["read", "write"],
@@ -331,18 +330,6 @@ async function runTurn(
     const message = (err as Error).message;
     if (signal?.aborted || message === "aborted") {
       return zeroUsage({ ok: false, ready: false, cancelled: true });
-    }
-    if (message === "maxTurns exceeded") {
-      await opts.bus.publish({
-        kind: "brainstorm_system",
-        systemKind: "blocked",
-        data: { reason: `maxTurns (${opts.phaseModel.maxTurns ?? "default"}) exceeded` },
-      });
-      return zeroUsage({
-        ok: false,
-        ready: false,
-        error: "brainstorm: maxTurns exceeded",
-      });
     }
     await opts.bus.publish({
       kind: "brainstorm_system",
@@ -555,7 +542,6 @@ async function runWebResearchSubagent(
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
-      maxTurns: 12,
       systemPrompt,
       tools: [...def.allowedTools],
       customTools: [

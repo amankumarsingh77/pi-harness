@@ -25,13 +25,12 @@ export const CreateTaskSchema = z.object({
 });
 
 // Partial<PhaseModelConfig>: every field optional so a patch can flip a single
-// knob (e.g. just thinkingLevel) without restating provider/model/maxTurns.
+// knob (e.g. just thinkingLevel) without restating provider/model.
 const PhaseModelOverrideSchema = z
   .object({
     provider: z.string().min(1),
     model: z.string().min(1),
     thinkingLevel: z.enum(THINKING_LEVELS),
-    maxTurns: z.number().int().positive(),
   })
   .partial()
   .strict();

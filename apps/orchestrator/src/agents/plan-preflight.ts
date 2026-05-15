@@ -17,7 +17,6 @@ import { buildTicketDigest } from "./ticket-digest.js";
 export { PREFLIGHT_SUBAGENTS };
 export type PreflightSubagent = string;
 
-export const PREFLIGHT_SUBAGENT_MAX_TURNS = 12;
 export const PREFLIGHT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
@@ -178,7 +177,6 @@ async function runOneSubagent(args: {
         : {}),
       systemPrompt,
       tools: [...def.allowedTools],
-      maxTurns: PREFLIGHT_SUBAGENT_MAX_TURNS,
       customTools: [
         makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
       ],
