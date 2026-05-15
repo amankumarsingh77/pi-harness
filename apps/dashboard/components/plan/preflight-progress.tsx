@@ -22,7 +22,7 @@ export type DotKind = "intake" | "progress" | "done" | "blocked";
 export function deriveKind(
   subagent: string,
   research: Record<string, string | null>,
-  events: PlanJsonlEvent[],
+  events: readonly PlanJsonlEvent[],
 ): DotKind {
   if (research[subagent]) return "done";
   let latest: { sessionId: string; ended: boolean } | null = null;
