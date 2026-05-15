@@ -1,11 +1,17 @@
 import { z } from "zod";
+import { BlastRadiusRefSchema, RequirementRefSchema } from "./blast-radius.js";
 
 const SetupSchema = z.array(z.object({ bash: z.string() })).optional();
+const ScenarioRefsSchema = {
+  requirementRefs: z.array(RequirementRefSchema).optional(),
+  blastRadiusRefs: z.array(BlastRadiusRefSchema).optional(),
+};
 
 const ApiScenarioSchema = z.object({
   id: z.string().min(1),
   type: z.literal("api"),
   name: z.string().min(1),
+  ...ScenarioRefsSchema,
   setup: SetupSchema,
   request: z.object({
     method: z.string(),
@@ -30,6 +36,7 @@ const UiScenarioSchema = z.object({
   id: z.string().min(1),
   type: z.literal("ui"),
   name: z.string().min(1),
+  ...ScenarioRefsSchema,
   setup: SetupSchema,
   steps: z.array(UiStepSchema).min(1),
   expect: z.object({
@@ -42,6 +49,7 @@ const UiVisualScenarioSchema = z.object({
   id: z.string().min(1),
   type: z.literal("ui-visual"),
   name: z.string().min(1),
+  ...ScenarioRefsSchema,
   steps: z.array(UiStepSchema).min(1),
   capture: z.object({
     selector: z.string().optional(),

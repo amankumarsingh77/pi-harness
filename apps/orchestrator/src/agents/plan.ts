@@ -1,13 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import yaml from "js-yaml";
 import type {
   AgentSession,
   AgentSessionOptions,
   PiBridgeEvent,
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
-import type { AgentEvent, PhaseModelConfig } from "@pi-harness/shared";
+import {
+  BlastRadiusFileSchema,
+  type AgentEvent,
+  type PhaseModelConfig,
+} from "@pi-harness/shared";
 import { getSubagent, PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { SUBAGENT_FOOTER } from "./subagent-footer.js";
@@ -95,7 +100,7 @@ export async function runPlan(opts: PlanOpts): Promise<PlanResult> {
   // file exists. The "preflight_complete" event is published once when the
   // last missing findings file lands, so any tick after that goes straight to
   // the planner.
-  if (!isPreflightComplete(opts.cwd, opts.taskId)) {
+  if (!(await isPreflightComplete(opts))) {
     return runPreflightStage(opts);
   }
 
@@ -145,9 +150,10 @@ function buildInitialPrompt(): string {
     "Begin the plan phase.",
     "",
     "1. Read design.md and spec.md from .harness/<this task>/.",
-    `2. Read every file under .harness/<this task>/research/ — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
-    "3. Author plan.md and scenarios.yaml per the protocol in your system prompt.",
-    "4. Call mark_ready when both artifacts are complete and you have cross-checked your citations.",
+    "2. Read blast-radius.yaml from .harness/<this task>/.",
+    `3. Read every file under .harness/<this task>/research/ — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
+    "4. Author plan.md and scenarios.yaml per the protocol in your system prompt.",
+    "5. Call mark_ready when both authored artifacts are complete and you have cross-checked your citations.",
   ].join("\n");
 }
 
@@ -157,9 +163,9 @@ function buildRevisionPrompt(comment: string): string {
     "",
     `> ${comment}`,
     "",
-    "Read your existing plan.md and scenarios.yaml, revise them in place to address the comment, then call mark_ready again.",
+    "Read your existing plan.md, scenarios.yaml, and blast-radius.yaml, revise plan.md/scenarios.yaml in place to address the comment, then call mark_ready again.",
     "",
-    "The research findings under .harness/<task>/research/ have not changed — use them as-is.",
+    "The research findings under .harness/<task>/research/ and blast-radius.yaml have not changed — use them as-is.",
   ].join("\n");
 }
 
@@ -185,8 +191,12 @@ function lastIndexWhere<T>(arr: T[], pred: (e: T) => boolean): number {
   return -1;
 }
 
-function isPreflightComplete(cwd: string, taskId: string): boolean {
-  return missingPreflightFindings(cwd, taskId).length === 0;
+async function isPreflightComplete(opts: PlanOpts): Promise<boolean> {
+  const blastRadius = await opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius");
+  return (
+    missingPreflightFindings(opts.cwd, opts.taskId).length === 0 &&
+    Boolean(blastRadius && isValidBlastRadiusBody(blastRadius.body))
+  );
 }
 
 function missingPreflightFindings(cwd: string, taskId: string): string[] {
@@ -196,6 +206,14 @@ function missingPreflightFindings(cwd: string, taskId: string): string[] {
     if (!existsSync(path)) return true;
     return readFileSync(path, "utf8").trim().length === 0;
   });
+}
+
+function isValidBlastRadiusBody(body: string): boolean {
+  try {
+    return BlastRadiusFileSchema.safeParse(yaml.load(body)).success;
+  } catch {
+    return false;
+  }
 }
 
 async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
@@ -330,7 +348,11 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     };
   }
 
-  const missing = missingPreflightFindings(opts.cwd, opts.taskId);
+  const preflightComplete = await isPreflightComplete(opts);
+  const missing = [
+    ...missingPreflightFindings(opts.cwd, opts.taskId),
+    ...(preflightComplete ? [] : ["blast-radius.yaml"]),
+  ];
   if (missing.length > 0) {
     await opts.bus.publish({
       kind: "plan_system",
@@ -565,12 +587,15 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
   // succeeded inside the prompt without our switch logic seeing it (we
   // don't subscribe to bridge events in the planner stage; the bus does
   // the publishing internally).
-  const [plan, scenarios] = await Promise.all([
+  const [plan, scenarios, blastRadius] = await Promise.all([
     opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
     opts.store.readArtifact(opts.cwd, opts.taskId, "scenarios"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius"),
   ]);
   const ready =
-    plan?.fm.status === "ready" && scenarios?.fm.status === "ready";
+    plan?.fm.status === "ready" &&
+    scenarios?.fm.status === "ready" &&
+    blastRadius?.fm.status === "ready";
 
   return {
     ok: true,

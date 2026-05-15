@@ -15,6 +15,7 @@ export type ScaffoldPlanResult = {
   created: boolean;
   planPath: string;
   scenariosPath: string;
+  blastRadiusPath: string;
 };
 
 // Materialize plan.md + scenarios.yaml inside the worktree at
@@ -30,10 +31,12 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
   const store = new ArtifactsStore();
   const planPath = store.artifactPath(opts.cwd, opts.taskId, "plan");
   const scenariosPath = store.artifactPath(opts.cwd, opts.taskId, "scenarios");
+  const blastRadiusPath = store.artifactPath(opts.cwd, opts.taskId, "blast-radius");
   const dir = store.artifactDir(opts.cwd, opts.taskId);
   const gitignorePath = join(dir, ".gitignore");
 
-  const filesExist = existsSync(planPath) && existsSync(scenariosPath);
+  const filesExist =
+    existsSync(planPath) && existsSync(scenariosPath) && existsSync(blastRadiusPath);
   const ts = new Date().toISOString();
 
   if (!filesExist) {
@@ -63,8 +66,21 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
       // scenarios conforming to ScenarioFileSchema before mark_ready.
       body: "scenarios: []\n",
     };
+    const blastRadius: Artifact = {
+      fm: {
+        task: opts.taskId,
+        kind: "blast-radius",
+        parent: "spec.md",
+        status: "draft",
+        branch: opts.branch,
+        last_updated: ts,
+        last_updated_by: "orchestrator",
+      },
+      body: "items: []\n",
+    };
     await store.writeArtifact(opts.cwd, opts.taskId, plan);
     await store.writeArtifact(opts.cwd, opts.taskId, scenarios);
+    await store.writeArtifact(opts.cwd, opts.taskId, blastRadius);
   }
 
   if (!existsSync(gitignorePath)) {
@@ -76,8 +92,8 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
   const status = await git.status();
   if (status.staged.length > 0) {
     await git.commit(`chore(${opts.taskId}): plan scaffolding`);
-    return { created: true, planPath, scenariosPath };
+    return { created: true, planPath, scenariosPath, blastRadiusPath };
   }
 
-  return { created: false, planPath, scenariosPath };
+  return { created: false, planPath, scenariosPath, blastRadiusPath };
 }

@@ -49,14 +49,16 @@ export function registerPlanRoutes(
         status: task.status,
         plan: null,
         scenarios: null,
+        blastRadius: null,
         research: emptyResearch(),
         events: [],
       };
     }
 
-    const [plan, scenarios, events, gate, research] = await Promise.all([
+    const [plan, scenarios, blastRadius, events, gate, research] = await Promise.all([
       deps.artifacts.readArtifact(cwd, task.id, "plan"),
       deps.artifacts.readArtifact(cwd, task.id, "scenarios"),
+      deps.artifacts.readArtifact(cwd, task.id, "blast-radius"),
       readJsonl(join(cwd, ".harness", task.id, "plan.jsonl")),
       derivePlanGate(cwd, task.id, deps.artifacts),
       readResearch(cwd, task.id),
@@ -67,6 +69,7 @@ export function registerPlanRoutes(
       status: task.status,
       plan,
       scenarios,
+      blastRadius,
       research,
       events,
     };

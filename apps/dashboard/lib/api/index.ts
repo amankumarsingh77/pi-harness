@@ -34,6 +34,7 @@ export type PlanBundle = {
   status: Task["status"];
   plan: Artifact | null;
   scenarios: Artifact | null;
+  blastRadius: Artifact | null;
   research: Record<string, string | null>;
   events: PlanJsonlEvent[];
 };
