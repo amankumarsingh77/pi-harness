@@ -252,8 +252,8 @@ describe("runBrainstorm (real-bridge)", () => {
         "write_mock_revision",
         "mark_ready",
         "reply_to_user",
-        "searxng_search",
-        "searxng_fetch",
+        "pi_web_search",
+        "pi_web_fetch",
       ]),
     );
 
@@ -301,12 +301,12 @@ describe("runBrainstorm (real-bridge)", () => {
 
     adapter.emit({
       type: "tool_execution_start",
-      toolName: "searxng_search",
+      toolName: "pi_web_search",
       args: { query: "oauth libraries node" },
     } as AgentSessionEvent);
     adapter.emit({
       type: "tool_execution_end",
-      toolName: "searxng_search",
+      toolName: "pi_web_search",
       isError: false,
       result: {
         details: {
@@ -352,12 +352,12 @@ describe("runBrainstorm (real-bridge)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: "tool_call",
-          tool: "searxng_search",
+          tool: "pi_web_search",
           subagent: "web-search-researcher",
         }),
         expect.objectContaining({
           kind: "tool_result",
-          tool: "searxng_search",
+          tool: "pi_web_search",
           subagent: "web-search-researcher",
         }),
       ]),

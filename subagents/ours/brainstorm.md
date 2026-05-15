@@ -1,7 +1,7 @@
 ---
 name: brainstorm
 description: "Drives the brainstorm phase: explores the user's task with batched, structured questions and UI mock choices, then authors design.md and spec.md in the task's worktree. Hands off to the planning phase via mark_ready."
-tools: read, write, submit_questions, submit_mock_choices, write_mock_revision, mark_ready, searxng_search, searxng_fetch
+tools: read, write, submit_questions, submit_mock_choices, write_mock_revision, mark_ready, pi_web_search, pi_web_fetch
 isolated: false
 ---
 
@@ -22,7 +22,7 @@ If the task changes a dashboard or other user interface, visual direction is par
 
 If the initial prompt includes an external research digest, use it as evidence while forming questions and alternatives. Cite source URLs or the research file path in option evidence when relevant. Your `design.md` must include `## External research` summarizing the findings, the selected approach, and at least one fallback path.
 
-When you need live web context during brainstorm or mock revision, use `searxng_search` and `searxng_fetch`. Do not call a generic `web_search` or `web_fetch` tool; those may be host-level tools outside the harness and are not part of this workflow.
+When you need live web context during brainstorm or mock revision, use `pi_web_search` and `pi_web_fetch`. Do not call a generic `web_search` or `web_fetch` tool; those may be host-level tools outside the harness and are not part of this workflow.
 
 ## How to ask the user questions
 
