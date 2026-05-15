@@ -31,6 +31,20 @@ type MessageDeltaGroup = {
   readonly last: MessageDeltaEvent;
   readonly count: number;
 };
+type MockEvent = Extract<
+  BrainstormJsonlEvent,
+  { kind: "brainstorm_mock_proposed" | "brainstorm_mock_revised" }
+>;
+type MockEventEntry = {
+  readonly ts: string;
+  readonly mock: BrainstormMock;
+  readonly editRequestId?: string;
+};
+type MockSet = {
+  readonly setId: string;
+  readonly ts: string;
+  readonly entries: ReadonlyArray<MockEventEntry>;
+};
 
 export type AnswerValue = {
   readonly optionId?: string;
@@ -288,11 +302,17 @@ export function projectAgentEvent(event: AgentEvent): BrainstormJsonlEvent | nul
           : {}),
       };
     case "brainstorm_mock_proposed":
-      return { kind: "brainstorm_mock_proposed", ts, mock: event.mock };
+      return {
+        kind: "brainstorm_mock_proposed",
+        ts,
+        ...(event.mockSetId !== undefined ? { mockSetId: event.mockSetId } : {}),
+        mock: event.mock,
+      };
     case "brainstorm_mock_revised":
       return {
         kind: "brainstorm_mock_revised",
         ts,
+        ...(event.mockSetId !== undefined ? { mockSetId: event.mockSetId } : {}),
         mock: event.mock,
         editRequestId: event.editRequestId,
       };
@@ -430,43 +450,84 @@ function answerByQuestionId(
   }, new Map<string, { optionId?: string; optionIds?: string[]; freeText?: string }>());
 }
 
-function createTimelineMocks(
+export function createTimelineMocks(
   events: ReadonlyArray<BrainstormJsonlEvent>,
   taskStatus: TaskStatus,
 ): TimelineMock[] {
   const selected = latestSelectedMockId(events);
   const lockedIds = lockedMockIds(events);
-  const mockEvents = latestMockEvents(events);
-  return [...mockEvents.values()]
+  const mockEvents = latestMockSetEvents(events);
+  const activeSelected = selected !== null && mockEvents.some((entry) => entry.mock.mockId === selected);
+  return [...mockEvents]
     .sort(compareByTs)
     .map((entry) => ({
       ts: entry.ts,
       mock: entry.mock,
       locked: taskStatus !== "brainstorming" || lockedIds.has(entry.mock.mockId),
       selected: selected === entry.mock.mockId,
-      dimmed: selected !== null && selected !== entry.mock.mockId,
+      dimmed: activeSelected && selected !== entry.mock.mockId,
       ...(entry.editRequestId !== undefined ? { editRequestId: entry.editRequestId } : {}),
     }));
 }
 
-function latestMockEvents(events: ReadonlyArray<BrainstormJsonlEvent>): Map<
-  string,
-  { ts: string; mock: BrainstormMock; editRequestId?: string }
-> {
-  const byId = new Map<string, { ts: string; mock: BrainstormMock; editRequestId?: string }>();
-  for (const event of events) {
-    if (event.kind === "brainstorm_mock_proposed") {
-      byId.set(event.mock.mockId, { ts: event.ts, mock: event.mock });
+function latestMockSetEvents(
+  events: ReadonlyArray<BrainstormJsonlEvent>,
+): ReadonlyArray<MockEventEntry> {
+  return createMockSets(events).at(-1)?.entries ?? [];
+}
+
+function createMockSets(events: ReadonlyArray<BrainstormJsonlEvent>): ReadonlyArray<MockSet> {
+  const sets = new Map<string, { ts: string; entries: Map<string, MockEventEntry> }>();
+  let legacySetIndex = 0;
+  let currentLegacySetId: string | null = null;
+
+  for (const event of [...events].sort(compareByTs)) {
+    if (!isMockEvent(event)) {
+      currentLegacySetId = null;
+      continue;
     }
-    if (event.kind === "brainstorm_mock_revised") {
-      byId.set(event.mock.mockId, {
+
+    const setId: string =
+      event.mockSetId ?? currentLegacySetId ?? `legacy:${legacySetIndex + 1}`;
+    if (event.mockSetId === undefined && currentLegacySetId === null) {
+      legacySetIndex += 1;
+      currentLegacySetId = setId;
+    }
+    if (event.mockSetId !== undefined) {
+      currentLegacySetId = null;
+    }
+
+    const existing = sets.get(setId);
+    const entry = mockEventEntry(event);
+    if (existing) {
+      existing.entries.set(event.mock.mockId, entry);
+    } else {
+      sets.set(setId, {
         ts: event.ts,
-        mock: event.mock,
-        editRequestId: event.editRequestId,
+        entries: new Map([[event.mock.mockId, entry]]),
       });
     }
   }
-  return byId;
+
+  return [...sets.entries()]
+    .map(([setId, set]): MockSet => ({
+      setId,
+      ts: set.ts,
+      entries: [...set.entries.values()].sort(compareByTs),
+    }))
+    .sort(compareByTs);
+}
+
+function isMockEvent(event: BrainstormJsonlEvent): event is MockEvent {
+  return event.kind === "brainstorm_mock_proposed" || event.kind === "brainstorm_mock_revised";
+}
+
+function mockEventEntry(event: MockEvent): MockEventEntry {
+  return {
+    ts: event.ts,
+    mock: event.mock,
+    ...(event.kind === "brainstorm_mock_revised" ? { editRequestId: event.editRequestId } : {}),
+  };
 }
 
 function lockedMockIds(events: ReadonlyArray<BrainstormJsonlEvent>): Set<string> {
@@ -556,7 +617,7 @@ function createFocusItems({
       .filter((event): event is RevisionEvent => event.kind === "brainstorm_revision_requested")
       .map(revisionFocusItem),
   ];
-  const mockTs = firstMockTs(events);
+  const mockTs = mocks[0]?.ts ?? null;
   if (mockTs !== null && mocks.length > 0) {
     items.push({ kind: "mocks", ts: mockTs, mocks });
   }
@@ -602,17 +663,6 @@ function createArtifactAnchors(
     }
   }
   return anchors;
-}
-
-function firstMockTs(events: ReadonlyArray<BrainstormJsonlEvent>): string | null {
-  const mockEvent = events.find(
-    (event) =>
-      event.kind === "brainstorm_mock_proposed" ||
-      event.kind === "brainstorm_mock_revised" ||
-      event.kind === "brainstorm_mock_selected" ||
-      event.kind === "brainstorm_mock_edit_requested",
-  );
-  return mockEvent?.ts ?? null;
 }
 
 function domainRailRow(event: BrainstormJsonlEvent): RailRow {

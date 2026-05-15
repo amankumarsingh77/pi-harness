@@ -166,6 +166,7 @@ describe("brainstorm mock tools", () => {
     expect(eventAppends).toHaveLength(1);
     expect(eventAppends[0]).toMatchObject({
       kind: "brainstorm_mock_proposed",
+      mockSetId: expect.stringMatching(/^mset_/),
       mock: {
         mockId: "mock-a",
         recommended: true,
@@ -191,6 +192,48 @@ describe("brainstorm mock tools", () => {
     await expect(
       store.readBrainstormMockHtml(cwd, TASK, "mock-a", "task-detail"),
     ).resolves.toContain("Task detail");
+  });
+
+  it("submit_mock_choices publishes one mockSetId for every mock in a tool call", async () => {
+    const store = new ArtifactsStore();
+    const { bus, eventAppends } = makeBus();
+    const tool = makeSubmitMockChoicesTool({ store, bus, cwd, taskId: TASK });
+
+    await fakeExecute(tool, {
+      mocks: [
+        {
+          mockId: "mock-a",
+          title: "Split pane",
+          summary: "Shows options beside artifacts.",
+          recommended: true,
+          pages: [{ pageId: "task-detail", title: "Task detail", html: "<h1>A</h1>" }],
+        },
+        {
+          mockId: "mock-b",
+          title: "Stacked review",
+          summary: "Stacks choices above artifacts.",
+          recommended: false,
+          pages: [{ pageId: "task-detail", title: "Task detail", html: "<h1>B</h1>" }],
+        },
+      ],
+    });
+    await fakeExecute(tool, {
+      mocks: [
+        {
+          mockId: "mock-c",
+          title: "Focused review",
+          summary: "Narrows the active review.",
+          recommended: true,
+          pages: [{ pageId: "task-detail", title: "Task detail", html: "<h1>C</h1>" }],
+        },
+      ],
+    });
+
+    const firstSetId = eventAppends[0]?.["mockSetId"];
+    expect(firstSetId).toEqual(expect.stringMatching(/^mset_/));
+    expect(eventAppends[1]?.["mockSetId"]).toBe(firstSetId);
+    expect(eventAppends[2]?.["mockSetId"]).toEqual(expect.stringMatching(/^mset_/));
+    expect(eventAppends[2]?.["mockSetId"]).not.toBe(firstSetId);
   });
 
   it("write_mock_revision creates a derived mock revision and publishes it", async () => {
@@ -226,6 +269,7 @@ describe("brainstorm mock tools", () => {
     expect(eventAppends[0]).toMatchObject({
       kind: "brainstorm_mock_revised",
       editRequestId: "mer_1",
+      mockSetId: expect.stringMatching(/^mset_/),
       mock: {
         mockId: "mock-a-rev1",
         derivedFrom: "mock-a",

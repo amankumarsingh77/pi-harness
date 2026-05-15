@@ -156,10 +156,12 @@ export type AgentEvent =
     })
   | (AgentEventBase & {
       kind: "brainstorm_mock_proposed";
+      mockSetId?: string;
       mock: BrainstormMock;
     })
   | (AgentEventBase & {
       kind: "brainstorm_mock_revised";
+      mockSetId?: string;
       mock: BrainstormMock;
       editRequestId: string;
     })

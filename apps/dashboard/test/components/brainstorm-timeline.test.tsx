@@ -128,6 +128,104 @@ describe("useBrainstormTimeline", () => {
     expect(result.current.artifactAnchors.get("design")?.commitSha).toBe("abc123");
   });
 
+  it("shows only the latest explicit mock set as active choices", () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:00.000Z",
+        mockSetId: "mset_1",
+        mock: mock("mock-a", "Original A"),
+      },
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:01.000Z",
+        mockSetId: "mset_1",
+        mock: mock("mock-b", "Original B"),
+      },
+      {
+        kind: "brainstorm_mock_selected",
+        ts: "2026-05-15T10:00:02.000Z",
+        mockId: "mock-a",
+      },
+      {
+        kind: "brainstorm_user_nudge",
+        ts: "2026-05-15T10:00:03.000Z",
+        nudgeId: "n1",
+        comment: "Try sharper alternatives",
+        consumed: true,
+      },
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:04.000Z",
+        mockSetId: "mset_2",
+        mock: mock("mock-c", "New C"),
+      },
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:05.000Z",
+        mockSetId: "mset_2",
+        mock: mock("mock-d", "New D"),
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useBrainstormTimeline({
+        initialEvents: events,
+        liveEvents: [],
+        connected: true,
+        taskStatus: "brainstorming",
+        gate: "running",
+        runId: "r1",
+        nowMs: Date.now(),
+      }),
+    );
+
+    expect(result.current.mocks.map((entry) => entry.mock.mockId)).toEqual(["mock-c", "mock-d"]);
+    expect(result.current.mocks.every((entry) => entry.dimmed === false)).toBe(true);
+    expect(result.current.focusItems.filter((item) => item.kind === "mocks")).toHaveLength(1);
+  });
+
+  it("treats legacy contiguous proposal groups as separate active mock sets", () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:00.000Z",
+        mock: mock("mock-a", "Original A"),
+      },
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:01.000Z",
+        mock: mock("mock-b", "Original B"),
+      },
+      {
+        kind: "brainstorm_user_nudge",
+        ts: "2026-05-15T10:00:02.000Z",
+        nudgeId: "n1",
+        comment: "Try sharper alternatives",
+        consumed: true,
+      },
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-15T10:00:03.000Z",
+        mock: mock("mock-c", "New C"),
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useBrainstormTimeline({
+        initialEvents: events,
+        liveEvents: [],
+        connected: true,
+        taskStatus: "brainstorming",
+        gate: "running",
+        runId: "r1",
+        nowMs: Date.now(),
+      }),
+    );
+
+    expect(result.current.mocks.map((entry) => entry.mock.mockId)).toEqual(["mock-c"]);
+  });
+
   it("keeps generic tool logs in the rail and answered questions in chronological focus history", () => {
     const events: BrainstormJsonlEvent[] = [
       {
