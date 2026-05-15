@@ -158,11 +158,13 @@ export type BrainstormJsonlEvent =
   | {
       kind: "brainstorm_mock_proposed";
       ts: string;
+      mockSetId?: string;
       mock: BrainstormMock;
     }
   | {
       kind: "brainstorm_mock_revised";
       ts: string;
+      mockSetId?: string;
       mock: BrainstormMock;
       editRequestId: string;
     }

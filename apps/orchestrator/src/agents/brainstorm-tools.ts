@@ -366,6 +366,7 @@ export function makeSubmitMockChoicesTool(deps: {
       "Write one or more static HTML brainstorm mock choices and publish them for the user to open, edit, or choose. After calling this, halt your turn.",
     parameters: SubmitMockChoicesParams,
     async execute(_id, params) {
+      const mockSetId = `mset_${randomUUID()}`;
       const proposed: string[] = [];
       for (const input of params.mocks) {
         const mock: BrainstormMock = {
@@ -390,6 +391,7 @@ export function makeSubmitMockChoicesTool(deps: {
         );
         await deps.bus.publish({
           kind: "brainstorm_mock_proposed",
+          mockSetId,
           mock,
         });
         proposed.push(input.mockId);
@@ -417,6 +419,7 @@ export function makeWriteMockRevisionTool(deps: {
     parameters: WriteMockRevisionParams,
     async execute(_id, params) {
       const manifest = await deps.store.readBrainstormMockManifest(deps.cwd, deps.taskId);
+      const mockSetId = `mset_${randomUUID()}`;
       const mockId = nextRevisionMockId(
         params.sourceMockId,
         manifest.mocks.map((mock) => mock.mockId),
@@ -444,6 +447,7 @@ export function makeWriteMockRevisionTool(deps: {
       );
       await deps.bus.publish({
         kind: "brainstorm_mock_revised",
+        mockSetId,
         mock,
         editRequestId: params.editRequestId,
       });

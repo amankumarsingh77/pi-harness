@@ -13,6 +13,7 @@ import {
 import { QuestionBatch } from "./question-card";
 import { NudgeInput } from "./nudge-input";
 import { ActivityLine, deriveActivity, type ActivityState } from "./activity-line";
+import { createTimelineMocks } from "./use-brainstorm-timeline";
 
 // Renders the brainstorm transcript from JSONL events. Live updates: the
 // page passes the server-rendered snapshot as `initialEvents`, and we
@@ -127,6 +128,9 @@ export function ChatPanel({
     string,
     { ts: string; mock: BrainstormMock; editRequestId?: string }
   >();
+  const activeMockIds = new Set(
+    createTimelineMocks(events, taskStatus).map((entry) => entry.mock.mockId),
+  );
 
   for (const e of events) {
     if (e.kind === "brainstorm_question") {
@@ -217,6 +221,7 @@ export function ChatPanel({
     }
   }
   for (const mockEvent of mockEventById.values()) {
+    if (!activeMockIds.has(mockEvent.mock.mockId)) continue;
     timeline.push({ kind: "mock", ...mockEvent });
   }
   for (const b of batchById.values()) {
@@ -668,11 +673,17 @@ function projectAgentEvent(e: AgentEvent): BrainstormJsonlEvent | null {
           : {}),
       };
     case "brainstorm_mock_proposed":
-      return { kind: "brainstorm_mock_proposed", ts, mock: e.mock };
+      return {
+        kind: "brainstorm_mock_proposed",
+        ts,
+        ...(e.mockSetId !== undefined ? { mockSetId: e.mockSetId } : {}),
+        mock: e.mock,
+      };
     case "brainstorm_mock_revised":
       return {
         kind: "brainstorm_mock_revised",
         ts,
+        ...(e.mockSetId !== undefined ? { mockSetId: e.mockSetId } : {}),
         mock: e.mock,
         editRequestId: e.editRequestId,
       };
