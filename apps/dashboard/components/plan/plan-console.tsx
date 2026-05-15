@@ -15,6 +15,7 @@ export function PlanConsole({
   headerStatus,
   iconKind,
   plan,
+  blastRadius,
   scenarios,
   research,
   planEvents,
@@ -28,6 +29,7 @@ export function PlanConsole({
   readonly headerStatus: string;
   readonly iconKind: "intake" | "progress" | "review" | "done" | "blocked";
   readonly plan: Artifact | null;
+  readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
   readonly research: Record<string, string | null>;
   readonly planEvents: readonly PlanJsonlEvent[];
@@ -83,7 +85,11 @@ export function PlanConsole({
           liveEvents={liveEvents}
         />
 
-        <PlanArtifactConsole plan={plan} scenarios={scenarios} />
+        <PlanArtifactConsole
+          plan={plan}
+          blastRadius={blastRadius}
+          scenarios={scenarios}
+        />
 
         <PlannerLogPanel defaultOpen={plannerLogDefaultOpen} />
       </div>

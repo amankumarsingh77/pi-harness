@@ -77,6 +77,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           research={bundle.research}
           planEvents={bundle.events}
           plan={bundle.plan}
+          blastRadius={bundle.blastRadius}
           scenarios={bundle.scenarios}
           plannerLogDefaultOpen={plannerLogDefaultOpen}
         />

@@ -6,19 +6,29 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { StatusIcon } from "@/components/kanban/status-icon";
 
-type ArtifactKind = "plan" | "scenarios";
+type ArtifactKind = "plan" | "blastRadius" | "scenarios";
 type ArtifactTab = "rendered" | "raw" | "diff";
 
 export function PlanArtifactConsole({
   plan,
+  blastRadius,
   scenarios,
 }: {
   readonly plan: Artifact | null;
+  readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
 }) {
   const [expanded, setExpanded] = useState<ArtifactKind | null>(null);
   const [tab, setTab] = useState<ArtifactTab>("rendered");
-  const expandedArtifact = expanded === "plan" ? plan : expanded === "scenarios" ? scenarios : null;
+  const expandedArtifact =
+    expanded === "plan"
+      ? plan
+      : expanded === "blastRadius"
+        ? blastRadius
+        : expanded === "scenarios"
+          ? scenarios
+          : null;
+  const expandedTitle = expanded ? artifactTitle(expanded) : "";
 
   useEffect(() => {
     if (expanded === null) return;
@@ -32,7 +42,7 @@ export function PlanArtifactConsole({
   return (
     <>
       <section
-        className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]"
+        className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.72fr)_minmax(0,0.72fr)]"
         aria-label="Main artifacts"
       >
         <ArtifactPane
@@ -41,6 +51,15 @@ export function PlanArtifactConsole({
           artifact={plan}
           onExpand={() => {
             setExpanded("plan");
+            setTab("rendered");
+          }}
+        />
+        <ArtifactPane
+          kind="blastRadius"
+          title="blast-radius.yaml"
+          artifact={blastRadius}
+          onExpand={() => {
+            setExpanded("blastRadius");
             setTab("rendered");
           }}
         />
@@ -64,13 +83,13 @@ export function PlanArtifactConsole({
             className="absolute left-1/2 top-1/2 max-h-[min(82vh,760px)] w-[min(980px,calc(100vw-34px))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[12px] border border-line-strong bg-card shadow-[0_24px_90px_rgba(0,0,0,0.56)]"
             role="dialog"
             aria-modal="true"
-            aria-label={`${expanded === "plan" ? "plan.md" : "scenarios.yaml"} expanded artifact`}
+            aria-label={`${expandedTitle} expanded artifact`}
             onClick={(event) => event.stopPropagation()}
           >
             <header className="flex items-center gap-3 border-b border-line px-4 py-3.5">
               <div className="min-w-0">
                 <div className="text-[14px] font-semibold text-fg">
-                  {expanded === "plan" ? "plan.md" : "scenarios.yaml"}
+                  {expandedTitle}
                 </div>
                 <div className="mt-0.5 font-mono text-[10.5px] text-fg-mute">
                   expanded artifact · rendered / raw / diff
@@ -153,14 +172,12 @@ function ArtifactPreview({
   if (!artifact) {
     return (
       <p className="font-mono text-[12px] italic text-fg-mute">
-        {kind === "plan"
-          ? "plan.md has not been authored yet"
-          : "scenarios.yaml has not been authored yet"}
+        {artifactTitle(kind)} has not been authored yet
       </p>
     );
   }
 
-  if (kind === "scenarios") {
+  if (kind !== "plan") {
     return <pre className="whitespace-pre font-mono text-[11.5px] leading-[1.58] text-fg-body">{artifact.body.trim()}</pre>;
   }
 
@@ -196,7 +213,7 @@ function ArtifactModalBody({
     );
   }
 
-  if (tab === "raw" || kind === "scenarios") {
+  if (tab === "raw" || kind !== "plan") {
     return (
       <pre className="overflow-x-auto whitespace-pre rounded border border-line bg-bg p-3 font-mono text-[12px] leading-[1.58] text-fg-body">
         {artifact.body.trim()}
@@ -209,6 +226,12 @@ function ArtifactModalBody({
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.body.trim()}</ReactMarkdown>
     </div>
   );
+}
+
+function artifactTitle(kind: ArtifactKind) {
+  if (kind === "plan") return "plan.md";
+  if (kind === "blastRadius") return "blast-radius.yaml";
+  return "scenarios.yaml";
 }
 
 function ArtifactTabButton({

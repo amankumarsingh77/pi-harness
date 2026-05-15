@@ -19,6 +19,7 @@ export function PlanBody({
   research,
   planEvents,
   plan,
+  blastRadius,
   scenarios,
   plannerLogDefaultOpen,
 }: {
@@ -30,6 +31,7 @@ export function PlanBody({
   research: Record<string, string | null>;
   planEvents: PlanJsonlEvent[];
   plan: Artifact | null;
+  blastRadius: Artifact | null;
   scenarios: Artifact | null;
   plannerLogDefaultOpen: boolean;
 }) {
@@ -43,6 +45,7 @@ export function PlanBody({
       headerStatus={headerStatus}
       iconKind={iconKind}
       plan={plan}
+      blastRadius={blastRadius}
       scenarios={scenarios}
       research={research}
       planEvents={planEvents}

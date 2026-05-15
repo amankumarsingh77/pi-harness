@@ -22,6 +22,7 @@ describe("PlanConsole", () => {
     expect(screen.getByRole("region", { name: "Main artifacts" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "planner agent log" })).toBeInTheDocument();
     expect(screen.getAllByText("plan.md").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("blast-radius.yaml").length).toBeGreaterThan(0);
     expect(screen.getAllByText("scenarios.yaml").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Approve plan" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
@@ -52,7 +53,7 @@ describe("PlanConsole", () => {
     expect(screen.getByText(/"kind": "tool_call"/)).toBeInTheDocument();
   });
 
-  it("opens expanded artifact modals for plan and scenarios", () => {
+  it("opens expanded artifact modals for plan, blast radius, and scenarios", () => {
     renderConsole();
 
     const mainArtifacts = screen.getByRole("region", { name: "Main artifacts" });
@@ -66,6 +67,11 @@ describe("PlanConsole", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close artifact modal" }));
 
     fireEvent.click(expandButtons[1]!);
+    expect(screen.getByRole("dialog", { name: "blast-radius.yaml expanded artifact" })).toBeInTheDocument();
+    expect(screen.getAllByText(/BR-001/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Close artifact modal" }));
+
+    fireEvent.click(expandButtons[2]!);
     expect(screen.getByRole("dialog", { name: "scenarios.yaml expanded artifact" })).toBeInTheDocument();
     expect(screen.getAllByText(/task-detail-inspectors/).length).toBeGreaterThan(0);
   });
@@ -103,6 +109,7 @@ function renderConsole() {
         headerStatus="in progress"
         iconKind="progress"
         plan={artifact("plan", planBody)}
+        blastRadius={artifact("blast-radius", blastRadiusBody)}
         scenarios={artifact("scenarios", scenariosBody)}
         research={{
           "codebase-scout": "# Scout\n\nNo backend change needed.",
@@ -149,6 +156,11 @@ const scenariosBody = `scenarios:
     name: Inspectors open without mutation actions
 `;
 
+const blastRadiusBody = `items:
+  - id: BR-001
+    summary: Plan page shell and artifacts change together
+`;
+
 function task(): Task {
   return {
     id: "T-1",
@@ -183,12 +195,12 @@ function run(): Run {
   };
 }
 
-function artifact(kind: "plan" | "scenarios", body: string): Artifact {
+function artifact(kind: "plan" | "blast-radius" | "scenarios", body: string): Artifact {
   return {
     fm: {
       task: "T-1",
       kind,
-      parent: kind === "scenarios" ? "plan.md" : null,
+      parent: kind === "scenarios" || kind === "blast-radius" ? "plan.md" : null,
       status: "ready",
       branch: "codex/task-detail-redesign",
       last_updated: "2026-05-15T10:04:00Z",
