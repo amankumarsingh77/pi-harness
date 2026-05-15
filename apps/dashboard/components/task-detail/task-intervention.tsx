@@ -153,23 +153,37 @@ export function TaskInterventionStrip({
   readonly intervention: TaskIntervention;
 }) {
   return (
-    <section className="flex items-center gap-3.5 border-b border-line bg-card px-6 py-3">
+    <section
+      className="mb-[22px] grid grid-cols-1 items-center gap-[18px] rounded-[9px] border px-3.5 py-[13px] md:grid-cols-[minmax(0,1fr)_auto]"
+      style={{
+        borderColor: "rgba(242,201,76,0.34)",
+        background:
+          "linear-gradient(90deg, rgba(242,201,76,0.1), transparent 54%), rgba(255,255,255,0.018)",
+      }}
+      aria-label="Required user intervention"
+    >
+      <div className="flex min-w-0 items-center gap-3">
       <span
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line bg-bg text-st-review"
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-st-review"
+        style={{
+          borderColor: "rgba(242,201,76,0.42)",
+          background: "rgba(242,201,76,0.1)",
+        }}
       >
         <StatusIcon kind="review" size={14} />
       </span>
       <div className="min-w-0 flex-1 leading-[1.45]">
-        <div className="text-[13px] font-semibold tracking-[-0.01em] text-fg">
+        <div className="text-[13px] font-semibold text-fg">
           {intervention.title}
         </div>
-        <div className="mt-0.5 truncate font-mono text-[11.5px] text-fg-mute">
+        <div className="mt-0.5 truncate font-mono text-[11px] text-fg-mute">
           {intervention.detail}
         </div>
       </div>
+      </div>
       <Link
         href={intervention.href as Route}
-        className="rounded-md border border-line bg-transparent px-3 py-1.5 text-[12.5px] text-fg-body transition-colors hover:border-line-hover hover:bg-white/[0.03]"
+        className="inline-flex h-[31px] items-center justify-center rounded-[7px] bg-st-review px-3 text-[12px] font-semibold text-[#12100a] transition hover:-translate-y-px hover:brightness-105"
       >
         {intervention.cta} <span aria-hidden="true">→</span>
       </Link>

@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Topbar } from "@/components/topbar";
-import { PhaseRail } from "@/components/task-detail/phase-rail";
-import { AgentLog } from "@/components/task-detail/agent-log";
-import { RunContext } from "@/components/task-detail/run-context";
-import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
-import { TaskCostStrip } from "@/components/task-detail/task-cost-strip";
+import { TaskActivityPanel } from "@/components/task-detail/task-activity-panel";
+import {
+  type ArtifactSummary,
+  TaskDetailInspectors,
+} from "@/components/task-detail/task-detail-inspectors";
+import { TaskDetailShell } from "@/components/task-detail/task-detail-shell";
+import { TaskFactsPanel } from "@/components/task-detail/task-facts-panel";
+import { TaskPhaseStrip } from "@/components/task-detail/task-phase-strip";
 import {
   deriveTaskIntervention,
   TaskInterventionStrip,
@@ -16,16 +18,17 @@ import { ApiError } from "@/lib/api";
 import { orchestrator } from "@/lib/server/api";
 
 /**
- * Task detail page. Layout (top → bottom):
+ * Task detail page. Layout (top → bottom), aligned to:
+ * docs/mocks/task-detail-focused-command-2026-05-16.html
  *
  *   topbar           shared with kanban
- *   head             breadcrumb + title + read-only telemetry
- *   intervention     optional link to the phase page that needs input
- *   phase-rail       7-step rail (steps are clickable into sub-pages)
- *   body grid        live agent log | run-context sidebar
+ *   focused shell    breadcrumb + title + metadata + read-only inspector controls
+ *   intervention     optional thin link to the phase page that needs input
+ *   phase strip      compact 7-step phase surface
+ *   panels           latest activity | task facts
  *
- * `?run=<id>` selects which run's events to display in the agent log.
- * Without it, the latest run is shown.
+ * `?run=<id>` selects which run is inspected in read-only drawers/modals.
+ * Workflow decisions remain on phase pages, never on this detail page.
  */
 
 export async function generateMetadata({
@@ -74,6 +77,7 @@ export default async function TaskDetailPage({
   ]);
 
   const liveRun = runs.find((r) => r.status === "running") ?? null;
+  const artifactSummaries = buildArtifactSummaries(task, runs);
 
   return (
     <>
@@ -84,56 +88,34 @@ export default async function TaskDetailPage({
         branch="main"
       />
 
-      <Head task={task} runs={runs} liveRunId={liveRun?.id ?? null} />
-      {intervention && <TaskInterventionStrip intervention={intervention} />}
-      <PhaseRail runs={runs} taskId={task.id} />
-
-      <main className="grid min-h-[calc(100vh-48px-64px-100px)] grid-cols-[1fr_320px] gap-0">
-        <section className="flex min-w-0 flex-col border-r border-line">
-          <AgentLog
+      <TaskDetailShell
+        task={task}
+        runs={runs}
+        liveRunId={liveRun?.id ?? null}
+        inspectorControls={
+          <TaskDetailInspectors
             events={events}
+            files={files}
+            artifactSummaries={artifactSummaries}
             runId={selectedRun?.id ?? "—"}
             live={liveRun !== null && liveRun.id === selectedRun?.id}
           />
-        </section>
-        <RunContext
-          task={task}
-          runs={runs}
-          files={files}
-          {...(selectedRun ? { selectedRunId: selectedRun.id } : {})}
-        />
-      </main>
-    </>
-  );
-}
+        }
+      >
+        {intervention && <TaskInterventionStrip intervention={intervention} />}
+        <TaskPhaseStrip task={task} runs={runs} intervention={intervention} />
 
-function Head({
-  task,
-  runs,
-  liveRunId,
-}: {
-  task: Task;
-  runs: Run[];
-  liveRunId: string | null;
-}) {
-  const kind = statusKindFor(task.status);
-  return (
-    <section className="border-b border-line px-6 pt-[18px] pb-3.5">
-      <div className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-mute-2">
-        <Link href="/" className="text-fg-mute hover:text-fg-body">
-          ← Board
-        </Link>
-        <span className="text-fg-faint">/</span>
-        <span className="text-fg-body">{task.id}</span>
-      </div>
-      <div className="flex items-center gap-3.5">
-        <StatusIcon kind={kind} size={18} live={kind === "progress"} />
-        <h1 className="m-0 flex-1 text-[19px] font-semibold tracking-tight text-fg">
-          {task.title}
-        </h1>
-        <TaskCostStrip initialRuns={runs} liveRunId={liveRunId} />
-      </div>
-    </section>
+        <section className="grid grid-cols-1 gap-[18px] md:grid-cols-[minmax(0,1fr)_310px]">
+          <TaskActivityPanel events={events} />
+          <TaskFactsPanel
+            task={task}
+            runs={runs}
+            files={files}
+            {...(selectedRun ? { selectedRunId: selectedRun.id } : {})}
+          />
+        </section>
+      </TaskDetailShell>
+    </>
   );
 }
 
@@ -163,5 +145,69 @@ async function optionalNotFound<T>(promise: Promise<T>): Promise<T | null> {
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
+  }
+}
+
+function buildArtifactSummaries(task: Task, runs: readonly Run[]): readonly ArtifactSummary[] {
+  return [
+    ...artifactSummariesForPhase(task.id, "brainstorm", runs),
+    ...artifactSummariesForPhase(task.id, "plan", runs),
+    ...artifactSummariesForPhase(task.id, "verify", runs),
+  ];
+}
+
+function artifactSummariesForPhase(
+  taskId: string,
+  phase: ArtifactSummary["phase"],
+  runs: readonly Run[],
+): readonly ArtifactSummary[] {
+  const run = runs.find((item) => item.phase === phase);
+  if (!run) return [];
+
+  const names = artifactNamesForPhase(phase);
+  return names.map((name) => ({
+    name,
+    status: artifactStatusForRun(run),
+    lines: null,
+    phase,
+    href: `/tasks/${taskId}/${phase}`,
+    preview: artifactPreviewForPhase(phase, name),
+  }));
+}
+
+function artifactNamesForPhase(phase: ArtifactSummary["phase"]): readonly string[] {
+  switch (phase) {
+    case "brainstorm":
+      return ["design.md", "spec.md"];
+    case "plan":
+      return ["plan.md", "scenarios.yaml"];
+    case "verify":
+      return ["proof-report.md"];
+  }
+}
+
+function artifactStatusForRun(run: Run): string {
+  switch (run.status) {
+    case "running":
+      return "active";
+    case "succeeded":
+      return "ready";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    case "pending":
+      return "queued";
+  }
+}
+
+function artifactPreviewForPhase(phase: ArtifactSummary["phase"], name: string): string {
+  switch (phase) {
+    case "brainstorm":
+      return `${name} is produced by the brainstorm phase. Open the brainstorm page to inspect the full design and spec artifacts.`;
+    case "plan":
+      return `${name} is produced by the plan phase. Open the plan page to review implementation steps, scenarios, and approval controls.`;
+    case "verify":
+      return `${name} is produced by verification. Open the verify page to inspect proof and remaining blockers.`;
   }
 }
