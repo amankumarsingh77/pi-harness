@@ -13,6 +13,8 @@ import {
 import { findEnvKeys, getEnvApiKey, getModel } from "@earendil-works/pi-ai";
 import type { AssistantMessage, KnownProvider, Usage } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AuthError, loadEnvHarness } from "./auth.js";
 import {
   CROFAI_API_KEY_ENV,
@@ -45,9 +47,9 @@ export type AgentSessionOptions = {
   maxTurns?: number;
   systemPrompt?: string;
   customTools?: ToolDefinition[];
-  // Allowlist of built-in tool names. When provided, only these built-ins
-  // are enabled (custom tools are always available). Omit to keep the SDK's
-  // default builtins: read, bash, edit, write.
+  // Allowlist of SDK tool names. The pi SDK applies this filter to both
+  // built-ins and custom tools, so openSession augments it with custom tool
+  // names before constructing the SDK session.
   tools?: string[];
   sessionPath?: string;
   onEvent: (e: PiBridgeEvent) => void;
@@ -89,19 +91,25 @@ const CUSTOM_PROVIDER_ENV: Record<string, string> = {
   [CROFAI_PROVIDER_NAME]: CROFAI_API_KEY_ENV,
 };
 
+const OAUTH_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
+
 // Lazy per-process registry. Built once on first session creation; reused for
 // every subsequent session so the orchestrator doesn't re-register providers
 // each phase tick. The registry resolves credentials via setRuntimeApiKey
 // (populated from .env.harness) — that's why loadEnvHarness must run first.
+let authStorage: AuthStorage | null = null;
 let registryPromise: Promise<ModelRegistry> | null = null;
 
 function buildCustomRegistry(): ModelRegistry {
-  // Each provider's ProviderConfigInput declares its own apiKey as an env-var
-  // name; the SDK resolves it from process.env at request time. AuthStorage
-  // is just a placeholder here — we don't persist credentials.
-  const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+  const auth = getAuthStorage();
+  const registry = ModelRegistry.create(auth);
   registry.registerProvider(CROFAI_PROVIDER_NAME, CROFAI_PROVIDER_CONFIG);
   return registry;
+}
+
+function getAuthStorage(): AuthStorage {
+  authStorage ??= AuthStorage.create();
+  return authStorage;
 }
 
 async function getRegistry(): Promise<ModelRegistry> {
@@ -114,6 +122,7 @@ async function getRegistry(): Promise<ModelRegistry> {
 // Test-only: clear the cached registry between tests so .env.harness changes
 // take effect. Mirrors __resetAuthCache from auth.ts.
 export function __resetRegistryCache(): void {
+  authStorage = null;
   registryPromise = null;
 }
 
@@ -127,6 +136,7 @@ const defaultBoundary: SdkBoundary = {
     const sdkOpts: CreateAgentSessionOptions = {
       cwd: opts.cwd,
       model,
+      authStorage: getAuthStorage(),
       modelRegistry: registry,
       sessionManager,
       customTools: opts.customTools ?? [],
@@ -294,7 +304,7 @@ async function openSession(
       ...(opts.thinkingLevel !== undefined ? { thinkingLevel: opts.thinkingLevel } : {}),
       ...(opts.systemPrompt !== undefined ? { systemPrompt: opts.systemPrompt } : {}),
       ...(opts.customTools !== undefined ? { customTools: opts.customTools } : {}),
-      ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
+      ...(opts.tools !== undefined ? { tools: allowlistedTools(opts.tools, opts.customTools) } : {}),
       ...(opts.sessionPath !== undefined ? { sessionPath: opts.sessionPath } : {}),
     };
     const { session } = await boundary.create(create);
@@ -309,6 +319,17 @@ async function openSession(
   }
 }
 
+function allowlistedTools(
+  tools: readonly string[],
+  customTools: readonly ToolDefinition[] | undefined,
+): string[] {
+  const out = new Set(tools);
+  for (const tool of customTools ?? []) {
+    out.add(tool.name);
+  }
+  return [...out];
+}
+
 // Upfront credential check using the SDK's own provider→env-var registry
 // (findEnvKeys / getEnvApiKey). Throws AuthError before the SDK is touched so
 // brainstorm.ts can route the failure into a phase_blocked state without
@@ -320,10 +341,31 @@ function assertCredential(provider: string): void {
     if (process.env[customEnv]) return;
     throw new AuthError(`missing API key for ${provider} (expected ${customEnv} in .env.harness)`);
   }
+  if (OAUTH_PROVIDERS.has(provider)) {
+    if (hasOAuthCredential(provider)) return;
+    throw new AuthError(`missing subscription login for ${provider} (run /login in pi)`);
+  }
   if (getEnvApiKey(provider)) return;
   const envVars = findEnvKeys(provider);
   const expected = envVars && envVars.length > 0 ? envVars.join(" or ") : "<unknown>";
   throw new AuthError(`missing API key for ${provider} (expected ${expected} in .env.harness)`);
+}
+
+function hasOAuthCredential(provider: string): boolean {
+  const path = join(process.env["HOME"] ?? "", ".pi", "agent", "auth.json");
+  if (!existsSync(path)) return false;
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const entry = raw[provider];
+    return (
+      typeof entry === "object" &&
+      entry !== null &&
+      "type" in entry &&
+      (entry as { type?: unknown }).type === "oauth"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function looksLikeAuthFailure(message: string): boolean {

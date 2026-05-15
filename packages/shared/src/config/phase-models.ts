@@ -28,6 +28,11 @@ export const DEFAULT_PHASE_MODELS: Record<Phase, PhaseModelConfig> = {
   code:       { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "medium" },
   verify:     { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high"   },
   pr:         { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "off"    },
+  // brainstorm: { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium" },
+  // plan:       { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium"   },
+  // code:       { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium" },
+  // verify:     { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "high"   },
+  // pr:         { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "off"    },
 };
 
 export function mergePhaseModels(

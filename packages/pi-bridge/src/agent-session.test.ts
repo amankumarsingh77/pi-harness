@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSession, AuthError, type PiBridgeEvent } from "./agent-session.js";
@@ -36,10 +36,13 @@ const baseModel = { provider: "anthropic", model: "claude-opus-4-5" };
 
 let envDir: string;
 let prevCwd: string;
+let prevHome: string | undefined;
 
 beforeEach(() => {
   envDir = mkdtempSync(join(tmpdir(), "pi-bridge-env-"));
   prevCwd = process.cwd();
+  prevHome = process.env["HOME"];
+  process.env["HOME"] = envDir;
   process.chdir(envDir);
   writeFileSync(join(envDir, ".env.harness"), "ANTHROPIC_API_KEY=test-key\n");
   __resetAuthCache();
@@ -47,6 +50,11 @@ beforeEach(() => {
 
 afterEach(() => {
   process.chdir(prevCwd);
+  if (prevHome === undefined) {
+    delete process.env["HOME"];
+  } else {
+    process.env["HOME"] = prevHome;
+  }
   rmSync(envDir, { recursive: true, force: true });
   __resetAuthCache();
   delete process.env["ANTHROPIC_API_KEY"];
@@ -119,6 +127,30 @@ describe("createAgentSession", () => {
     const result = events.find((e) => e.kind === "tool_result");
     expect(call).toEqual({ kind: "tool_call", tool: "foo", input: { x: 1 } });
     expect(result).toEqual({ kind: "tool_result", tool: "foo", ok: true, output: { y: 2 } });
+  });
+
+  it("tool allowlist keeps custom tools available", async () => {
+    const adapter = createFakeAdapter();
+    await createAgentSession(
+      {
+        cwd: "/tmp",
+        model: baseModel,
+        tools: ["read", "write"],
+        customTools: [
+          {
+            name: "submit_questions",
+            label: "Submit questions",
+            description: "Ask structured questions",
+            parameters: {} as never,
+            execute: async () => ({ content: [], details: {} }),
+          },
+        ],
+        onEvent: () => {},
+      },
+      adapter,
+    );
+
+    expect(adapter.state.createOpts?.tools).toEqual(["read", "write", "submit_questions"]);
   });
 
   it("tool error: emits tool_result with ok=false and error payload", async () => {
@@ -330,6 +362,29 @@ describe("createAgentSession", () => {
     } finally {
       delete process.env["CROFAI_API_KEY"];
     }
+  });
+
+  it("openai-codex oauth present: assertCredential passes with auth.json token", async () => {
+    const authDir = join(envDir, ".pi", "agent");
+    mkdirSync(authDir, { recursive: true });
+    writeFileSync(join(authDir, "auth.json"), JSON.stringify({ "openai-codex": { type: "oauth" } }));
+
+    const adapter = createFakeAdapter();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: { provider: "openai-codex", model: "gpt-5.5" }, onEvent: () => {} },
+      adapter,
+    );
+    await session.close();
+  });
+
+  it("openai-codex oauth missing: AuthError points to login instead of env key", async () => {
+    const adapter = createFakeAdapter();
+    await expect(
+      createAgentSession(
+        { cwd: "/tmp", model: { provider: "openai-codex", model: "gpt-5.5" }, onEvent: () => {} },
+        adapter,
+      ),
+    ).rejects.toThrow(/missing subscription login for openai-codex/);
   });
 
   it("abort: rejects pending prompt with 'aborted' and forwards to sdk", async () => {
