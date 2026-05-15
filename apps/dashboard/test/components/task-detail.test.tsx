@@ -113,7 +113,7 @@ describe("AgentLog", () => {
         runId: "r_abc",
         ts: new Date("2026-05-08T14:32:01Z"),
         kind: "tool_call",
-        tool: "searxng_search",
+        tool: "pi_web_search",
         input: { query: "oauth libraries node", maxResults: 3 },
         subagent: "web-search-researcher",
       },
@@ -123,12 +123,12 @@ describe("AgentLog", () => {
         runId: "r_abc",
         ts: new Date("2026-05-08T14:32:02Z"),
         kind: "tool_result",
-        tool: "searxng_search",
+        tool: "pi_web_search",
         ok: true,
         output: {
           details: {
             ok: true,
-            providerUrl: "http://localhost:8888",
+            provider: "tinyfish",
             query: "oauth libraries node",
             results: [{ title: "OAuth", url: "https://example.com", snippet: "docs" }],
           },
@@ -141,16 +141,16 @@ describe("AgentLog", () => {
         runId: "r_abc",
         ts: new Date("2026-05-08T14:32:03Z"),
         kind: "tool_call",
-        tool: "searxng_fetch",
+        tool: "pi_web_fetch",
         input: { url: "https://example.com" },
         subagent: "web-search-researcher",
       },
     ];
     render(<AgentLog events={events} runId="r_abc" />);
-    expect(screen.getByText(/searxng_search\("oauth libraries node"\)/)).toBeInTheDocument();
-    expect(screen.getByText(/searxng_fetch\(https:\/\/example.com\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/searxng_search/));
-    expect(screen.getByText(/localhost:8888/)).toBeInTheDocument();
+    expect(screen.getByText(/pi_web_search\("oauth libraries node"\)/)).toBeInTheDocument();
+    expect(screen.getByText(/pi_web_fetch\(https:\/\/example.com\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/pi_web_search/));
+    expect(screen.getByText(/tinyfish/)).toBeInTheDocument();
     expect(screen.getAllByText(/https:\/\/example.com/).length).toBeGreaterThanOrEqual(1);
   });
 

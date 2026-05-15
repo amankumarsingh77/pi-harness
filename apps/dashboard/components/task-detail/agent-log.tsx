@@ -447,13 +447,15 @@ function renderToolCall(tool: string, rawTool: string, input: unknown): string {
       const dir = stringField(obj, ["dir", "path"]);
       return `read repo layout · ${dir ?? "—"}`;
     }
+    case "pi_web_search":
     case "searxng_search": {
       const query = stringField(obj, ["query"]);
-      return `searxng_search("${truncate(query ?? "—", 72)}")`;
+      return `${rawTool}("${truncate(query ?? "—", 72)}")`;
     }
+    case "pi_web_fetch":
     case "searxng_fetch": {
       const url = stringField(obj, ["url"]);
-      return `searxng_fetch(${truncate(url ?? "—", 90)})`;
+      return `${rawTool}(${truncate(url ?? "—", 90)})`;
     }
     default: {
       const arg = summarizeArg(obj);

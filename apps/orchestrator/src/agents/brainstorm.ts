@@ -23,8 +23,8 @@ import {
 } from "./brainstorm-tools.js";
 import {
   brainstormResearchPath,
-  makeSearXNGFetchTool,
-  makeSearXNGSearchTool,
+  makePiWebFetchTool,
+  makePiWebSearchTool,
   makeWriteBrainstormResearchFindingsTool,
   shouldRunWebResearch,
 } from "./web-research-tools.js";
@@ -267,8 +267,8 @@ async function runTurn(
         writeMockRevisionTool,
         markReadyTool,
         replyToUserTool,
-        makeSearXNGSearchTool(),
-        makeSearXNGFetchTool(),
+        makePiWebSearchTool(),
+        makePiWebFetchTool(),
       ],
       onEvent: handleEvent,
     });
@@ -559,8 +559,8 @@ async function runWebResearchSubagent(
       systemPrompt,
       tools: [...def.allowedTools],
       customTools: [
-        makeSearXNGSearchTool(),
-        makeSearXNGFetchTool(),
+        makePiWebSearchTool(),
+        makePiWebFetchTool(),
         makeWriteBrainstormResearchFindingsTool({
           cwd: opts.cwd,
           taskId: opts.taskId,
@@ -647,7 +647,7 @@ function buildWebResearchPrompt(opts: BrainstormOpts): string {
     opts.ticketTitle ? `Title: ${opts.ticketTitle}` : "",
     opts.ticketDescription ? `Description: ${opts.ticketDescription}` : "",
     "",
-    "Use searxng_search for discovery and searxng_fetch for the most relevant primary sources.",
+    "Use pi_web_search for discovery and pi_web_fetch for the most relevant primary sources.",
     "Prioritize official docs, release notes, package/repo pages, pricing pages, and credible comparisons.",
     "Write concise findings with source links, maturity signals, and recommended fallback choices.",
     "Persist findings through write_findings exactly once.",
