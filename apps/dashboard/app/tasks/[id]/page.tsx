@@ -5,9 +5,12 @@ import { PhaseRail } from "@/components/task-detail/phase-rail";
 import { AgentLog } from "@/components/task-detail/agent-log";
 import { RunContext } from "@/components/task-detail/run-context";
 import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
-import { TaskActions } from "@/components/task-detail/task-actions";
 import { TaskCostStrip } from "@/components/task-detail/task-cost-strip";
-import type { Run } from "@pi-harness/shared";
+import {
+  deriveTaskIntervention,
+  TaskInterventionStrip,
+} from "@/components/task-detail/task-intervention";
+import type { Run, Task } from "@pi-harness/shared";
 import { notFound } from "next/navigation";
 import { ApiError } from "@/lib/api";
 import { orchestrator } from "@/lib/server/api";
@@ -16,7 +19,8 @@ import { orchestrator } from "@/lib/server/api";
  * Task detail page. Layout (top → bottom):
  *
  *   topbar           shared with kanban
- *   head             breadcrumb + title + action row
+ *   head             breadcrumb + title + read-only telemetry
+ *   intervention     optional link to the phase page that needs input
  *   phase-rail       7-step rail (steps are clickable into sub-pages)
  *   body grid        live agent log | run-context sidebar
  *
@@ -52,18 +56,22 @@ export default async function TaskDetailPage({
     (requestedRunId ? runs.find((r) => r.id === requestedRunId) : undefined) ??
     runs.at(-1);
 
-  // Parallel fetch: events + files for the selected run. Both depend on the
-  // selectedRun id resolved above, so they share the waterfall but run
-  // concurrently against each other.
-  const [events, files] = selectedRun
-    ? await Promise.all([
-        orchestrator.listEvents(selectedRun.id).then((r) => r.events),
-        orchestrator
-          .listRunFiles(selectedRun.id)
-          .then((r) => r.files)
-          .catch(() => []),
-      ])
-    : [[], []];
+  const eventsPromise = selectedRun
+    ? orchestrator.listEvents(selectedRun.id).then((r) => r.events)
+    : Promise.resolve([]);
+  const filesPromise = selectedRun
+    ? orchestrator
+        .listRunFiles(selectedRun.id)
+        .then((r) => r.files)
+        .catch(() => [])
+    : Promise.resolve([]);
+  const interventionPromise = getTaskIntervention(task);
+
+  const [events, files, intervention] = await Promise.all([
+    eventsPromise,
+    filesPromise,
+    interventionPromise,
+  ]);
 
   const liveRun = runs.find((r) => r.status === "running") ?? null;
 
@@ -77,6 +85,7 @@ export default async function TaskDetailPage({
       />
 
       <Head task={task} runs={runs} liveRunId={liveRun?.id ?? null} />
+      {intervention && <TaskInterventionStrip intervention={intervention} />}
       <PhaseRail runs={runs} taskId={task.id} />
 
       <main className="grid min-h-[calc(100vh-48px-64px-100px)] grid-cols-[1fr_320px] gap-0">
@@ -103,7 +112,7 @@ function Head({
   runs,
   liveRunId,
 }: {
-  task: import("@pi-harness/shared").Task;
+  task: Task;
   runs: Run[];
   liveRunId: string | null;
 }) {
@@ -123,8 +132,36 @@ function Head({
           {task.title}
         </h1>
         <TaskCostStrip initialRuns={runs} liveRunId={liveRunId} />
-        <TaskActions task={task} />
       </div>
     </section>
   );
+}
+
+async function getTaskIntervention(task: Task) {
+  if (task.status === "brainstorming") {
+    const bundle = await optionalNotFound(orchestrator.getBrainstormBundle(task.id));
+    return deriveTaskIntervention({
+      task,
+      ...(bundle ? { brainstorm: { gate: bundle.gate, events: bundle.events } } : {}),
+    });
+  }
+
+  if (task.status === "planning") {
+    const bundle = await optionalNotFound(orchestrator.getPlanBundle(task.id));
+    return deriveTaskIntervention({
+      task,
+      ...(bundle ? { plan: { gate: bundle.gate } } : {}),
+    });
+  }
+
+  return deriveTaskIntervention({ task });
+}
+
+async function optionalNotFound<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
