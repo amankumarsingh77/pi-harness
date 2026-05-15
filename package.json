@@ -14,6 +14,10 @@
     "typecheck": "turbo run typecheck",
     "db:up": "podman compose up -d postgres",
     "db:down": "podman compose down",
+    "search:up": "podman compose up -d searxng",
+    "search:down": "podman compose stop searxng",
+    "infra:up": "podman compose up -d postgres searxng",
+    "infra:down": "podman compose down",
     "db:migrate": "pnpm --filter @pi-harness/db migrate",
     "db:generate": "pnpm --filter @pi-harness/db generate"
   },
