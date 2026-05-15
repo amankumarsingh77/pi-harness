@@ -62,3 +62,13 @@ export type Task = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type DashboardSummary = {
+  runningCount: number;
+  reviewCount: number;
+  blockedCount: number;
+  costUsd: number;
+  costCapUsd: number;
+  lastEventAt: Date | null;
+  activeRunIds: readonly string[];
+};

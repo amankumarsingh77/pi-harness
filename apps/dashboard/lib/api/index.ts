@@ -1,4 +1,5 @@
 import type {
+  DashboardSummary,
   Task,
   Run,
   AgentEvent,
@@ -201,7 +202,11 @@ export type RunFile = {
 };
 
 export type Api = {
-  listTasks: () => Promise<{ tasks: Task[]; counts: Record<string, number> }>;
+  listTasks: () => Promise<{
+    tasks: Task[];
+    counts: Record<string, number>;
+    summary: DashboardSummary;
+  }>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
   createTask: (
@@ -300,8 +305,16 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
 
   return {
     listTasks: async () => {
-      const r = await send<{ tasks: Task[]; counts: Record<string, number> }>("/api/tasks");
-      return { tasks: r.tasks.map(hydrateTask), counts: r.counts };
+      const r = await send<{
+        tasks: Task[];
+        counts: Record<string, number>;
+        summary: DashboardSummary;
+      }>("/api/tasks");
+      return {
+        tasks: r.tasks.map(hydrateTask),
+        counts: r.counts,
+        summary: hydrateDashboardSummary(r.summary),
+      };
     },
     getTask: async (id) => {
       const r = await send<{ task: Task; runs: Run[] }>(`/api/tasks/${id}`);
@@ -429,4 +442,11 @@ function hydrateRun(r: Run): Run {
 
 function hydrateEvent(e: AgentEvent): AgentEvent {
   return { ...e, ts: toDate(e.ts) };
+}
+
+function hydrateDashboardSummary(summary: DashboardSummary): DashboardSummary {
+  return {
+    ...summary,
+    lastEventAt: summary.lastEventAt ? toDate(summary.lastEventAt) : null,
+  };
 }

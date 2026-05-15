@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { AgentEvent } from "@pi-harness/shared";
 
 export type UseEventsResult = {
   events: AgentEvent[];
   connected: boolean;
+  lastEventAt: Date | null;
 };
 
 // Subscribes to /api/sse/:runId and accumulates events. Reconnects on error
@@ -26,7 +27,11 @@ export function useEvents(
 ): UseEventsResult {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [connected, setConnected] = useState(false);
+  const [lastEventAt, setLastEventAt] = useState<Date | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const lastPublishedAtRef = useRef<number | null>(null);
+  const pendingLastEventAtRef = useRef<Date | null>(null);
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -53,6 +58,12 @@ export function useEvents(
         try {
           const parsed = JSON.parse(ev.data) as AgentEvent;
           setEvents((curr) => [...curr, parsed]);
+          publishLastEventAtThrottled(toEventDate(parsed.ts), {
+            lastPublishedAtRef,
+            pendingLastEventAtRef,
+            pendingTimerRef,
+            setLastEventAt,
+          });
         } catch {
           // ignore non-JSON keep-alives
         }
@@ -74,8 +85,45 @@ export function useEvents(
     return () => {
       cancelled = true;
       esRef.current?.close();
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = null;
     };
   }, [runId]);
 
-  return { events, connected };
+  return { events, connected, lastEventAt };
+}
+
+type LastEventThrottle = {
+  lastPublishedAtRef: MutableRefObject<number | null>;
+  pendingLastEventAtRef: MutableRefObject<Date | null>;
+  pendingTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  setLastEventAt: Dispatch<SetStateAction<Date | null>>;
+};
+
+function publishLastEventAtThrottled(
+  next: Date,
+  throttle: LastEventThrottle,
+): void {
+  const now = Date.now();
+  const lastPublishedAt = throttle.lastPublishedAtRef.current;
+  const elapsed = lastPublishedAt === null ? 1000 : now - lastPublishedAt;
+  if (elapsed >= 1000) {
+    throttle.lastPublishedAtRef.current = now;
+    throttle.setLastEventAt(next);
+    return;
+  }
+
+  throttle.pendingLastEventAtRef.current = next;
+  if (throttle.pendingTimerRef.current) return;
+
+  throttle.pendingTimerRef.current = setTimeout(() => {
+    throttle.pendingTimerRef.current = null;
+    throttle.lastPublishedAtRef.current = Date.now();
+    throttle.setLastEventAt(throttle.pendingLastEventAtRef.current);
+    throttle.pendingLastEventAtRef.current = null;
+  }, 1000 - elapsed);
+}
+
+function toEventDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
 }

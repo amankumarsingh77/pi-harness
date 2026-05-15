@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
+import { mkEvent } from "../src/domain/events.js";
 
 // Build a real git worktree with both artifacts in `status: ready`. Used by
 // tests that exercise the brainstorm approval gate — the route enforces the
@@ -175,6 +176,38 @@ describe("http", () => {
     const body = res.json();
     expect(body.tasks).toHaveLength(2);
     expect(body.counts.backlog).toBe(2);
+  });
+
+  it("GET /api/tasks includes dashboard telemetry summary", async () => {
+    const runningTask = await runs.createTask({ title: "running" });
+    const reviewTask = await runs.createTask({ title: "review" });
+    await runs.updateTask(runningTask.id, { status: "executing" });
+    await runs.updateTask(reviewTask.id, { status: "ready_to_ship" });
+    const run = await runs.createRun({ taskId: runningTask.id, phase: "code" });
+    await runs.updateRun(run.id, { status: "running", costUsd: 1.5 });
+    await events.append({
+      ...mkEvent({
+        runId: run.id,
+        taskId: runningTask.id,
+        kind: "log",
+        level: "info",
+        text: "latest",
+      }),
+      ts: new Date("2026-05-15T10:00:00.000Z"),
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.summary).toMatchObject({
+      runningCount: 1,
+      reviewCount: 1,
+      blockedCount: 0,
+      costUsd: 1.5,
+      costCapUsd: 10,
+      activeRunIds: [run.id],
+    });
+    expect(body.summary.lastEventAt).toBe("2026-05-15T10:00:00.000Z");
   });
 
   it("POST /api/tasks/:id/transitions runs state-machine + persists", async () => {

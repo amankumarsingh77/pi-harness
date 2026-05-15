@@ -109,12 +109,21 @@ export function KanbanColumn({
             pending={pendingTaskId === t.id}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
-            onTransition={onTransition}
           />
         ))}
-        {tasks.length === 0 && (
+        {tasks.length === 0 && status === "backlog" && (
+          <div className="flex h-10 items-center justify-center rounded-md border border-dashed border-line text-[11.5px] text-fg-faint">
+            drop here · or ⌘N
+          </div>
+        )}
+        {tasks.length === 0 && status !== "backlog" && (
           <div className="flex h-10 items-center justify-center rounded-md border border-dashed border-line text-[11.5px] text-fg-faint">
             empty
+          </div>
+        )}
+        {tasks.length > 0 && status === "backlog" && (
+          <div className="flex h-10 items-center justify-center rounded-md border border-dashed border-line text-[11.5px] text-fg-faint">
+            drop here · or ⌘N
           </div>
         )}
       </div>

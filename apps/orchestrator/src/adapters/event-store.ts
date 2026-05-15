@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, desc } from "drizzle-orm";
 import { events as eventsTable, type DbClient } from "@pi-harness/db";
 import type { AgentEvent } from "@pi-harness/shared";
 
@@ -48,6 +48,15 @@ export class EventStore {
       kind: r.kind,
       ...(r.payload as Record<string, unknown>),
     })) as AgentEvent[];
+  }
+
+  async latestEventAt(): Promise<Date | null> {
+    const [row] = await this.db
+      .select({ ts: eventsTable.ts })
+      .from(eventsTable)
+      .orderBy(desc(eventsTable.ts))
+      .limit(1);
+    return row?.ts ?? null;
   }
 
   subscribe(runId: string, sub: Subscriber): () => void {

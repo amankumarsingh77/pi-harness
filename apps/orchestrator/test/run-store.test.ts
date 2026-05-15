@@ -84,4 +84,15 @@ describe("RunStore", () => {
     expect(counts.backlog).toBe(2);
     expect(counts.executing).toBe(1);
   });
+
+  it("dashboard summary helpers expose active run ids and total cost", async () => {
+    const t = await store.createTask({ title: "summary" });
+    const active = await store.createRun({ taskId: t.id, phase: "brainstorm" });
+    const settled = await store.createRun({ taskId: t.id, phase: "code" });
+    await store.updateRun(active.id, { status: "running", costUsd: 0.25 });
+    await store.updateRun(settled.id, { status: "succeeded", costUsd: 0.75 });
+
+    expect(await store.listActiveRunIds()).toEqual([active.id]);
+    expect(await store.totalCostUsd()).toBe(1);
+  });
 });

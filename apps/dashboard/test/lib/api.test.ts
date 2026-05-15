@@ -4,12 +4,25 @@ import { api, ApiError } from "@/lib/api";
 describe("api", () => {
   it("listTasks returns parsed shape", async () => {
     const fetchSpy = vi.fn(async () =>
-      Response.json({ tasks: [], counts: { backlog: 0 } }),
+      Response.json({
+        tasks: [],
+        counts: { backlog: 0 },
+        summary: {
+          runningCount: 0,
+          reviewCount: 0,
+          blockedCount: 0,
+          costUsd: 0,
+          costCapUsd: 10,
+          lastEventAt: "2026-05-15T10:00:00.000Z",
+          activeRunIds: [],
+        },
+      }),
     );
     const a = api({ baseUrl: "http://x", fetch: fetchSpy });
 
     const r = await a.listTasks();
     expect(r.tasks).toEqual([]);
+    expect(r.summary.lastEventAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z");
     expect(fetchSpy).toHaveBeenCalledWith("http://x/api/tasks", expect.any(Object));
   });
 

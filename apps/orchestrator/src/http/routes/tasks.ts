@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import type { Phase, PhaseModelConfig } from "@pi-harness/shared";
+import type { DashboardSummary, Phase, PhaseModelConfig, Task, TaskStatus } from "@pi-harness/shared";
 import type { RunStore } from "../../adapters/run-store.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
@@ -27,8 +27,27 @@ export function registerTaskRoutes(
   const { runs, events: eventStore, artifacts, scheduler, cancellation } = deps;
 
   app.get("/api/tasks", async () => {
-    const [tasks, counts] = await Promise.all([runs.listTasks(), runs.countByStatus()]);
-    return { tasks, counts };
+    const [tasks, counts, activeRunIds, costUsd, lastEventAt] = await Promise.all([
+      runs.listTasks(),
+      runs.countByStatus(),
+      runs.listActiveRunIds(),
+      runs.totalCostUsd(),
+      eventStore.latestEventAt(),
+    ]);
+    const reviewCount = await deriveReviewCount(tasks, artifacts);
+    return {
+      tasks,
+      counts,
+      summary: {
+        runningCount: runningCount(counts),
+        reviewCount,
+        blockedCount: blockedCount(counts),
+        costUsd,
+        costCapUsd: costCapUsd(process.env.HARNESS_COST_CAP_USD),
+        lastEventAt,
+        activeRunIds,
+      } satisfies DashboardSummary,
+    };
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (req) => {
@@ -305,4 +324,59 @@ export function registerTaskRoutes(
       return { task: updated };
     },
   );
+}
+
+const RUNNING_STATUSES: readonly TaskStatus[] = [
+  "brainstorming",
+  "planning",
+  "executing",
+  "verifying",
+];
+
+const BLOCKED_STATUSES: readonly TaskStatus[] = [
+  "brainstorm_failed",
+  "plan_failed",
+  "code_failed",
+  "verification_failed",
+  "pr_failed",
+];
+
+function runningCount(counts: Partial<Record<TaskStatus, number>>): number {
+  return sumStatuses(counts, RUNNING_STATUSES);
+}
+
+function blockedCount(counts: Partial<Record<TaskStatus, number>>): number {
+  return sumStatuses(counts, BLOCKED_STATUSES);
+}
+
+function sumStatuses(
+  counts: Partial<Record<TaskStatus, number>>,
+  statuses: readonly TaskStatus[],
+): number {
+  return statuses.reduce((total, status) => total + (counts[status] ?? 0), 0);
+}
+
+async function deriveReviewCount(
+  tasks: readonly Task[],
+  artifacts: ArtifactsStore,
+): Promise<number> {
+  const reviews = await Promise.all(tasks.map((task) => isAwaitingReview(task, artifacts)));
+  return reviews.filter(Boolean).length;
+}
+
+async function isAwaitingReview(task: Task, artifacts: ArtifactsStore): Promise<boolean> {
+  if (task.status === "ready_to_ship") return true;
+  if (!task.worktreePath) return false;
+  if (task.status === "brainstorming") {
+    return (await deriveBrainstormGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
+  }
+  if (task.status === "planning") {
+    return (await derivePlanGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
+  }
+  return false;
+}
+
+function costCapUsd(raw: string | undefined): number {
+  const parsed = raw ? Number.parseFloat(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
 }

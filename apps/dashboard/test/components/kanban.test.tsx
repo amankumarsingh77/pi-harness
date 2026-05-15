@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { KanbanBoard } from "@/components/kanban/board";
 import type { Task } from "@pi-harness/shared";
@@ -73,7 +72,7 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("feat/rate-limit-login")).toBeInTheDocument();
   });
 
-  it("renders persisted priority, tags, and workflow without rendering description copy", () => {
+  it("renders quiet card content without tags, phase chips, status icons, or inline actions", () => {
     const tasks = [
       baseTask({
         id: "1",
@@ -86,10 +85,13 @@ describe("KanbanBoard", () => {
       }),
     ];
     render(<KanbanBoard tasks={tasks} counts={{ backlog: 1 }} />);
-    expect(screen.getByText("Urgent")).toBeInTheDocument();
-    expect(screen.getByText("bugfix")).toBeInTheDocument();
-    expect(screen.getByText("backend")).toBeInTheDocument();
+    expect(screen.getByText("▲")).toBeInTheDocument();
     expect(screen.getByText("backend-feature")).toBeInTheDocument();
+    expect(screen.queryByText("Urgent")).not.toBeInTheDocument();
+    expect(screen.queryByText("bugfix")).not.toBeInTheDocument();
+    expect(screen.queryByText("backend")).not.toBeInTheDocument();
+    expect(screen.queryByText("ready to start")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start brainstorm/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Long detail belongs/)).not.toBeInTheDocument();
   });
 
@@ -104,7 +106,6 @@ describe("KanbanBoard", () => {
   });
 
   it("starts brainstorm when a backlog card is dropped on Brainstorming", async () => {
-    const user = userEvent.setup();
     const transitions: { taskId: string; action: unknown }[] = [];
     const tasks = [baseTask({ id: "drag-me", title: "Drag me", status: "backlog" })];
     render(
@@ -132,30 +133,7 @@ describe("KanbanBoard", () => {
     ]);
   });
 
-  it("exposes Start on backlog cards as a non-drag fallback", async () => {
-    const user = userEvent.setup();
-    const transitions: { taskId: string; action: unknown }[] = [];
-    const tasks = [baseTask({ id: "start-me", title: "Start me", status: "backlog" })];
-    render(
-      <KanbanBoard
-        tasks={tasks}
-        counts={{ backlog: 1 }}
-        onTransition={async (taskId, action) => {
-          transitions.push({ taskId, action });
-        }}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Start brainstorm for Start me" }));
-    expect(transitions).toEqual([
-      {
-        taskId: "start-me",
-        action: { type: "user_start_brainstorm", workflow: "backend-feature" },
-      },
-    ]);
-  });
-
-  it("verification_failed card carries blocked retry meta", () => {
+  it("verification_failed card uses a blocked stripe without retry meta or red border", () => {
     const tasks = [
       baseTask({
         id: "2",
@@ -165,16 +143,21 @@ describe("KanbanBoard", () => {
       }),
     ];
     render(<KanbanBoard tasks={tasks} counts={{ verification_failed: 1 }} />);
-    expect(screen.getByText("retry 1/2")).toBeInTheDocument();
+    const card = screen.getByTestId("task-card-2");
+    expect(screen.queryByText("retry 1/2")).not.toBeInTheDocument();
+    expect(card.className).not.toMatch(/border-st-blocked/);
+    expect(screen.getByTestId("task-card-stripe-2")).toHaveAttribute(
+      "style",
+      expect.stringContaining("var(--color-card-stripe-blocked)"),
+    );
   });
 
-  it("empty columns show an 'empty' affordance", () => {
+  it("empty columns show the drop placeholder affordance", () => {
     render(<KanbanBoard tasks={[]} counts={{}} />);
-    // 8 columns, all empty
-    expect(screen.getAllByText("empty")).toHaveLength(8);
+    expect(screen.getAllByText("drop here · or ⌘N")).toHaveLength(1);
   });
 
-  it("brainstorm_failed task buckets into Brainstorming column with blocked meta and red border", () => {
+  it("brainstorm_failed task buckets into Brainstorming with a blocked stripe only", () => {
     const tasks = [
       baseTask({
         id: "3",
@@ -196,15 +179,17 @@ describe("KanbanBoard", () => {
     const brainstormHeader = screen.getByText("Brainstorming").closest("header")!;
     expect(brainstormHeader).toHaveTextContent("1");
 
-    // Card has the "brainstorm failed" meta and a red border style.
-    expect(screen.getByText("brainstorm failed")).toBeInTheDocument();
     const card = screen.getByTestId("task-card-3");
-    expect(card.className).toMatch(/border-st-blocked/);
-    expect(screen.getByRole("button", { name: "Retry Brainstorm crashed mid-tick" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel Brainstorm crashed mid-tick" })).toBeInTheDocument();
+    expect(card.className).not.toMatch(/border-st-blocked/);
+    expect(screen.queryByText("brainstorm failed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-card-stripe-3")).toHaveAttribute(
+      "style",
+      expect.stringContaining("var(--color-card-stripe-blocked)"),
+    );
   });
 
-  it("plan_failed / code_failed / pr_failed bucket under their parent phase columns", () => {
+  it("plan_failed / code_failed / pr_failed bucket under their parent phase columns without phase text", () => {
     const tasks = [
       baseTask({ id: "p", title: "plan crashed", status: "plan_failed" }),
       baseTask({ id: "c", title: "code crashed", status: "code_failed" }),
@@ -214,8 +199,37 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("plan crashed")).toBeInTheDocument();
     expect(screen.getByText("code crashed")).toBeInTheDocument();
     expect(screen.getByText("pr crashed")).toBeInTheDocument();
-    expect(screen.getByText("plan failed")).toBeInTheDocument();
-    expect(screen.getByText("code failed")).toBeInTheDocument();
-    expect(screen.getByText("PR failed")).toBeInTheDocument();
+    expect(screen.queryByText("plan failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("code failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("PR failed")).not.toBeInTheDocument();
+  });
+
+  it("renders the board toolbar and disabled future views", () => {
+    render(<KanbanBoard tasks={[]} counts={{}} />);
+    expect(screen.getByRole("toolbar", { name: "Board controls" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Board" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "List" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Calendar" })).toBeDisabled();
+    expect(screen.getByText("0 cards idle > 30m · auto-cleanup ok")).toBeInTheDocument();
+  });
+
+  it("filters visible cards by workflow and removes a filter pill", () => {
+    const tasks = [
+      baseTask({ id: "backend", title: "Backend task", workflow: "backend-feature" }),
+      baseTask({ id: "other", title: "No workflow task", workflow: null }),
+    ];
+    render(
+      <KanbanBoard
+        tasks={tasks}
+        counts={{ backlog: 2 }}
+        initialFilters={{ workflow: "backend-feature" }}
+      />,
+    );
+
+    expect(screen.getByText("Backend task")).toBeInTheDocument();
+    expect(screen.queryByText("No workflow task")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove workflow filter" }));
+    expect(screen.getByText("No workflow task")).toBeInTheDocument();
   });
 });
