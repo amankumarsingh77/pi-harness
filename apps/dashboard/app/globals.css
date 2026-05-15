@@ -32,6 +32,12 @@
   --color-st-shipping:  #c084fc;
   --color-st-done:      #4cb782;
 
+  --color-card-stripe-progress: var(--color-st-progress);
+  --color-card-stripe-review:   var(--color-st-review);
+  --color-card-stripe-blocked:  var(--color-st-blocked);
+  --color-card-stripe-shipping: var(--color-st-shipping);
+  --color-card-stripe-done:     var(--color-st-done);
+
   --color-violet-fg: #a78bfa;
   --color-violet-bg: #3b1f5e;
   --color-blue-fg:   #60a5fa;

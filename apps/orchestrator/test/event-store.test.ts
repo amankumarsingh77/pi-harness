@@ -64,4 +64,21 @@ describe("EventStore", () => {
 
     expect(r1got).toEqual([]);
   });
+
+  it("returns the latest event timestamp across runs", async () => {
+    const t = await runs.createTask({ title: "latest" });
+    const r1 = await runs.createRun({ taskId: t.id, phase: "code" });
+    const r2 = await runs.createRun({ taskId: t.id, phase: "verify" });
+
+    await events.append({
+      ...mkEvent({ runId: r1.id, taskId: t.id, kind: "log", level: "info", text: "first" }),
+      ts: new Date("2026-05-15T09:00:00.000Z"),
+    });
+    await events.append({
+      ...mkEvent({ runId: r2.id, taskId: t.id, kind: "log", level: "info", text: "second" }),
+      ts: new Date("2026-05-15T10:00:00.000Z"),
+    });
+
+    expect((await events.latestEventAt())?.toISOString()).toBe("2026-05-15T10:00:00.000Z");
+  });
 });

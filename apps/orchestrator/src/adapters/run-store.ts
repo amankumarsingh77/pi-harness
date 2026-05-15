@@ -74,6 +74,20 @@ export class RunStore {
     return init;
   }
 
+  async listActiveRunIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(inArray(runs.status, ["pending", "running"]))
+      .orderBy(asc(runs.startedAt));
+    return rows.map((r) => r.id);
+  }
+
+  async totalCostUsd(): Promise<number> {
+    const rows = (await this.db.select({ costUsd: runs.costUsd }).from(runs)) as { costUsd: number }[];
+    return rows.reduce((total, r) => total + r.costUsd, 0);
+  }
+
   async createRun(input: { taskId: string; phase: Phase }): Promise<Run> {
     const [row] = await this.db
       .insert(runs)
