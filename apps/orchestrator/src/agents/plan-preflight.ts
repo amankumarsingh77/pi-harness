@@ -2,22 +2,29 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import yaml from "js-yaml";
 import type {
   AgentSession,
   AgentSessionOptions,
   PiBridgeEvent,
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
-import type { PhaseModelConfig } from "@pi-harness/shared";
+import {
+  BlastRadiusFileSchema,
+  type Artifact,
+  type PhaseModelConfig,
+} from "@pi-harness/shared";
 import { PREFLIGHT_SUBAGENTS, getSubagent } from "@pi-harness/subagents";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { SUBAGENT_FOOTER } from "./subagent-footer.js";
 import { buildTicketDigest } from "./ticket-digest.js";
+import { ArtifactsStore } from "./artifacts-store.js";
 
 export { PREFLIGHT_SUBAGENTS };
 export type PreflightSubagent = string;
 
 export const PREFLIGHT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+const SCOUT_SUBAGENT = "codebase-scout";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -73,16 +80,14 @@ export type PreflightSubagentResult = {
 
 export type PreflightResult = {
   results: PreflightSubagentResult[];
-  // True when ≥3 subagents failed. The caller (runPlan in Phase 4) treats
-  // this as "preflight failed" and fails the phase into plan_failed.
+  // True when any required subagent failed. The caller treats this as
+  // "preflight failed" and fails the phase into plan_failed.
   failed: boolean;
 };
 
-// Dispatches every research subagent whose findings file doesn't already
-// exist. Each subagent runs in its own pi session (no shared session JSONL —
-// they're one-shot), all in parallel. Findings files are the canonical
-// recovery anchor: a re-entry after orchestrator crash skips any subagent
-// whose file is already on disk.
+// Dispatches plan preflight in two stages: first codebase-scout, then a
+// deterministic blast-radius synthesis, then the remaining research agents in
+// parallel. Findings files and blast-radius.yaml are the recovery anchors.
 //
 // Returns once every dispatched subagent has resolved (success or failure).
 // The caller treats any missing required findings file as fatal. A subagent
@@ -91,70 +96,92 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
   const researchDir = join(opts.cwd, ".harness", opts.taskId, "research");
   await mkdir(researchDir, { recursive: true });
 
-  const tasks = PREFLIGHT_SUBAGENTS.map(async (subagent) => {
-    const findingsPath = join(researchDir, `${subagent}.md`);
-    // Cache hit: a previous tick already wrote this subagent's findings.
-    // Skip silently — emit no started/ended events so the dashboard's
-    // strip doesn't double-count.
-    if (hasNonEmptyFindings(findingsPath)) {
-      return {
-        subagent,
-        ok: true,
-        findingsPath,
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        durationMs: 0,
-      } satisfies PreflightSubagentResult;
-    }
-
-    const sessionId = `psa_${randomUUID()}`;
-    const startedAt = Date.now();
-    await opts.onSubagentEvent({ kind: "started", subagent, sessionId });
-
-    let result: PreflightSubagentResult;
-    try {
-      const usage = await runOneSubagent({ subagent, opts, findingsPath });
-      result = {
-        subagent,
-        ok: true,
-        findingsPath,
-        costUsd: usage.costUsd,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (err) {
-      result = {
-        subagent,
-        ok: false,
-        error: (err as Error).message,
-        findingsPath,
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        durationMs: Date.now() - startedAt,
-      };
-    }
-
-    await opts.onSubagentEvent({
-      kind: "ended",
-      subagent,
-      sessionId,
-      ok: result.ok,
-      durationMs: result.durationMs,
-      costUsd: result.costUsd,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      ...(result.error !== undefined ? { error: result.error } : {}),
-    });
-
-    return result;
+  const scoutResult = await runSubagentWithEvents({
+    subagent: SCOUT_SUBAGENT,
+    opts,
+    researchDir,
   });
 
-  const results = await Promise.all(tasks);
+  if (!scoutResult.ok) {
+    return { results: [scoutResult], failed: true };
+  }
+
+  await ensureBlastRadiusArtifact({ opts, researchDir });
+
+  const enrichmentSubagents = PREFLIGHT_SUBAGENTS.filter((sa) => sa !== SCOUT_SUBAGENT);
+  const tasks = enrichmentSubagents.map((subagent) =>
+    runSubagentWithEvents({ subagent, opts, researchDir }),
+  );
+
+  const results = [scoutResult, ...(await Promise.all(tasks))];
   const failedCount = results.filter((r) => !r.ok).length;
   return { results, failed: failedCount > 0 };
+}
+
+async function runSubagentWithEvents(args: {
+  subagent: PreflightSubagent;
+  opts: PreflightOpts;
+  researchDir: string;
+}): Promise<PreflightSubagentResult> {
+  const { subagent, opts, researchDir } = args;
+  const findingsPath = join(researchDir, `${subagent}.md`);
+  // Cache hit: a previous tick already wrote this subagent's findings.
+  // Skip silently — emit no started/ended events so the dashboard's
+  // strip doesn't double-count.
+  if (hasNonEmptyFindings(findingsPath)) {
+    return {
+      subagent,
+      ok: true,
+      findingsPath,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: 0,
+    };
+  }
+
+  const sessionId = `psa_${randomUUID()}`;
+  const startedAt = Date.now();
+  await opts.onSubagentEvent({ kind: "started", subagent, sessionId });
+
+  let result: PreflightSubagentResult;
+  try {
+    const usage = await runOneSubagent({ subagent, opts, findingsPath });
+    result = {
+      subagent,
+      ok: true,
+      findingsPath,
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (err) {
+    result = {
+      subagent,
+      ok: false,
+      error: (err as Error).message,
+      findingsPath,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
+  await opts.onSubagentEvent({
+    kind: "ended",
+    subagent,
+    sessionId,
+    ok: result.ok,
+    durationMs: result.durationMs,
+    costUsd: result.costUsd,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    ...(result.error !== undefined ? { error: result.error } : {}),
+  });
+
+  return result;
 }
 
 async function runOneSubagent(args: {
@@ -239,10 +266,17 @@ function buildSubagentPrompt(args: {
     designBody: opts.designBody,
     specBody: opts.specBody,
   });
+  const blastRadius = subagent === SCOUT_SUBAGENT
+    ? null
+    : readBlastRadiusBody(opts.cwd, opts.taskId);
+  const blastRadiusSection = blastRadius
+    ? [``, `# Current blast-radius.yaml`, ``, blastRadius]
+    : [];
   return [
     `You are running inside a git worktree at ${opts.cwd}.`,
     ``,
     digest,
+    ...blastRadiusSection,
     ``,
     `# Your job`,
     ``,
@@ -256,4 +290,122 @@ function buildSubagentPrompt(args: {
     ``,
     `Persist your findings via the \`write_findings\` tool. Call it exactly once when done.`,
   ].join("\n");
+}
+
+async function ensureBlastRadiusArtifact(args: {
+  opts: PreflightOpts;
+  researchDir: string;
+}): Promise<void> {
+  const { opts, researchDir } = args;
+  const store = new ArtifactsStore();
+  const existing = await store.readArtifact(opts.cwd, opts.taskId, "blast-radius");
+  if (existing && isValidBlastRadiusBody(existing.body)) return;
+
+  const scoutPath = join(researchDir, `${SCOUT_SUBAGENT}.md`);
+  const scoutBody = existsSync(scoutPath) ? readFileSync(scoutPath, "utf8") : "";
+  const body = buildBlastRadiusBody({
+    taskId: opts.taskId,
+    designBody: opts.designBody,
+    specBody: opts.specBody,
+    scoutBody,
+  });
+  const now = new Date().toISOString();
+  const fallback: Artifact = {
+    fm: {
+      task: opts.taskId,
+      kind: "blast-radius",
+      parent: "spec.md",
+      status: "draft",
+      branch: `pi/${opts.taskId}`,
+      last_updated: now,
+      last_updated_by: "orchestrator",
+    },
+    body,
+  };
+  await store.writeArtifact(opts.cwd, opts.taskId, {
+    fm: {
+      ...(existing?.fm ?? fallback.fm),
+      status: "draft",
+      last_updated: now,
+      last_updated_by: "orchestrator",
+    },
+    body,
+  });
+}
+
+function isValidBlastRadiusBody(body: string): boolean {
+  try {
+    return BlastRadiusFileSchema.safeParse(yaml.load(body)).success;
+  } catch {
+    return false;
+  }
+}
+
+function buildBlastRadiusBody(args: {
+  taskId: string;
+  designBody: string;
+  specBody: string;
+  scoutBody: string;
+}): string {
+  const requirementRefs = extractRequirementRefs(`${args.specBody}\n${args.designBody}`);
+  const touchpoints = extractTouchpoints(args.scoutBody, args.taskId);
+  const items = requirementRefs.map((ref, index) => ({
+    id: `BR-${String(index + 1).padStart(3, "0")}`,
+    requirementRefs: [ref],
+    surface: inferSurface(touchpoints.map((t) => t.path)),
+    title: `Impact area for ${ref}`,
+    risk: "medium",
+    touchpoints,
+    inbound: [],
+    outbound: [],
+    precedentRefs: [],
+    verificationRefs: [],
+  }));
+  return yaml.dump({ items }, { lineWidth: 100, sortKeys: false });
+}
+
+function extractRequirementRefs(body: string): string[] {
+  const refs = [...body.matchAll(/\bREQ-\d+\b/g)].map((m) => m[0]);
+  const unique = [...new Set(refs)];
+  return unique.length > 0 ? unique.slice(0, 8) : ["REQ-001"];
+}
+
+function extractTouchpoints(
+  scoutBody: string,
+  taskId: string,
+): Array<{ path: string; role: "change"; note: string }> {
+  const backtickRefs = [...scoutBody.matchAll(/`([^`\n]+?\.[A-Za-z0-9]+(?::\d+)?)`/g)]
+    .map((m) => normalizePathRef(m[1] ?? ""));
+  const bulletRefs = [...scoutBody.matchAll(/^\s*-\s+([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)(?::\d+)?/gm)]
+    .map((m) => normalizePathRef(m[1] ?? ""));
+  const paths = [...new Set([...backtickRefs, ...bulletRefs].filter((p) => p.length > 0))];
+  const selected = paths.slice(0, 8);
+  const fallback = [`.harness/${taskId}/spec.md`];
+  return (selected.length > 0 ? selected : fallback).map((path) => ({
+    path,
+    role: "change" as const,
+    note: "Seeded from codebase-scout findings; planner and follow-up research should verify the exact impact.",
+  }));
+}
+
+function normalizePathRef(ref: string): string {
+  return ref.replace(/:\d+$/, "").trim();
+}
+
+function inferSurface(paths: string[]): "api" | "ui" | "db" | "worker" | "config" | "test" | "external" {
+  if (paths.some((p) => p.includes("/dashboard/"))) return "ui";
+  if (paths.some((p) => p.includes("/db/") || p.includes("schema"))) return "db";
+  if (paths.some((p) => p.includes("/test/") || p.endsWith(".test.ts"))) return "test";
+  if (paths.some((p) => p.includes("runner") || p.includes("worker"))) return "worker";
+  if (paths.some((p) => p.endsWith(".json") || p.endsWith(".yaml") || p.endsWith(".toml"))) {
+    return "config";
+  }
+  if (paths.some((p) => p.includes("/http/") || p.includes("/routes/"))) return "api";
+  return "api";
+}
+
+function readBlastRadiusBody(cwd: string, taskId: string): string | null {
+  const path = join(cwd, ".harness", taskId, "blast-radius.yaml");
+  if (!existsSync(path)) return null;
+  return readFileSync(path, "utf8");
 }

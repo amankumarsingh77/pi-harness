@@ -120,7 +120,8 @@ function toBrainstormMiniature(
 // plan phase's structured scenarios file (consumed by the verify phase).
 // Centralized so callers never compose a path themselves.
 export function artifactFileName(kind: ArtifactKind): string {
-  return kind === "scenarios" ? "scenarios.yaml" : `${kind}.md`;
+  if (kind === "scenarios" || kind === "blast-radius") return `${kind}.yaml`;
+  return `${kind}.md`;
 }
 
 // Branch-scoped artifact store. Owns every read/write under
@@ -133,7 +134,8 @@ export function artifactFileName(kind: ArtifactKind): string {
 //     ├── design.md       (frontmatter + body)
 //     ├── spec.md         (frontmatter + body)
 //     ├── plan.md         (frontmatter + body)
-//     └── scenarios.yaml  (frontmatter + body)
+//     ├── scenarios.yaml  (frontmatter + body)
+//     └── blast-radius.yaml (frontmatter + body)
 //
 // Legacy run-scoped artifacts (BrainstormArtifact / PlanArtifact /
 // ProofReport JSON) live in LegacyRunArtifactsStore — separate class because
@@ -174,7 +176,7 @@ export class ArtifactsStore {
   async listArtifacts(
     cwd: string,
     taskId: string,
-    kinds: readonly ArtifactKind[] = ["design", "spec", "plan", "scenarios"],
+    kinds: readonly ArtifactKind[] = ["design", "spec", "plan", "scenarios", "blast-radius"],
   ): Promise<Artifact[]> {
     const out: Artifact[] = [];
     for (const kind of kinds) {
@@ -381,6 +383,7 @@ export class ArtifactsStore {
       "pi-session.jsonl",
       "plan.md",
       "scenarios.yaml",
+      "blast-radius.yaml",
       "plan.jsonl",
       "pi-session-plan.jsonl",
     ];

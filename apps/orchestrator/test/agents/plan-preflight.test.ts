@@ -122,7 +122,7 @@ describe("runPreflight", () => {
   const N = PREFLIGHT_SUBAGENTS.length;
   const FIRST = PREFLIGHT_SUBAGENTS[0]!;
 
-  it("dispatches every preflight subagent in parallel and writes findings", async () => {
+  it("runs codebase-scout, synthesizes blast-radius.yaml, then writes remaining findings", async () => {
     const events: PreflightSubagentEvent[] = [];
     const result = await runPreflight(
       baseOpts({
@@ -148,22 +148,30 @@ describe("runPreflight", () => {
 
     expect(events.filter((e) => e.kind === "started")).toHaveLength(N);
     expect(events.filter((e) => e.kind === "ended")).toHaveLength(N);
+    expect(events[0]).toMatchObject({ kind: "started", subagent: "codebase-scout" });
+    expect(events[1]).toMatchObject({ kind: "ended", subagent: "codebase-scout" });
+
+    const blastRadius = await readFile(
+      join(cwd, ".harness", "T-001", "blast-radius.yaml"),
+      "utf8",
+    );
+    expect(blastRadius).toContain("kind: blast-radius");
+    expect(blastRadius).toContain("id: BR-001");
+    expect(blastRadius).toContain("requirementRefs:");
   });
 
-  it("dispatches subagents concurrently (all create() calls fire before any prompt resolves)", async () => {
+  it("dispatches enrichment subagents concurrently after codebase-scout resolves", async () => {
     let createdCount = 0;
-    const peakBeforeFirstResolve = { value: 0 };
-    let firstResolved = false;
+    const enrichmentCreatedBeforeResolve = { value: 0 };
+    let scoutResolved = false;
+    let enrichmentResolved = false;
 
     const writer = makeFakeWriter({
       delayMs: 30,
       onCreate: () => {
         createdCount += 1;
-        if (!firstResolved) {
-          peakBeforeFirstResolve.value = Math.max(
-            peakBeforeFirstResolve.value,
-            createdCount,
-          );
+        if (scoutResolved && !enrichmentResolved) {
+          enrichmentCreatedBeforeResolve.value += 1;
         }
       },
     });
@@ -173,7 +181,11 @@ describe("runPreflight", () => {
       const orig = s.prompt.bind(s);
       s.prompt = async (t) => {
         const r = await orig(t);
-        firstResolved = true;
+        if (!scoutResolved) {
+          scoutResolved = true;
+        } else {
+          enrichmentResolved = true;
+        }
         return r;
       };
       return s;
@@ -186,10 +198,10 @@ describe("runPreflight", () => {
       }),
     );
 
-    expect(peakBeforeFirstResolve.value).toBe(N);
+    expect(enrichmentCreatedBeforeResolve.value).toBe(N - 1);
   });
 
-  it("one required subagent failure makes preflight fail", async () => {
+  it("a codebase-scout failure stops preflight before downstream research", async () => {
     const result = await runPreflight(
       baseOpts({
         createAgentSession: makeFakeWriter({
@@ -202,8 +214,7 @@ describe("runPreflight", () => {
     const failed = result.results.find((r) => r.subagent === FIRST)!;
     expect(failed.ok).toBe(false);
     expect(failed.error).toContain("synthetic failure");
-    const others = result.results.filter((r) => r.subagent !== FIRST);
-    expect(others.every((r) => r.ok)).toBe(true);
+    expect(result.results).toHaveLength(1);
   });
 
   it("a session that returns without write_findings fails the subagent", async () => {
@@ -214,6 +225,7 @@ describe("runPreflight", () => {
     );
 
     expect(result.failed).toBe(true);
+    expect(result.results).toHaveLength(1);
     expect(result.results.every((r) => !r.ok)).toBe(true);
     expect(result.results[0]?.error).toContain("completed without writing findings");
   });
@@ -226,6 +238,7 @@ describe("runPreflight", () => {
     );
 
     expect(result.failed).toBe(true);
+    expect(result.results).toHaveLength(1);
     expect(result.results.every((r) => !r.ok)).toBe(true);
     expect(result.results[0]?.error).toContain("completed without writing findings");
   });
@@ -261,7 +274,7 @@ describe("runPreflight", () => {
     );
 
     expect(result.failed).toBe(true);
-    expect(aborts).toBe(N);
+    expect(aborts).toBe(1);
     expect(result.results.every((r) => r.error?.includes("timed out"))).toBe(true);
   });
 
@@ -275,7 +288,7 @@ describe("runPreflight", () => {
           rejectOnAbort: true,
           onCreate: () => {
             created += 1;
-            if (created === N) {
+            if (created === 1) {
               setTimeout(() => controller.abort(), 0);
             }
           },
@@ -290,7 +303,7 @@ describe("runPreflight", () => {
 
     const result = await resultPromise;
     expect(result.failed).toBe(true);
-    expect(aborts).toBe(N);
+    expect(aborts).toBe(1);
   });
 
   it("re-entry skips subagents whose findings file already exists", async () => {
@@ -374,5 +387,37 @@ describe("runPreflight", () => {
     expect(captured).toContain("WHEN /cancel arrives");
     expect(captured).not.toContain(designSentinel);
     expect(captured).toContain("Full context (read on demand)");
+  });
+
+  it("passes synthesized blast radius context to downstream research prompts", async () => {
+    const captured: Record<string, string> = {};
+    const writer = makeFakeWriter();
+    const wrapped: typeof writer = async (o) => {
+      const writeFindings = (o.customTools ?? []).find((t) => t.name === "write_findings") as
+        | (NonNullable<AgentSessionOptions["customTools"]>[number] & {
+            __subagent: string;
+          })
+        | undefined;
+      const subagent = writeFindings?.__subagent ?? "unknown";
+      const s = await writer(o);
+      const orig = s.prompt.bind(s);
+      s.prompt = async (t) => {
+        captured[subagent] = t;
+        return orig(t);
+      };
+      return s;
+    };
+
+    await runPreflight(
+      baseOpts({
+        createAgentSession: wrapped,
+        specBody: "# Spec\n\nREQ-002: Verify plan blast radius.\n",
+      }),
+    );
+
+    expect(captured["codebase-scout"]).not.toContain("Current blast-radius.yaml");
+    expect(captured["integration-scanner"]).toContain("Current blast-radius.yaml");
+    expect(captured["integration-scanner"]).toContain("BR-001");
+    expect(captured["precedent-locator"]).toContain("BR-001");
   });
 });

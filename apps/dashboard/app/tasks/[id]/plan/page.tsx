@@ -116,7 +116,15 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
                 )}
               </article>
               <aside className="scroll-hide overflow-y-auto px-7 py-5.5">
-                <SectionHeading num="02" title="scenarios.yaml" status={bundle.scenarios?.fm.status ?? null} />
+                <SectionHeading num="02" title="blast-radius.yaml" status={bundle.blastRadius?.fm.status ?? null} />
+                {bundle.blastRadius ? (
+                  <pre className="scroll-hide mb-5 overflow-x-auto rounded border border-line bg-bg p-3 font-mono text-[12px] leading-[1.55] text-fg-body">
+                    {bundle.blastRadius.body.trim()}
+                  </pre>
+                ) : (
+                  <EmptyState text="blast-radius.yaml hasn't been authored yet" />
+                )}
+                <SectionHeading num="03" title="scenarios.yaml" status={bundle.scenarios?.fm.status ?? null} />
                 {bundle.scenarios ? (
                   <pre className="scroll-hide overflow-x-auto rounded border border-line bg-bg p-3 font-mono text-[12px] leading-[1.55] text-fg-body">
                     {bundle.scenarios.body.trim()}

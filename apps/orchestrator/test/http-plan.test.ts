@@ -81,6 +81,33 @@ async function makePlanWorktree(
     },
     body: validScenariosBody,
   });
+  await store.writeArtifact(wt, taskId, {
+    fm: {
+      task: taskId,
+      kind: "blast-radius",
+      parent: "spec.md",
+      branch: `pi/${taskId}`,
+      status: scenariosStatus,
+      last_updated: new Date().toISOString(),
+      last_updated_by: "test",
+    },
+    body: `items:
+  - id: BR-001
+    requirementRefs:
+      - REQ-001
+    surface: api
+    title: Plan route impact
+    risk: medium
+    touchpoints:
+      - path: apps/orchestrator/src/http/routes/plan.ts
+        role: change
+        note: Plan bundle surfaces blast radius.
+    inbound: []
+    outbound: []
+    precedentRefs: []
+    verificationRefs: []
+`,
+  });
   await git.raw(["add", "-f", ".harness"]);
   await git.commit("seed plan");
   return wt;
@@ -116,6 +143,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(body.gate).toBe("running");
     expect(body.plan).toBeNull();
     expect(body.scenarios).toBeNull();
+    expect(body.blastRadius).toBeNull();
     expect(body.research["codebase-scout"]).toBeNull();
   });
 
@@ -134,6 +162,8 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(body.gate).toBe("awaiting_user");
     expect(body.plan?.fm.status).toBe("ready");
     expect(body.scenarios?.fm.status).toBe("ready");
+    expect(body.blastRadius?.fm.status).toBe("ready");
+    expect(body.blastRadius?.body).toContain("BR-001");
     expect(body.research["codebase-scout"]).toContain("codebase-scout findings");
     expect(body.research["integration-scanner"]).toBeNull();
   });

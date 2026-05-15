@@ -180,7 +180,7 @@ function artifactNamesForPhase(phase: ArtifactSummary["phase"]): readonly string
     case "brainstorm":
       return ["design.md", "spec.md"];
     case "plan":
-      return ["plan.md", "scenarios.yaml"];
+      return ["plan.md", "blast-radius.yaml", "scenarios.yaml"];
     case "verify":
       return ["proof-report.md"];
   }
