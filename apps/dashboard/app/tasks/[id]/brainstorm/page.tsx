@@ -33,6 +33,8 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
   // exists (e.g. the user has filed the task but not approved start-brainstorm).
   const brainstormRun = [...runs].reverse().find((r) => r.phase === "brainstorm") ?? null;
   const brainstormRunId = brainstormRun?.id ?? null;
+  const brainstormRunActive =
+    brainstormRun?.status === "pending" || brainstormRun?.status === "running";
   // waterfall: the run id comes from the task detail response.
   const initialAgentEvents = brainstormRunId
     ? (await orchestrator.listEvents(brainstormRunId)).events
@@ -51,7 +53,11 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
           spec={bundle.spec}
           initialEvents={bundle.events}
           initialAgentEvents={initialAgentEvents}
-          canCancel={task.status === "brainstorming" && brainstormRun?.status === "running"}
+          canCancel={
+            task.status === "brainstorming" &&
+            bundle.gate === "running" &&
+            brainstormRunActive
+          }
           cancelled={task.status === "brainstorming" && brainstormRun?.status === "cancelled"}
         />
       </BrainstormEventsProvider>

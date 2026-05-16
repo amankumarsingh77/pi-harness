@@ -34,6 +34,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   // (e.g. before brainstorm has been approved).
   const planRun = [...runs].reverse().find((r) => r.phase === "plan") ?? null;
   const planRunId = planRun?.id ?? null;
+  const planRunActive = planRun?.status === "pending" || planRun?.status === "running";
 
   // Past planning: header status reads "approved" rather than "in progress",
   // matching the brainstorm page's PAST_BRAINSTORM treatment so the header
@@ -79,6 +80,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           gate={bundle.gate}
           headerStatus={headerStatus}
           iconKind={iconKind}
+          canCancelRun={task.status === "planning" && bundle.gate === "running" && planRunActive}
           research={bundle.research}
           planEvents={bundle.events}
           plan={bundle.plan}

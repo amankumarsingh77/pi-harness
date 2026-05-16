@@ -16,6 +16,7 @@ export function PlanConsole({
   gate,
   headerStatus,
   iconKind,
+  canCancelRun,
   plan,
   blastRadius,
   scenarios,
@@ -30,6 +31,7 @@ export function PlanConsole({
   readonly gate: PlanGate;
   readonly headerStatus: string;
   readonly iconKind: "intake" | "progress" | "review" | "done" | "blocked";
+  readonly canCancelRun: boolean;
   readonly plan: Artifact | null;
   readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
@@ -40,7 +42,6 @@ export function PlanConsole({
   readonly plannerLogDefaultOpen: boolean;
 }) {
   const planRun = [...runs].reverse().find((run) => run.phase === "plan") ?? null;
-  const canCancel = task.status === "planning" && planRun?.status === "running";
   const canRestart =
     (task.status === "planning" || task.status === "plan_failed") &&
     (planRun?.status === "running" || planRun?.status === "cancelled");
@@ -85,7 +86,7 @@ export function PlanConsole({
               <MetaPill label="stream" value={connected ? "live" : "replay"} />
             </div>
             <div className="flex flex-wrap gap-2 lg:justify-end">
-              {canCancel && (
+              {canCancelRun && (
                 <CancelPhaseRunButton taskId={task.id} phase="plan" disabled={false} />
               )}
               <RestartPlanButton taskId={task.id} disabled={!canRestart} />
@@ -95,7 +96,7 @@ export function PlanConsole({
 
         <PreflightAgentConsole
           taskId={task.id}
-          canCancelRun={canCancel}
+          canCancelRun={canCancelRun}
           research={research}
           planEvents={planEvents}
           liveEvents={liveEvents}

@@ -16,6 +16,7 @@ export function PlanBody({
   gate,
   headerStatus,
   iconKind,
+  canCancelRun,
   research,
   planEvents,
   plan,
@@ -28,6 +29,7 @@ export function PlanBody({
   gate: PlanGate;
   headerStatus: string;
   iconKind: "intake" | "progress" | "review" | "done" | "blocked";
+  canCancelRun: boolean;
   research: Record<string, string | null>;
   planEvents: PlanJsonlEvent[];
   plan: Artifact | null;
@@ -44,6 +46,7 @@ export function PlanBody({
       gate={gate}
       headerStatus={headerStatus}
       iconKind={iconKind}
+      canCancelRun={canCancelRun}
       plan={plan}
       blastRadius={blastRadius}
       scenarios={scenarios}

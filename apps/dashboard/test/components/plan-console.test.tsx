@@ -137,6 +137,7 @@ function renderConsole() {
         gate="running"
         headerStatus="in progress"
         iconKind="progress"
+        canCancelRun
         plan={artifact("plan", planBody)}
         blastRadius={artifact("blast-radius", blastRadiusBody)}
         scenarios={artifact("scenarios", scenariosBody)}
