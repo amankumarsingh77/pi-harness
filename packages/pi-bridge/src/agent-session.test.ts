@@ -1,11 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentSession, AuthError, type PiBridgeEvent } from "./agent-session.js";
+import {
+  createAgentSession,
+  AuthError,
+  __resetRegistryCache,
+  type PiBridgeEvent,
+} from "./agent-session.js";
 import { __resetAuthCache } from "./auth.js";
 import { createFakeAdapter } from "./_test/fake-sdk.js";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 // The fake-sdk adapter satisfies SdkBoundary structurally and lets each test
 // drive the SDK event stream directly. We assert observable outcomes only:
@@ -46,6 +51,7 @@ beforeEach(() => {
   process.chdir(envDir);
   writeFileSync(join(envDir, ".env.harness"), "ANTHROPIC_API_KEY=test-key\n");
   __resetAuthCache();
+  __resetRegistryCache();
 });
 
 afterEach(() => {
@@ -57,8 +63,11 @@ afterEach(() => {
   }
   rmSync(envDir, { recursive: true, force: true });
   __resetAuthCache();
+  __resetRegistryCache();
   delete process.env["ANTHROPIC_API_KEY"];
   delete process.env["OPENAI_API_KEY"];
+  delete process.env["CROFAI_API_KEY"];
+  vi.restoreAllMocks();
 });
 
 describe("createAgentSession", () => {
@@ -357,16 +366,28 @@ describe("createAgentSession", () => {
 
   it("crofai auth present: assertCredential passes when CROFAI_API_KEY is set", async () => {
     process.env["CROFAI_API_KEY"] = "test-crofai-key";
-    try {
-      const adapter = createFakeAdapter();
-      const session = await createAgentSession(
-        { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
-        adapter,
-      );
-      await session.close();
-    } finally {
-      delete process.env["CROFAI_API_KEY"];
-    }
+    const setRuntimeApiKey = vi.spyOn(AuthStorage.prototype, "setRuntimeApiKey");
+    const adapter = createFakeAdapter();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+      adapter,
+    );
+    await session.close();
+    expect(setRuntimeApiKey).toHaveBeenCalledWith("crofai", "test-crofai-key");
+  });
+
+  it("programmatically shares .env.harness CROFAI_API_KEY with AuthStorage", async () => {
+    writeFileSync(join(envDir, ".env.harness"), "CROFAI_API_KEY=file-crofai-key\n");
+    __resetAuthCache();
+    __resetRegistryCache();
+    const setRuntimeApiKey = vi.spyOn(AuthStorage.prototype, "setRuntimeApiKey");
+    const adapter = createFakeAdapter();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+      adapter,
+    );
+    await session.close();
+    expect(setRuntimeApiKey).toHaveBeenCalledWith("crofai", "file-crofai-key");
   });
 
   it("openai-codex oauth present: assertCredential passes with auth.json token", async () => {

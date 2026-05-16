@@ -158,6 +158,7 @@ export async function createAgentSession(
   boundary: SdkBoundary = defaultBoundary,
 ): Promise<AgentSession> {
   loadEnvHarness();
+  syncRuntimeApiKey(opts.model.provider);
   assertCredential(opts.model.provider);
 
   const sdkSession = await openSession(boundary, opts);
@@ -324,6 +325,32 @@ function allowlistedTools(
     out.add(tool.name);
   }
   return [...out];
+}
+
+function syncRuntimeApiKey(provider: string): void {
+  if (OAUTH_PROVIDERS.has(provider)) return;
+  const apiKey = apiKeyFromEnv(provider);
+  if (apiKey) {
+    getAuthStorage().setRuntimeApiKey(provider, apiKey);
+  }
+}
+
+function apiKeyFromEnv(provider: string): string | undefined {
+  const customEnv = CUSTOM_PROVIDER_ENV[provider];
+  if (customEnv !== undefined) {
+    return nonEmptyEnv(customEnv);
+  }
+
+  for (const envKey of findEnvKeys(provider) ?? []) {
+    const apiKey = nonEmptyEnv(envKey);
+    if (apiKey) return apiKey;
+  }
+  return getEnvApiKey(provider) || undefined;
+}
+
+function nonEmptyEnv(key: string): string | undefined {
+  const value = process.env[key];
+  return value && value.length > 0 ? value : undefined;
 }
 
 // Upfront credential check using the SDK's own provider→env-var registry

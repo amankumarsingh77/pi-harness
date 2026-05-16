@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { __resetAuthCache, loadEnvHarness } from "./auth.js";
 
-const TOUCHED_KEYS = ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY"];
+const TOUCHED_KEYS = ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "CROFAI_API_KEY"];
 
 let dir: string;
 let prevCwd: string;
@@ -47,6 +47,13 @@ describe("loadEnvHarness", () => {
     writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=file-key\n");
     loadEnvHarness();
     expect(process.env["ANTHROPIC_API_KEY"]).toBe("shell-key");
+  });
+
+  it("fills an empty shell env var from .env.harness", () => {
+    process.env["CROFAI_API_KEY"] = "";
+    writeFileSync(join(dir, ".env.harness"), "CROFAI_API_KEY=file-key\n");
+    loadEnvHarness();
+    expect(process.env["CROFAI_API_KEY"]).toBe("file-key");
   });
 
   it("is idempotent within a single process (cache guard)", () => {
