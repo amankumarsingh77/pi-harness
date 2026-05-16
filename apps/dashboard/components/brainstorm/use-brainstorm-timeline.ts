@@ -6,7 +6,6 @@ import type { BrainstormGate, BrainstormJsonlEvent } from "@/lib/api";
 import { deriveActivity, type ActivityState } from "./activity-line";
 
 export type QuestionEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>;
-export type AnswerEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_answer" }>;
 export type NudgeEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_user_nudge" }>;
 export type AgentReplyEvent = Extract<
   BrainstormJsonlEvent,

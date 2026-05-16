@@ -1,0 +1,23 @@
+ruleDirs:
+  - ast-grep/rules
+ignores:
+  - node_modules
+  - .turbo
+  - .worktrees
+  - .harness
+  - .next
+  - dist
+  - coverage
+  - .reports
+  - test-results
+  - apps/dashboard/test
+  - apps/dashboard/e2e
+  - apps/orchestrator/test
+  - packages/shared/test
+  - packages/db/test
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - subagents/_vendored
+  - packages/db/migrations

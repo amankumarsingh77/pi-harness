@@ -50,8 +50,6 @@ export function registerEventStream(
         reply.raw.end();
       });
 
-      // Keep the response open.
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
       return new Promise<never>(() => {});
     },
   );

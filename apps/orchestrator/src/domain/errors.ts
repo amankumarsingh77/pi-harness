@@ -2,7 +2,6 @@ export type HarnessErrorCode =
   | "invalid_transition"
   | "not_found"
   | "validation"
-  | "dispatch_failed"
   | "worktree_failed"
   | "internal";
 
@@ -44,12 +43,6 @@ export class NotFoundError extends HarnessError {
 export class ValidationError extends HarnessError {
   constructor(message: string, details?: Record<string, unknown>) {
     super("validation", 400, message, details);
-  }
-}
-
-export class DispatchError extends HarnessError {
-  constructor(message: string, details?: Record<string, unknown>) {
-    super("dispatch_failed", 500, message, details);
   }
 }
 

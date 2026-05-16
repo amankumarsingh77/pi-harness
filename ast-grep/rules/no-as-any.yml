@@ -1,0 +1,6 @@
+id: no-as-any
+language: TypeScript
+severity: error
+message: Do not cast to any. Use unknown plus narrowing or a focused test double type.
+rule:
+  pattern: $VALUE as any

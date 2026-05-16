@@ -112,7 +112,6 @@ async function main(): Promise<void> {
 main().catch((e) => {
   // No structured logger here yet — fatal during boot, write the raw error
   // to stderr so the process supervisor sees it.
-  // eslint-disable-next-line no-console
   console.error("fatal:", e);
   process.exit(1);
 });
