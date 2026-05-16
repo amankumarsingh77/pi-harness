@@ -460,6 +460,20 @@ describe("parseFalsifiedClaims", () => {
     expect(parseFalsifiedClaims("# claims\n## c1\nVerified\n")).toEqual([]);
   });
 
+  it("collects pipe-delimited Falsified finding rows with justifications", () => {
+    const findings = [
+      "FINDING S1 | Verified | quote matches at src/a.ts:1",
+      "FINDING S2 | Falsified | cited file src/missing.ts does not exist",
+      "FINDING S3 | Weakened | narrower than stated at src/b.ts:2",
+      "FINDING S4 | Falsified | claim contradicted by src/c.ts:3",
+    ].join("\n");
+
+    expect(parseFalsifiedClaims(findings)).toEqual([
+      "S2: cited file src/missing.ts does not exist",
+      "S4: claim contradicted by src/c.ts:3",
+    ]);
+  });
+
   it("collects each header preceded by a Falsified marker", () => {
     const md = [
       "# Audit",

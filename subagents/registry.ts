@@ -48,11 +48,23 @@ export type BuiltinTool =
   | "edit"
   | "write";
 
+export type CustomTool =
+  | "submit_questions"
+  | "submit_mock_choices"
+  | "write_mock_revision"
+  | "reply_to_user"
+  | "mark_ready"
+  | "pi_web_search"
+  | "pi_web_fetch"
+  | "write_findings"
+  | "git_history";
+
 export type SubagentDef = {
   name: string;
   role: SubagentRole;
   promptPath: string;
   allowedTools: readonly BuiltinTool[];
+  customTools?: readonly CustomTool[];
   invokedBy: readonly Phase[];
   // One-line per-ticket job framing the dispatcher inlines into the user
   // prompt. Empty for phase-drivers — they build their own prompts.
@@ -68,7 +80,16 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     name: "brainstorm",
     role: "phase-driver",
     promptPath: resolve(OURS_DIR, "brainstorm.md"),
-    allowedTools: ["read", "grep", "find", "ls", "edit", "write"],
+    allowedTools: ["read", "write"],
+    customTools: [
+      "submit_questions",
+      "submit_mock_choices",
+      "write_mock_revision",
+      "mark_ready",
+      "reply_to_user",
+      "pi_web_search",
+      "pi_web_fetch",
+    ],
     invokedBy: ["brainstorm"],
     framing: "",
     description: "Drives the Q&A loop and writes design.md + spec.md",
@@ -77,7 +98,8 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     name: "plan",
     role: "phase-driver",
     promptPath: resolve(OURS_DIR, "plan.md"),
-    allowedTools: ["read", "grep", "find", "ls", "edit", "write"],
+    allowedTools: ["read", "grep", "find", "write"],
+    customTools: ["mark_ready"],
     invokedBy: ["plan"],
     framing: "",
     description: "Reads research findings, authors plan.md + scenarios.yaml",
@@ -87,6 +109,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     role: "preflight-research",
     promptPath: resolve(VENDORED_DIR, "codebase-scout.md"),
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["write_findings"],
     invokedBy: ["plan"],
     framing:
       "Scout the codebase end-to-end for this ticket. Produce a single findings doc with three sections: Files (every file to be read or modified), Patterns (analogous code with file:line cites), Call paths (how the relevant flows work today).",
@@ -97,6 +120,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     role: "brainstorm-research",
     promptPath: resolve(VENDORED_DIR, "web-search-researcher.md"),
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["pi_web_search", "pi_web_fetch", "write_findings"],
     invokedBy: ["brainstorm"],
     framing:
       "Research external libraries, APIs, pricing, recent approaches, and source-backed alternatives before brainstorm asks the user questions.",
@@ -107,6 +131,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     role: "preflight-research",
     promptPath: resolve(VENDORED_DIR, "integration-scanner.md"),
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["write_findings"],
     invokedBy: ["plan"],
     framing:
       "Identify inbound and outbound system edges affected by this ticket.",
@@ -117,6 +142,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     role: "preflight-research",
     promptPath: resolve(VENDORED_DIR, "precedent-locator.md"),
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["git_history", "write_findings"],
     invokedBy: ["plan"],
     framing:
       "Find past similar changes from git history and what went wrong with each one.",
@@ -127,6 +153,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
     role: "post-plan-audit",
     promptPath: resolve(VENDORED_DIR, "claim-verifier.md"),
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["git_history", "write_findings"],
     invokedBy: ["plan"],
     framing: "",
     description: "Audits the planner's draft plan.md, tags claims",

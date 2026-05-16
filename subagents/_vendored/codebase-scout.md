@@ -1,7 +1,7 @@
 ---
 name: codebase-scout
 description: One-pass codebase research subagent. Locates files, surfaces analogous patterns, and traces relevant call paths in a single session — replaces the prior split between codebase-locator, codebase-pattern-finder, and codebase-analyzer. Composed from those three rpiv-mono originals; see subagents/ATTRIBUTION.md.
-tools: grep, find, ls, read
+tools: read, grep, find, ls, write_findings
 isolated: true
 ---
 
@@ -66,10 +66,11 @@ Use file:line refs liberally. Skip generic framework code (e.g. don't trace Fast
 - File:line references and short prose. **No code blocks longer than 3 lines.** No quoting whole functions. Link, don't summarize.
 - Hard cap: ~4KB of findings. If you're approaching the cap, prune the weakest entries — quality beats quantity.
 - Cite, don't restate. The planner can open any file you reference.
+- Do not list files only because they match a keyword. Include a file only if the planner might read or modify it.
 
 ## Process
 
 1. Read `.harness/<task>/design.md` and `spec.md` first to scope your search to what the ticket actually needs.
 2. Run `grep` / `find` / `ls` to locate candidate files. Keep tool calls focused — re-running a slightly different grep is fine; bulk-listing the entire repo is not.
-3. `read` the most relevant files to confirm their purpose and to extract the patterns + call paths.
+3. Use `read` only on high-signal files to confirm their purpose and to extract the patterns + call paths.
 4. Persist your findings via the `write_findings` tool. Call it exactly once when done.

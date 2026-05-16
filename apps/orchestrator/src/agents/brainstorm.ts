@@ -239,8 +239,10 @@ async function runTurn(
   };
 
   let systemPrompt: string;
+  let brainstormDef: ReturnType<typeof getSubagent>;
   try {
-    systemPrompt = readFileSync(getSubagent("brainstorm").promptPath, "utf8");
+    brainstormDef = getSubagent("brainstorm");
+    systemPrompt = readFileSync(brainstormDef.promptPath, "utf8");
   } catch (err) {
     return zeroUsage({
       ok: false,
@@ -259,7 +261,7 @@ async function runTurn(
         : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
-      tools: ["read", "write"],
+      tools: [...brainstormDef.allowedTools],
       customTools: [
         submitQuestionsTool,
         submitMockChoicesTool,
