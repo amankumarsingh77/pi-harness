@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { unlink, writeFile } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import yaml from "js-yaml";
 import type {
@@ -629,11 +629,4 @@ function numField(e: JsonlEvent, k: string): number | null {
 
 function zeroUsage(rest: Omit<PlanResult, "costUsd" | "inputTokens" | "outputTokens">): PlanResult {
   return { ...rest, costUsd: 0, inputTokens: 0, outputTokens: 0 };
-}
-
-// Helper: write a placeholder file to ensure parent directory exists when
-// callers want to seed an empty findings file (used in tests).
-export async function _ensureResearchFile(cwd: string, taskId: string, name: string): Promise<void> {
-  const path = join(cwd, ".harness", taskId, "research", name);
-  await writeFile(path, "# placeholder\n");
 }

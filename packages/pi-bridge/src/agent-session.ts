@@ -10,7 +10,7 @@ import {
   type CreateAgentSessionOptions,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { findEnvKeys, getEnvApiKey, getModel } from "@earendil-works/pi-ai";
+import { findEnvKeys, getEnvApiKey, getModels, getProviders } from "@earendil-works/pi-ai";
 import type { AssistantMessage, KnownProvider, Usage } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { existsSync, readFileSync } from "node:fs";
@@ -82,8 +82,13 @@ export type SdkBoundaryCreateOptions = {
   sessionPath?: string;
 };
 
+export type BridgeSdkSession = Pick<
+  SdkAgentSession,
+  "abort" | "dispose" | "isStreaming" | "prompt" | "sessionFile" | "subscribe"
+>;
+
 export type SdkBoundary = {
-  create: (opts: SdkBoundaryCreateOptions) => Promise<{ session: SdkAgentSession }>;
+  create: (opts: SdkBoundaryCreateOptions) => Promise<{ session: BridgeSdkSession }>;
 };
 
 // Providers we register with the SDK at runtime (not in pi-ai's static MODELS).
@@ -94,6 +99,7 @@ const CUSTOM_PROVIDER_ENV: Record<string, string> = {
 };
 
 const OAUTH_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
+const KNOWN_PROVIDERS = new Set<string>(getProviders());
 
 // Lazy per-process registry. Built once on first session creation; reused for
 // every subsequent session so the orchestrator doesn't re-register providers
@@ -112,6 +118,10 @@ function buildCustomRegistry(): ModelRegistry {
 function getAuthStorage(): AuthStorage {
   authStorage ??= AuthStorage.create();
   return authStorage;
+}
+
+function isKnownProvider(provider: string): provider is KnownProvider {
+  return KNOWN_PROVIDERS.has(provider);
 }
 
 async function getRegistry(): Promise<ModelRegistry> {
@@ -268,21 +278,14 @@ function resolveModel(spec: { provider: string; model: string }, registry: Model
     }
     return found;
   }
-  // The SDK's `getModel` is generic over the literal provider/model union and
-  // refuses bare strings at the type level. We accept arbitrary provider/model
-  // strings at our boundary (orchestrator config is dynamic) and let the SDK
-  // throw at runtime if the pair is unknown — that error is caught and rewrapped
-  // as AuthError so callers get a uniform failure type.
-  try {
-    return (getModel as unknown as (p: string, m: string) => ReturnType<typeof getModel<KnownProvider, never>>)(
-      spec.provider,
-      spec.model,
-    );
-  } catch (err) {
-    throw new AuthError(
-      `unknown model ${spec.provider}/${spec.model}: ${(err as Error).message}`,
-    );
+  if (isKnownProvider(spec.provider)) {
+    const found = getModels(spec.provider).find((model) => model.id === spec.model);
+    if (found) {
+      return found;
+    }
   }
+
+  throw new AuthError(`unknown model ${spec.provider}/${spec.model}: not registered in pi-ai`);
 }
 
 // The SDK throws on missing credentials. We catch and rewrap as AuthError so
@@ -293,7 +296,7 @@ function resolveModel(spec: { provider: string; model: string }, registry: Model
 async function openSession(
   boundary: SdkBoundary,
   opts: AgentSessionOptions,
-): Promise<SdkAgentSession> {
+): Promise<BridgeSdkSession> {
   try {
     const create: SdkBoundaryCreateOptions = {
       cwd: opts.cwd,

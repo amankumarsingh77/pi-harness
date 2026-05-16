@@ -161,7 +161,6 @@ describe("runPreflight", () => {
   });
 
   it("dispatches enrichment subagents concurrently after codebase-scout resolves", async () => {
-    let createdCount = 0;
     const enrichmentCreatedBeforeResolve = { value: 0 };
     let scoutResolved = false;
     let enrichmentResolved = false;
@@ -169,7 +168,6 @@ describe("runPreflight", () => {
     const writer = makeFakeWriter({
       delayMs: 30,
       onCreate: () => {
-        createdCount += 1;
         if (scoutResolved && !enrichmentResolved) {
           enrichmentCreatedBeforeResolve.value += 1;
         }

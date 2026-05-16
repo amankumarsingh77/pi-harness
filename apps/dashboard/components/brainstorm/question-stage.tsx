@@ -2,26 +2,7 @@
 
 import { useState } from "react";
 import { QuestionBatch } from "./question-card";
-import type { PendingBatch, QuestionEvent, QuestionThread, AnswerValue } from "./use-brainstorm-timeline";
-
-export function QuestionStage({
-  taskId,
-  batch,
-}: {
-  readonly taskId: string;
-  readonly batch: PendingBatch | null;
-}) {
-  if (batch === null) return null;
-  return (
-    <section className="brainstorm-focus-card" aria-label="Current question batch">
-      <div className="mb-3 flex items-baseline gap-2">
-        <h2 className="text-[15px] font-semibold text-fg">Current question</h2>
-        <span className="font-mono text-[11px] text-fg-subtle">{batch.batchId}</span>
-      </div>
-      <QuestionBatch taskId={taskId} questions={batch.questions} answered={batch.answered} />
-    </section>
-  );
-}
+import type { QuestionEvent, QuestionThread, AnswerValue } from "./use-brainstorm-timeline";
 
 export function QuestionThreadStage({
   taskId,

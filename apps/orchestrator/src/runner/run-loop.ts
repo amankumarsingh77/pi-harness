@@ -109,7 +109,7 @@ async function dispatchBrainstorm(
   opts: DispatchOpts & { branch: string },
 ): Promise<Task> {
   const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
-  let task = opts.task;
+  const task = opts.task;
 
   // Lay down design.md / spec.md scaffolding + initial commit. Idempotent.
   await scaffoldBrainstorm({ cwd: worktree.path, taskId: task.id, branch });
@@ -196,7 +196,7 @@ async function dispatchPlan(
   opts: DispatchOpts & { branch: string; enqueue?: (taskId: string) => void },
 ): Promise<Task> {
   const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
-  let task = opts.task;
+  const task = opts.task;
 
   await scaffoldPlan({ cwd: worktree.path, taskId: task.id, branch });
 

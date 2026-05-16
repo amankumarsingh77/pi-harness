@@ -110,10 +110,6 @@ export function ChatPanel({
   type QuestionEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>;
   type NudgeEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_user_nudge" }>;
   type ReplyEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_agent_reply" }>;
-  type MockProposalEvent = Extract<
-    BrainstormJsonlEvent,
-    { kind: "brainstorm_mock_proposed" | "brainstorm_mock_revised" }
-  >;
 
   const batchById = new Map<
     string,

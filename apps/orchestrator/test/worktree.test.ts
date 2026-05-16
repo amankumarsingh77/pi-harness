@@ -47,7 +47,7 @@ describe("WorktreeManager", () => {
     const wtDir = join(scratch, "worktrees");
     const wm = new WorktreeManager({ repoRoot: repo, worktreesDir: wtDir });
 
-    const wt = await wm.create("task-2", "feat/two");
+    await wm.create("task-2", "feat/two");
     await wm.remove("task-2");
 
     const list = await wm.list();
