@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { config as dotenvConfig } from "dotenv";
+import { config as dotenvConfig, parse as dotenvParse } from "dotenv";
 
 export class AuthError extends Error {
   constructor(message: string) {
@@ -23,12 +23,22 @@ function findMonorepoRoot(start: string): string {
 
 // Loads `.env.harness` once per process. The SDK reads provider credentials
 // straight from `process.env`; this shim only locates the file the user keeps
-// at the monorepo root and primes those env vars. Already-set shell vars win
-// (dotenv default `override:false`).
+// at the monorepo root and primes those env vars. Already-set non-empty shell
+// vars win; empty shell vars are treated as unset so the harness file can
+// repair a common `CROFAI_API_KEY=` environment leak.
 export function loadEnvHarness(): void {
   if (loaded) return;
   loaded = true;
-  dotenvConfig({ path: join(findMonorepoRoot(process.cwd()), ".env.harness") });
+  const path = join(findMonorepoRoot(process.cwd()), ".env.harness");
+  const result = dotenvConfig({ path });
+  if (!existsSync(path)) return;
+
+  const parsed = result.parsed ?? dotenvParse(readFileSync(path));
+  for (const [key, value] of Object.entries(parsed)) {
+    if (process.env[key] === "" && value !== "") {
+      process.env[key] = value;
+    }
+  }
 }
 
 // Test-only: rearm the load() guard so tests that rewrite .env.harness can
