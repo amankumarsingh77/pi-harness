@@ -214,7 +214,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     const t = await runs.createTask({ title: "appr" });
     const wt = await makePlanWorktree(t.id, "ready", "ready");
     await runs.updateTask(t.id, { status: "planning", worktreePath: wt, branchName: `pi/${t.id}` });
-    const run = await runs.createRun({ taskId: t.id, phase: "plan" });
+    await runs.createRun({ taskId: t.id, phase: "plan" });
 
     const res = await app.inject({
       method: "POST",

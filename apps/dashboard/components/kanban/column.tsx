@@ -1,6 +1,6 @@
 import type { Task, TaskStatus } from "@pi-harness/shared";
 import { clsx } from "clsx";
-import type { BoardTransition, BoardTransitionAction } from "./board";
+import type { BoardTransition, BoardTransitionAction } from "./transition-types";
 import { TaskCard } from "./card";
 import { StatusIcon, statusKindFor } from "./status-icon";
 

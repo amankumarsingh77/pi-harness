@@ -1,0 +1,7 @@
+id: no-ts-ignore
+language: TypeScript
+severity: error
+message: Do not use @ts-ignore. Fix the type mismatch or use a described @ts-expect-error for intentional negative tests.
+rule:
+  kind: comment
+  regex: "@ts-ignore"

@@ -50,7 +50,7 @@ export const orchestrator: Api = {
       return await real.getArtifact<T>(taskId, name);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404 && name === "brainstorm") {
-        return MOCK_BRAINSTORM_ARTIFACT as unknown as T;
+        return MOCK_BRAINSTORM_ARTIFACT as T;
       }
       throw e;
     }

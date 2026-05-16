@@ -165,8 +165,8 @@ export function TaskDetailInspectors({
                       key={artifact.name}
                       type="button"
                       onClick={() => setSelectedArtifactName(artifact.name)}
-                      className="flex min-h-[35px] w-full items-center justify-between rounded-[7px] px-2.5 text-left font-mono text-[11px] text-fg-mute transition-colors hover:bg-white/[0.045] hover:text-fg-body aria-selected:bg-white/[0.045] aria-selected:text-fg-body"
-                      aria-selected={artifact.name === selectedArtifact?.name}
+                      className="flex min-h-[35px] w-full items-center justify-between rounded-[7px] px-2.5 text-left font-mono text-[11px] text-fg-mute transition-colors hover:bg-white/[0.045] hover:text-fg-body aria-pressed:bg-white/[0.045] aria-pressed:text-fg-body"
+                      aria-pressed={artifact.name === selectedArtifact?.name}
                     >
                       <span>{artifact.name}</span>
                       <span>{artifact.lines === null ? "--" : `${artifact.lines}L`}</span>

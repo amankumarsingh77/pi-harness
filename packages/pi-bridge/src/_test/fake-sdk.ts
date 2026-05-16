@@ -1,8 +1,11 @@
 import type {
-  AgentSession as SdkAgentSession,
   AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { SdkBoundary, SdkBoundaryCreateOptions } from "../agent-session.js";
+import type {
+  BridgeSdkSession,
+  SdkBoundary,
+  SdkBoundaryCreateOptions,
+} from "../agent-session.js";
 
 export type FakeSdkSessionState = {
   subscribers: ((e: AgentSessionEvent) => void)[];
@@ -42,7 +45,7 @@ export function createFakeAdapter(opts?: { sessionFile?: string }): FakeAgentSdk
     for (const sub of state.subscribers) sub(event);
   };
 
-  const session = {
+  const session: BridgeSdkSession = {
     subscribe(listener: (event: AgentSessionEvent) => void) {
       state.subscribers.push(listener);
       return () => {
@@ -65,7 +68,7 @@ export function createFakeAdapter(opts?: { sessionFile?: string }): FakeAgentSdk
     get isStreaming() {
       return state.isStreaming;
     },
-  } as unknown as SdkAgentSession;
+  };
 
   return {
     state,

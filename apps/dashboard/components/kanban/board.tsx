@@ -2,15 +2,9 @@
 
 import type { Task, TaskPriority, TaskStatus, Workflow } from "@pi-harness/shared";
 import { useMemo, useState } from "react";
-import type { Api } from "@/lib/api";
 import { mutations } from "@/lib/client/queries";
 import { KanbanColumn } from "./column";
-
-export type BoardTransitionAction = Parameters<Api["transitionTask"]>[1];
-export type BoardTransition = (
-  taskId: string,
-  action: BoardTransitionAction,
-) => Promise<void>;
+import type { BoardTransition } from "./transition-types";
 
 export type BoardFilters = {
   workflow?: Workflow;

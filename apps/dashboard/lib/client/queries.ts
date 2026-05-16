@@ -9,33 +9,6 @@ const proxied: Api = api({
   fetch: (input, init) => fetch(input.replace(/^\/api\//, "/api/proxy/"), init),
 });
 
-export const queryKeys = {
-  tasks: ["tasks"] as const,
-  task: (id: string) => ["tasks", id] as const,
-  events: (runId: string) => ["runs", runId, "events"] as const,
-  artifact: (taskId: string, name: "brainstorm" | "plan" | "proof-report") =>
-    ["tasks", taskId, "artifacts", name] as const,
-};
-
-export const queries = {
-  listTasks: () => ({
-    queryKey: queryKeys.tasks,
-    queryFn: () => proxied.listTasks(),
-  }),
-  getTask: (id: string) => ({
-    queryKey: queryKeys.task(id),
-    queryFn: () => proxied.getTask(id),
-  }),
-  listEvents: (runId: string) => ({
-    queryKey: queryKeys.events(runId),
-    queryFn: () => proxied.listEvents(runId),
-  }),
-  getArtifact: <T,>(taskId: string, name: "brainstorm" | "plan" | "proof-report") => ({
-    queryKey: queryKeys.artifact(taskId, name),
-    queryFn: () => proxied.getArtifact<T>(taskId, name),
-  }),
-};
-
 export const mutations = {
   createTask: () => ({
     mutationFn: (input: Parameters<Api["createTask"]>[0]) =>
