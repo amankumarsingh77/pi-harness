@@ -271,6 +271,28 @@ describe("KanbanBoard", () => {
     );
   });
 
+  it("uses a yellow edge for cards that require human intervention", () => {
+    const tasks = [
+      baseTask({
+        id: "needs-human",
+        title: "Review the brainstorm",
+        status: "brainstorming",
+      }),
+    ];
+    render(
+      <KanbanBoard
+        tasks={tasks}
+        counts={{ brainstorming: 1 }}
+        humanInterventionTaskIds={["needs-human"]}
+      />,
+    );
+
+    expect(screen.getByTestId("task-card-stripe-needs-human")).toHaveAttribute(
+      "style",
+      expect.stringContaining("var(--color-card-stripe-review)"),
+    );
+  });
+
   it("empty columns show the drop placeholder affordance", () => {
     render(<KanbanBoard tasks={[]} counts={{}} />);
     expect(screen.getAllByText("drop here · or ⌘N")).toHaveLength(1);

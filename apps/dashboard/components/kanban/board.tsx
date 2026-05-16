@@ -51,17 +51,23 @@ export function KanbanBoard({
   counts: _counts,
   onTransition,
   initialFilters = {},
+  humanInterventionTaskIds = [],
 }: {
   tasks: Task[];
   counts: Partial<Record<TaskStatus, number>>;
   onTransition?: BoardTransition;
   initialFilters?: BoardFilters;
+  humanInterventionTaskIds?: readonly string[];
 }) {
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState<BoardFilters>(initialFilters);
   const transitionTask = onTransition ?? createDefaultTransition();
   const visibleTasks = useMemo(() => filterTasks(tasks, filters), [tasks, filters]);
+  const humanInterventionTasks = useMemo(
+    () => new Set(humanInterventionTaskIds),
+    [humanInterventionTaskIds],
+  );
   const activeDragTask = useMemo(
     () => visibleTasks.find((task) => task.id === activeDragTaskId) ?? null,
     [activeDragTaskId, visibleTasks],
@@ -132,6 +138,7 @@ export function KanbanBoard({
                 count={bucketedCounts[status] ?? 0}
                 activeDragTaskId={activeDragTaskId}
                 pendingTaskId={pendingTaskId}
+                humanInterventionTasks={humanInterventionTasks}
               />
             ))}
           </div>

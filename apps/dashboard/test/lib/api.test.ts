@@ -7,6 +7,7 @@ describe("api", () => {
       Response.json({
         tasks: [],
         counts: { backlog: 0 },
+        humanInterventionTaskIds: ["t-review"],
         summary: {
           runningCount: 0,
           reviewCount: 0,
@@ -22,6 +23,7 @@ describe("api", () => {
 
     const r = await a.listTasks();
     expect(r.tasks).toEqual([]);
+    expect(r.humanInterventionTaskIds).toEqual(["t-review"]);
     expect(r.summary.lastEventAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z");
     expect(fetchSpy).toHaveBeenCalledWith("http://x/api/tasks", expect.any(Object));
   });

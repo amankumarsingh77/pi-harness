@@ -40,12 +40,14 @@ export function KanbanColumn({
   count,
   activeDragTaskId,
   pendingTaskId,
+  humanInterventionTasks,
 }: {
   status: TaskStatus;
   tasks: Task[];
   count: number;
   activeDragTaskId: string | null;
   pendingTaskId: string | null;
+  humanInterventionTasks: ReadonlySet<string>;
 }) {
   const kind = statusKindFor(status);
   const headerLive = LIVE_STATUSES.has(status) && tasks.length > 0;
@@ -104,6 +106,7 @@ export function KanbanColumn({
             key={t.id}
             task={t}
             pending={pendingTaskId === t.id}
+            requiresHumanIntervention={humanInterventionTasks.has(t.id)}
           />
         ))}
         {tasks.length === 0 && status === "backlog" && (

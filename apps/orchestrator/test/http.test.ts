@@ -211,6 +211,48 @@ describe("http", () => {
     expect(body.summary.lastEventAt).toBe("2026-05-15T10:00:00.000Z");
   });
 
+  it("GET /api/tasks marks user-gated tasks as requiring human intervention", async () => {
+    const t = await runs.createTask({ title: "review brainstorm" });
+    const wt = await makeReadyWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      worktreePath: wt,
+      branchName: `pi/${t.id}`,
+      workflow: "backend-feature",
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().humanInterventionTaskIds).toEqual([t.id]);
+  });
+
+  it("GET /api/tasks marks unanswered brainstorm questions as requiring human intervention", async () => {
+    const t = await runs.createTask({ title: "answer brainstorm" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      worktreePath: wt,
+      branchName: `pi/${t.id}`,
+      workflow: "backend-feature",
+    });
+    const run = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    await runs.updateRun(run.id, { status: "running" });
+    await events.append(mkEvent({
+      runId: run.id,
+      taskId: t.id,
+      kind: "brainstorm_question",
+      questionId: "q-scope",
+      prompt: "Choose a workflow",
+      options: [],
+      sectionTarget: { artifact: "design", section: "Scope" },
+      batchId: "b-scope",
+    }));
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().humanInterventionTaskIds).toEqual([t.id]);
+  });
+
   it("POST /api/tasks/:id/transitions runs state-machine + persists", async () => {
     const t = await runs.createTask({ title: "trans" });
     const res = await app.inject({

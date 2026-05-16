@@ -26,13 +26,15 @@ const FAILED_STATUSES: ReadonlySet<Task["status"]> = new Set([
 export function TaskCard({
   task,
   pending,
+  requiresHumanIntervention,
 }: {
   task: Task;
   pending: boolean;
+  requiresHumanIntervention: boolean;
 }) {
   const age = formatRelativeCompact(task.updatedAt ?? task.createdAt);
   const draggable = task.status === "backlog";
-  const stripe = stripeFor(task);
+  const stripe = stripeFor(task, requiresHumanIntervention);
   const priority = priorityGlyph(task);
   const subMeta = subMetaFor(task);
   const { handleRef, isDragging, ref } = useDraggable<KanbanDndData>({
@@ -104,7 +106,8 @@ export function TaskCard({
   );
 }
 
-function stripeFor(task: Task): string | null {
+function stripeFor(task: Task, requiresHumanIntervention: boolean): string | null {
+  if (requiresHumanIntervention) return "var(--color-card-stripe-review)";
   if (FAILED_STATUSES.has(task.status)) return "var(--color-card-stripe-blocked)";
   if (LIVE_STATUSES.has(task.status)) return "var(--color-card-stripe-progress)";
   if (task.status === "ready_to_ship") return "var(--color-card-stripe-shipping)";

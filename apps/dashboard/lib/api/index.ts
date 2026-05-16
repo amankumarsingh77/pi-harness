@@ -203,11 +203,7 @@ export type RunFile = {
 };
 
 export type Api = {
-  listTasks: () => Promise<{
-    tasks: Task[];
-    counts: Record<string, number>;
-    summary: DashboardSummary;
-  }>;
+  listTasks: () => Promise<TaskListResult>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
   createTask: (
@@ -283,6 +279,13 @@ export type Api = {
   ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
 };
 
+export type TaskListResult = {
+  readonly tasks: Task[];
+  readonly counts: Record<string, number>;
+  readonly humanInterventionTaskIds: readonly string[];
+  readonly summary: DashboardSummary;
+};
+
 export type BrainstormDiff = {
   kind: "design" | "spec";
   baseline: { commit: string; body: string } | null;
@@ -307,14 +310,11 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
 
   return {
     listTasks: async () => {
-      const r = await send<{
-        tasks: Task[];
-        counts: Record<string, number>;
-        summary: DashboardSummary;
-      }>("/api/tasks");
+      const r = await send<TaskListResult>("/api/tasks");
       return {
         tasks: r.tasks.map(hydrateTask),
         counts: r.counts,
+        humanInterventionTaskIds: r.humanInterventionTaskIds,
         summary: hydrateDashboardSummary(r.summary),
       };
     },

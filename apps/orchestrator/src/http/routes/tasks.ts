@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import type { DashboardSummary, Phase, PhaseModelConfig, Task, TaskStatus } from "@pi-harness/shared";
+import type { AgentEvent, DashboardSummary, Phase, PhaseModelConfig, Task, TaskStatus } from "@pi-harness/shared";
 import type { RunStore } from "../../adapters/run-store.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
@@ -34,10 +34,14 @@ export function registerTaskRoutes(
       runs.totalCostUsd(),
       eventStore.latestEventAt(),
     ]);
-    const reviewCount = await deriveReviewCount(tasks, artifacts);
+    const [reviewCount, humanInterventionTaskIds] = await Promise.all([
+      deriveReviewCount(tasks, artifacts),
+      deriveHumanInterventionTaskIds(tasks, artifacts, eventStore, runs),
+    ]);
     return {
       tasks,
       counts,
+      humanInterventionTaskIds,
       summary: {
         runningCount: runningCount(counts),
         reviewCount,
@@ -420,6 +424,83 @@ async function isAwaitingReview(task: Task, artifacts: ArtifactsStore): Promise<
     return (await derivePlanGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
   }
   return false;
+}
+
+async function deriveHumanInterventionTaskIds(
+  tasks: readonly Task[],
+  artifacts: ArtifactsStore,
+  eventStore: EventStore,
+  runs: RunStore,
+): Promise<readonly string[]> {
+  const required = await Promise.all(
+    tasks.map(async (task) => ({
+      taskId: task.id,
+      required: await requiresHumanIntervention(task, artifacts, eventStore, runs),
+    })),
+  );
+  return required.filter((item) => item.required).map((item) => item.taskId);
+}
+
+async function requiresHumanIntervention(
+  task: Task,
+  artifacts: ArtifactsStore,
+  eventStore: EventStore,
+  runs: RunStore,
+): Promise<boolean> {
+  if (task.status === "planning") return isPlanningAwaitingUser(task, artifacts);
+  if (task.status === "brainstorming") {
+    return isBrainstormAwaitingUser(task, artifacts, eventStore, runs);
+  }
+  return false;
+}
+
+async function isPlanningAwaitingUser(
+  task: Task,
+  artifacts: ArtifactsStore,
+): Promise<boolean> {
+  if (!task.worktreePath) return false;
+  return (await derivePlanGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
+}
+
+async function isBrainstormAwaitingUser(
+  task: Task,
+  artifacts: ArtifactsStore,
+  eventStore: EventStore,
+  runs: RunStore,
+): Promise<boolean> {
+  if (!task.worktreePath) return false;
+  const gate = await deriveBrainstormGate(task.worktreePath, task.id, artifacts);
+  if (gate === "awaiting_user") return true;
+
+  const activeRun = await runs.findActiveRun(task.id, "brainstorm");
+  if (!activeRun) return false;
+
+  const events = await eventStore.listForRun(activeRun.id);
+  return hasUnansweredBrainstormQuestion(events) || needsBrainstormMockSelection(events);
+}
+
+function hasUnansweredBrainstormQuestion(events: readonly AgentEvent[]): boolean {
+  const answeredQuestionIds = new Set(
+    events
+      .filter((event) => event.kind === "brainstorm_answer")
+      .map((event) => event.questionId),
+  );
+
+  return events.some(
+    (event) =>
+      event.kind === "brainstorm_question" && !answeredQuestionIds.has(event.questionId),
+  );
+}
+
+function needsBrainstormMockSelection(events: readonly AgentEvent[]): boolean {
+  const selectedMock = events.some((event) => event.kind === "brainstorm_mock_selected");
+  if (selectedMock) return false;
+
+  return events.some(
+    (event) =>
+      event.kind === "brainstorm_mock_proposed" ||
+      event.kind === "brainstorm_mock_revised",
+  );
 }
 
 function costCapUsd(raw: string | undefined): number {
