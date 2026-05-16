@@ -286,6 +286,11 @@ function parseFalsifiedClaims(findings: string): string[] {
   let lastHeader: string | null = null;
   for (const raw of lines) {
     const line = raw.trim();
+    const row = parseFindingRow(line);
+    if (row && row.tag === "Falsified") {
+      out.push(`${row.id}: ${row.justification}`);
+      continue;
+    }
     if (line.startsWith("### ") || line.startsWith("## ")) {
       lastHeader = line.replace(/^#+\s+/, "");
       continue;
@@ -297,6 +302,22 @@ function parseFalsifiedClaims(findings: string): string[] {
   return out;
 }
 
+function parseFindingRow(line: string): {
+  id: string;
+  tag: "Verified" | "Weakened" | "Falsified";
+  justification: string;
+} | null {
+  if (!line.startsWith("FINDING ")) return null;
+  const parts = line.split("|").map((part) => part.trim());
+  if (parts.length < 3) return null;
+  const id = parts[0]!.replace(/^FINDING\s+/, "").trim();
+  const tag = parts[1];
+  const justification = parts.slice(2).join(" | ").trim();
+  if (id.length === 0 || justification.length === 0) return null;
+  if (tag !== "Verified" && tag !== "Weakened" && tag !== "Falsified") return null;
+  return { id, tag, justification };
+}
+
 // Re-export for convenience: tests use these to construct fixtures and assert
 // the same constants the tool consumes.
-export { findMissingSection, validateScenariosYaml, parseFalsifiedClaims };
+export { findMissingSection, validateScenariosYaml, parseFalsifiedClaims, parseFindingRow };

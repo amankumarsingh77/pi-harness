@@ -260,6 +260,37 @@ describe("runPreflight", () => {
     expect(maxTurns).toEqual(Array.from({ length: N }, () => undefined));
   });
 
+  it("injects git_history only for precedent-locator and never exposes bash", async () => {
+    const toolMap = new Map<string, { tools: string[]; customTools: string[] }>();
+    const writer = makeFakeWriter();
+
+    await runPreflight(
+      baseOpts({
+        createAgentSession: async (o) => {
+          const writeFindings = (o.customTools ?? []).find(
+            (t) => t.name === "write_findings",
+          ) as { __subagent?: string } | undefined;
+          const subagent = writeFindings?.__subagent;
+          if (subagent) {
+            toolMap.set(subagent, {
+              tools: [...(o.tools ?? [])],
+              customTools: (o.customTools ?? []).map((t) => t.name),
+            });
+          }
+          return writer(o);
+        },
+      }),
+    );
+
+    expect(toolMap.get("precedent-locator")?.customTools).toContain("git_history");
+    for (const [subagent, tools] of toolMap) {
+      expect(tools.tools, subagent).not.toContain("bash");
+      if (subagent !== "precedent-locator") {
+        expect(tools.customTools, subagent).not.toContain("git_history");
+      }
+    }
+  });
+
   it("times out hanging subagents and aborts their sessions", async () => {
     let aborts = 0;
     const result = await runPreflight(

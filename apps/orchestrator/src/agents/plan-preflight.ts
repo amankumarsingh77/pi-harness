@@ -15,8 +15,9 @@ import {
   type PhaseModelConfig,
 } from "@pi-harness/shared";
 import { PREFLIGHT_SUBAGENTS, getSubagent } from "@pi-harness/subagents";
+import { makeGitHistoryTool } from "./git-history-tool.js";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
-import { SUBAGENT_FOOTER } from "./subagent-footer.js";
+import { makeSubagentFooter } from "./subagent-footer.js";
 import { buildTicketDigest } from "./ticket-digest.js";
 import { ArtifactsStore } from "./artifacts-store.js";
 
@@ -25,6 +26,7 @@ export type PreflightSubagent = string;
 
 export const PREFLIGHT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
 const SCOUT_SUBAGENT = "codebase-scout";
+const GIT_HISTORY_SUBAGENTS = new Set(["precedent-locator"]);
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -205,8 +207,13 @@ async function runOneSubagent(args: {
 }): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
   const { subagent, opts, findingsPath } = args;
   const def = getSubagent(subagent);
-  const systemPrompt = `${readFileSync(def.promptPath, "utf8")}\n\n${SUBAGENT_FOOTER}\n`;
+  const hasGitHistory = GIT_HISTORY_SUBAGENTS.has(subagent);
+  const systemPrompt = `${readFileSync(def.promptPath, "utf8")}\n\n${makeSubagentFooter({ hasGitHistory })}\n`;
   const userPrompt = buildSubagentPrompt({ subagent, opts, findingsPath });
+  const customTools = [
+    ...(hasGitHistory ? [makeGitHistoryTool({ cwd: opts.cwd })] : []),
+    makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
+  ];
 
   let session: AgentSession;
   try {
@@ -218,9 +225,7 @@ async function runOneSubagent(args: {
         : {}),
       systemPrompt,
       tools: [...def.allowedTools],
-      customTools: [
-        makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
-      ],
+      customTools,
       onEvent: (e) => opts.onSubagentBridgeEvent?.(subagent, e),
     });
   } catch (err) {

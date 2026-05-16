@@ -14,8 +14,9 @@ import {
   type PhaseModelConfig,
 } from "@pi-harness/shared";
 import { getSubagent, PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
+import { makeGitHistoryTool } from "./git-history-tool.js";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
-import { SUBAGENT_FOOTER } from "./subagent-footer.js";
+import { makeSubagentFooter } from "./subagent-footer.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
@@ -409,7 +410,7 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       await unlink(findingsPath).catch(() => {});
     }
     const cvDef = getSubagent("claim-verifier");
-    const systemPrompt = `${readFileSync(cvDef.promptPath, "utf8")}\n\n${SUBAGENT_FOOTER}\n`;
+    const systemPrompt = `${readFileSync(cvDef.promptPath, "utf8")}\n\n${makeSubagentFooter({ hasGitHistory: true })}\n`;
     const userPrompt = [
       `You are auditing the plan for task ${opts.taskId}. Read the plan below and tag every claim as Verified, Weakened, or Falsified per your system prompt.`,
       ``,
@@ -429,6 +430,7 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       systemPrompt,
       tools: [...cvDef.allowedTools],
       customTools: [
+        makeGitHistoryTool({ cwd: opts.cwd }),
         makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
       ],
       onEvent: () => {},
@@ -455,8 +457,10 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
   });
 
   let systemPrompt: string;
+  let planDef: ReturnType<typeof getSubagent>;
   try {
-    systemPrompt = readFileSync(getSubagent("plan").promptPath, "utf8");
+    planDef = getSubagent("plan");
+    systemPrompt = readFileSync(planDef.promptPath, "utf8");
   } catch (err) {
     return zeroUsage({
       ok: false,
@@ -476,6 +480,7 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
         : {}),
       systemPrompt,
       sessionPath,
+      tools: [...planDef.allowedTools, "mark_ready"],
       customTools: [markReadyTool],
       onEvent: (e: PiBridgeEvent) => {
         // Forward planner-session bridge events to EventStore (no subagent

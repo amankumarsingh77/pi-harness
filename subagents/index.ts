@@ -10,6 +10,7 @@ export {
   type SubagentDef,
   type SubagentRole,
   type BuiltinTool,
+  type CustomTool,
 } from "./registry.js";
 
 import { VENDORED_DIR, OURS_DIR } from "./registry.js";
