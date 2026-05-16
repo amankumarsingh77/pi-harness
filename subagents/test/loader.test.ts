@@ -5,8 +5,8 @@ import {
   PREFLIGHT_SUBAGENTS,
   RETIRED_PROMPTS,
   getSubagent,
-  listVendoredAgents,
-  listOurAgents,
+  listPromptAgents,
+  listPromptFiles,
 } from "../index.js";
 
 describe("subagent registry", () => {
@@ -19,7 +19,7 @@ describe("subagent registry", () => {
   });
 
   it("every .md on disk is either registered or explicitly retired", () => {
-    const onDisk = new Set([...listVendoredAgents(), ...listOurAgents()]);
+    const onDisk = new Set(listPromptAgents());
     const accounted = new Set<string>([
       ...Object.keys(SUBAGENTS),
       ...RETIRED_PROMPTS,
@@ -58,11 +58,9 @@ describe("subagent registry", () => {
 
   it("retired prompts are explicitly marked retired", () => {
     for (const name of RETIRED_PROMPTS) {
-      const path = [...listVendoredAgents(), ...listOurAgents()].includes(name)
-        ? promptPathFor(name)
-        : null;
+      const path = promptPathFor(name);
       expect(path, name).not.toBeNull();
-      const prompt = readFileSync(path!, "utf8");
+      const prompt = readFileSync(path, "utf8");
       expect(prompt, name).toMatch(/retired prompt/i);
     }
   });
@@ -85,7 +83,7 @@ function parseFrontmatterTools(prompt: string): string[] {
 function promptPathFor(name: string): string {
   const registered = SUBAGENTS[name];
   if (registered) return registered.promptPath;
-  const vendored = `${import.meta.dirname}/../_vendored/${name}.md`;
-  if (existsSync(vendored)) return vendored;
-  return `${import.meta.dirname}/../ours/${name}.md`;
+  const prompt = listPromptFiles().find((file) => file.name === name);
+  if (!prompt) throw new Error(`prompt not found: ${name}`);
+  return prompt.path;
 }

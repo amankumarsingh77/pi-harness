@@ -4,22 +4,16 @@ import { fileURLToPath } from "node:url";
 import type { Phase } from "@pi-harness/shared";
 
 // Anchor relative to this module's location, but tolerate dist mode. The
-// package compiles index.ts + registry.ts into subagents/dist/ — the .md
-// prompt files stay in subagents/_vendored/ and subagents/ours/ (not copied).
-// So we walk up from import.meta.url until we find a directory that has
-// _vendored/ and ours/ as siblings of the current location.
-// Walk up from this module to find the subagents root (where _vendored/ and
-// ours/ live as siblings). Returns null if not found — that's the case when
-// the package is consumed by a deployed dashboard build that doesn't ship
-// the .md prompt files. Consumers that need the paths (orchestrator) check
-// promptPath; consumers that need only metadata (dashboard) don't.
+// package compiles index.ts + registry.ts into subagents/dist/; prompt
+// markdown stays under subagents/prompts/ and is read directly by the
+// orchestrator in source/worktree deployments.
+// Returns null if the source prompt tree is not on disk. Consumers that need
+// promptPath validate it; metadata-only consumers can still import registry
+// data in deployed builds that do not ship prompt markdown.
 function findSubagentsRoot(): string | null {
   let here = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 6; i += 1) {
-    if (
-      existsSync(resolve(here, "_vendored")) &&
-      existsSync(resolve(here, "ours"))
-    ) {
+    if (existsSync(resolve(here, "prompts"))) {
       return here;
     }
     const parent = dirname(here);
@@ -30,8 +24,11 @@ function findSubagentsRoot(): string | null {
 }
 
 const SUBAGENTS_ROOT = findSubagentsRoot();
-export const VENDORED_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "_vendored") : "";
-export const OURS_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "ours") : "";
+export const PROMPTS_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "prompts") : "";
+export const PHASE_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "phase") : "";
+export const RESEARCH_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "research") : "";
+export const AUDIT_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "audit") : "";
+export const RETIRED_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "retired") : "";
 
 export type SubagentRole =
   | "phase-driver"
@@ -79,7 +76,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   brainstorm: {
     name: "brainstorm",
     role: "phase-driver",
-    promptPath: resolve(OURS_DIR, "brainstorm.md"),
+    promptPath: resolve(PHASE_PROMPTS_DIR, "brainstorm.md"),
     allowedTools: ["read", "write"],
     customTools: [
       "submit_questions",
@@ -97,7 +94,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   plan: {
     name: "plan",
     role: "phase-driver",
-    promptPath: resolve(OURS_DIR, "plan.md"),
+    promptPath: resolve(PHASE_PROMPTS_DIR, "plan.md"),
     allowedTools: ["read", "grep", "find", "write"],
     customTools: ["mark_ready"],
     invokedBy: ["plan"],
@@ -107,7 +104,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   "codebase-scout": {
     name: "codebase-scout",
     role: "preflight-research",
-    promptPath: resolve(VENDORED_DIR, "codebase-scout.md"),
+    promptPath: resolve(RESEARCH_PROMPTS_DIR, "codebase-scout.md"),
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: ["write_findings"],
     invokedBy: ["plan"],
@@ -118,7 +115,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   "web-search-researcher": {
     name: "web-search-researcher",
     role: "brainstorm-research",
-    promptPath: resolve(VENDORED_DIR, "web-search-researcher.md"),
+    promptPath: resolve(RESEARCH_PROMPTS_DIR, "web-search-researcher.md"),
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: ["pi_web_search", "pi_web_fetch", "write_findings"],
     invokedBy: ["brainstorm"],
@@ -129,7 +126,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   "integration-scanner": {
     name: "integration-scanner",
     role: "preflight-research",
-    promptPath: resolve(VENDORED_DIR, "integration-scanner.md"),
+    promptPath: resolve(RESEARCH_PROMPTS_DIR, "integration-scanner.md"),
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: ["write_findings"],
     invokedBy: ["plan"],
@@ -140,7 +137,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   "precedent-locator": {
     name: "precedent-locator",
     role: "preflight-research",
-    promptPath: resolve(VENDORED_DIR, "precedent-locator.md"),
+    promptPath: resolve(RESEARCH_PROMPTS_DIR, "precedent-locator.md"),
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: ["git_history", "write_findings"],
     invokedBy: ["plan"],
@@ -151,7 +148,7 @@ export const SUBAGENTS: Record<string, SubagentDef> = {
   "claim-verifier": {
     name: "claim-verifier",
     role: "post-plan-audit",
-    promptPath: resolve(VENDORED_DIR, "claim-verifier.md"),
+    promptPath: resolve(AUDIT_PROMPTS_DIR, "claim-verifier.md"),
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: ["git_history", "write_findings"],
     invokedBy: ["plan"],

@@ -242,7 +242,7 @@ describe("ChatPanel — nudges in transcript", () => {
           ts: new Date(),
           kind: "tool_call",
           tool: "read",
-          input: { path: "subagents/ours/brainstorm.md" },
+          input: { path: "subagents/prompts/phase/brainstorm.md" },
         },
       ],
     });
@@ -257,7 +257,7 @@ describe("ChatPanel — nudges in transcript", () => {
     );
     const line = screen.getByTestId("activity-line");
     expect(line.textContent).toContain("read");
-    expect(line.textContent).toContain("subagents/ours/brainstorm.md");
+    expect(line.textContent).toContain("subagents/prompts/phase/brainstorm.md");
   });
 
   it("hides activity-line once gate is awaiting_user", () => {
