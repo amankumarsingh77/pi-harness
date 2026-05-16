@@ -31,8 +31,8 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
   const { task, runs } = taskResult;
   // Latest brainstorm run drives the SSE subscription. Null until the run
   // exists (e.g. the user has filed the task but not approved start-brainstorm).
-  const brainstormRunId =
-    [...runs].reverse().find((r) => r.phase === "brainstorm")?.id ?? null;
+  const brainstormRun = [...runs].reverse().find((r) => r.phase === "brainstorm") ?? null;
+  const brainstormRunId = brainstormRun?.id ?? null;
   // waterfall: the run id comes from the task detail response.
   const initialAgentEvents = brainstormRunId
     ? (await orchestrator.listEvents(brainstormRunId)).events
@@ -51,6 +51,8 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
           spec={bundle.spec}
           initialEvents={bundle.events}
           initialAgentEvents={initialAgentEvents}
+          canCancel={task.status === "brainstorming" && brainstormRun?.status === "running"}
+          cancelled={task.status === "brainstorming" && brainstormRun?.status === "cancelled"}
         />
       </BrainstormEventsProvider>
     </>

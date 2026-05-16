@@ -9,6 +9,11 @@ import { PlanEventsProvider } from "@/lib/plan-events-context";
 vi.mock("@/app/tasks/[id]/plan/actions", () => ({
   approvePlan: vi.fn(),
   requestPlanChanges: vi.fn(),
+  restartPlan: vi.fn(),
+}));
+
+vi.mock("@/app/tasks/[id]/actions", () => ({
+  cancelCurrentPhaseAction: vi.fn(),
 }));
 
 describe("PlanConsole", () => {
@@ -36,6 +41,30 @@ describe("PlanConsole", () => {
     expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("live");
     expect(screen.getByRole("article", { name: "claim-verifier preflight agent" })).toHaveTextContent("queued");
     expect(screen.getByRole("article", { name: "precedent-locator preflight agent" })).toHaveTextContent("blocked");
+  });
+
+  it("shows phase cancel in the plan header and on active preflight agents", () => {
+    renderConsole();
+
+    expect(screen.getByRole("button", { name: "Cancel plan" })).toBeInTheDocument();
+    const integrationPane = screen.getByRole("article", {
+      name: "integration-scanner preflight agent",
+    });
+    expect(within(integrationPane).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    const scoutPane = screen.getByRole("article", { name: "codebase-scout preflight agent" });
+    expect(within(scoutPane).queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  it("opens phase cancel confirmation from an active preflight card", () => {
+    renderConsole();
+
+    const integrationPane = screen.getByRole("article", {
+      name: "integration-scanner preflight agent",
+    });
+    fireEvent.click(within(integrationPane).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("dialog", { name: "Cancel plan run" })).toBeInTheDocument();
+    expect(screen.getByText(/All plan preflight agents/)).toBeInTheDocument();
   });
 
   it("opens the full agent drawer and switches timeline, findings, and raw JSONL tabs", () => {

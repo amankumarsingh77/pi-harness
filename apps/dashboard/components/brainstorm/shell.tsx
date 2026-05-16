@@ -19,6 +19,8 @@ export function BrainstormShell({
   spec,
   initialEvents,
   initialAgentEvents,
+  canCancel,
+  cancelled,
 }: {
   readonly task: Task;
   readonly runId: string | null;
@@ -27,6 +29,8 @@ export function BrainstormShell({
   readonly spec: Artifact | null;
   readonly initialEvents: ReadonlyArray<BrainstormJsonlEvent>;
   readonly initialAgentEvents: ReadonlyArray<AgentEvent>;
+  readonly canCancel: boolean;
+  readonly cancelled: boolean;
 }) {
   const router = useRouter();
   const { events: liveEvents, connected } = useBrainstormEvents();
@@ -66,6 +70,8 @@ export function BrainstormShell({
         health={timeline.health}
         pastBrainstorm={timeline.pastBrainstorm}
         failed={timeline.failed}
+        canCancel={canCancel}
+        cancelled={cancelled}
       />
       <div className="brainstorm-grid">
         <EventRail

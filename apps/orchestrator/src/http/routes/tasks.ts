@@ -177,6 +177,7 @@ export function registerTaskRoutes(
           details: result.error.details,
         };
       }
+      let shouldEnqueue = true;
 
       // Revision requests do three things, in this order:
       //   1) Append brainstorm_revision_requested to brainstorm.jsonl so the
@@ -266,6 +267,45 @@ export function registerTaskRoutes(
         }
       }
 
+      if (action.type === "user_cancel_current_phase") {
+        const phase = currentCancelablePhase(task.status);
+        if (!phase) {
+          reply.code(409);
+          return {
+            error: "invalid_transition",
+            message: "task must be in brainstorming or planning",
+          };
+        }
+
+        const activeRun = await runs.findActiveRun(task.id, phase);
+        if (!activeRun) {
+          reply.code(409);
+          return {
+            error: "no_active_run",
+            message: `no active ${phase} run to cancel`,
+          };
+        }
+
+        if (scheduler) {
+          await scheduler.cancelAndDrain(task.id);
+        } else {
+          cancellation?.abort(task.id);
+        }
+
+        const ts = new Date();
+        await runs.updateRun(activeRun.id, { status: "cancelled", endedAt: ts });
+        await eventStore.append({
+          id: crypto.randomUUID(),
+          runId: activeRun.id,
+          taskId: task.id,
+          ts,
+          kind: "phase_ended",
+          phase,
+          status: "cancelled",
+        });
+        shouldEnqueue = false;
+      }
+
       // Approval ends the brainstorm phase. The run-loop intentionally leaves
       // the brainstorm run in `running` across all ticks so the dashboard's
       // SSE subscription survives a request-changes round-trip; we close it
@@ -320,7 +360,7 @@ export function registerTaskRoutes(
       // Tell the scheduler to look. enqueue is fire-and-forget and idempotent
       // — if there's already a tick in flight, this just sets the queued flag.
       // Tests that build the server without a scheduler skip this.
-      scheduler?.enqueue(task.id);
+      if (shouldEnqueue) scheduler?.enqueue(task.id);
       return { task: updated };
     },
   );
@@ -354,6 +394,12 @@ function sumStatuses(
   statuses: readonly TaskStatus[],
 ): number {
   return statuses.reduce((total, status) => total + (counts[status] ?? 0), 0);
+}
+
+function currentCancelablePhase(status: TaskStatus): "brainstorm" | "plan" | null {
+  if (status === "brainstorming") return "brainstorm";
+  if (status === "planning") return "plan";
+  return null;
 }
 
 async function deriveReviewCount(

@@ -590,21 +590,25 @@ export function registerBrainstormRoutes(
       // Settle the active run so findActiveRun() returns null on the next
       // dispatch. The dashboard's SSE subscription on the old run drops with
       // the cancelled status; the page revalidates and picks up the new run.
-      const activeRun = await deps.runs.findActiveRun(task.id, "brainstorm");
-      if (!activeRun) {
+      const restartRun =
+        (await deps.runs.findActiveRun(task.id, "brainstorm")) ??
+        (await deps.runs.findLatestRun(task.id, "brainstorm", "cancelled"));
+      if (!restartRun) {
         reply.code(409);
         return {
           error: "no_active_run",
-          message: "no active brainstorm run to restart",
+          message: "no active or cancelled brainstorm run to restart",
         };
       }
-      await deps.runs.updateRun(activeRun.id, {
-        status: "cancelled",
-        endedAt: new Date(),
-      });
+      if (restartRun.status !== "cancelled") {
+        await deps.runs.updateRun(restartRun.id, {
+          status: "cancelled",
+          endedAt: new Date(),
+        });
+      }
 
       // Move old files into runs/<archivedRunId>/.
-      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, activeRun.id);
+      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id);
 
       // Re-scaffold draft design.md / spec.md so the next tick has the files
       // it expects to read + write.
@@ -633,13 +637,13 @@ export function registerBrainstormRoutes(
       }
       await w.append({
         ts: new Date().toISOString(),
-        kind: "brainstorm_system",
-        systemKind: "session_reset",
-        data: {
-          archivedRunId: activeRun.id,
-          ...(note ? { note } : {}),
-        },
-      });
+          kind: "brainstorm_system",
+          systemKind: "session_reset",
+          data: {
+            archivedRunId: restartRun.id,
+            ...(note ? { note } : {}),
+          },
+        });
 
       // Create the new Run row + wake the scheduler. dispatchBrainstorm in
       // the run-loop also creates one if findActiveRun is null, but pre-
@@ -650,7 +654,7 @@ export function registerBrainstormRoutes(
 
       return {
         ok: true,
-        archivedRunId: activeRun.id,
+        archivedRunId: restartRun.id,
         newRunId: newRun.id,
       };
     },

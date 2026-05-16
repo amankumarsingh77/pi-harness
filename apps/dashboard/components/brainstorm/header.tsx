@@ -5,6 +5,7 @@ import type { Task } from "@pi-harness/shared";
 import { mergePhaseModels } from "@pi-harness/shared";
 import { RestartButton } from "./restart-button";
 import { StatusIcon, type StatusKind } from "@/components/kanban/status-icon";
+import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
 import type { ActivityState } from "./activity-line";
 import type { BrainstormHealth, UsageSummary } from "./use-brainstorm-timeline";
 
@@ -17,6 +18,8 @@ export function BrainstormHeader({
   health,
   pastBrainstorm,
   failed,
+  canCancel,
+  cancelled,
 }: {
   readonly task: Task;
   readonly usage: UsageSummary;
@@ -26,9 +29,11 @@ export function BrainstormHeader({
   readonly health: BrainstormHealth;
   readonly pastBrainstorm: boolean;
   readonly failed: boolean;
+  readonly canCancel: boolean;
+  readonly cancelled: boolean;
 }) {
   const phaseModel = mergePhaseModels(task.phaseModels, "brainstorm");
-  const status = headerStatus({ task, pastBrainstorm, failed, health });
+  const status = headerStatus({ task, pastBrainstorm, failed, cancelled, health });
   const restartEnabled = task.status === "brainstorming" || task.status === "brainstorm_failed";
 
   return (
@@ -60,6 +65,9 @@ export function BrainstormHeader({
             fallback={status.label}
           />
         </div>
+        {canCancel && (
+          <CancelPhaseRunButton taskId={task.id} phase="brainstorm" disabled={false} />
+        )}
         <RestartButton taskId={task.id} disabled={!restartEnabled} />
       </div>
     </section>
@@ -96,15 +104,18 @@ function headerStatus({
   task,
   pastBrainstorm,
   failed,
+  cancelled,
   health,
 }: {
   readonly task: Task;
   readonly pastBrainstorm: boolean;
   readonly failed: boolean;
+  readonly cancelled: boolean;
   readonly health: BrainstormHealth;
 }): { readonly icon: StatusKind; readonly label: string } {
   if (pastBrainstorm) return { icon: "done", label: "approved" };
   if (failed) return { icon: "blocked", label: "failed" };
+  if (cancelled) return { icon: "blocked", label: "cancelled — restart to retry" };
   if (task.status === "backlog") return { icon: "intake", label: "not started" };
   if (health === "reconnecting") return { icon: "review", label: "reconnecting" };
   return { icon: "progress", label: "in progress" };

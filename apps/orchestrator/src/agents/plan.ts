@@ -328,6 +328,17 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     costUsd += r.costUsd;
   }
 
+  if (result.cancelled) {
+    return {
+      ok: false,
+      ready: false,
+      cancelled: true,
+      inputTokens,
+      outputTokens,
+      costUsd,
+    };
+  }
+
   if (result.failed) {
     const failed = result.results.filter((r) => !r.ok).map((r) => r.subagent);
     await opts.bus.publish({

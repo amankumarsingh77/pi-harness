@@ -32,8 +32,8 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
 
   // Latest plan run drives the SSE subscription. Null until the run exists
   // (e.g. before brainstorm has been approved).
-  const planRunId =
-    [...runs].reverse().find((r) => r.phase === "plan")?.id ?? null;
+  const planRun = [...runs].reverse().find((r) => r.phase === "plan") ?? null;
+  const planRunId = planRun?.id ?? null;
 
   // Past planning: header status reads "approved" rather than "in progress",
   // matching the brainstorm page's PAST_BRAINSTORM treatment so the header
@@ -41,11 +41,14 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   const past = ["executing", "verifying", "verification_failed", "ready_to_ship", "done"]
     .includes(task.status);
   const failed = task.status === "plan_failed";
+  const cancelled = task.status === "planning" && planRun?.status === "cancelled";
   const ready = !past && !failed && bundle.gate === "awaiting_user";
   const headerStatus = past
     ? "approved"
     : failed
       ? "failed — restart to retry"
+      : cancelled
+        ? "cancelled — restart to retry"
       : ready
         ? "awaiting your approval"
         : task.status === "planning"
@@ -55,6 +58,8 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
     ? "done"
     : failed
       ? "blocked"
+      : cancelled
+        ? "blocked"
       : ready
         ? "review"
         : task.status === "planning"

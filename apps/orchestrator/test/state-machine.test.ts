@@ -164,6 +164,21 @@ describe("transition", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("user_cancel_current_phase keeps brainstorm and plan in their current stage", () => {
+    for (const s of ["brainstorming", "planning"] as const) {
+      const t = mkTask(s, { workflow: "backend-feature" });
+      const r = transition(t, { type: "user_cancel_current_phase" });
+      expect(r.ok, `from ${s}`).toBe(true);
+      if (r.ok) expect(r.task.status).toBe(s);
+    }
+  });
+
+  it("user_cancel_current_phase rejects non-brainstorm/plan statuses", () => {
+    const t = mkTask("executing", { workflow: "backend-feature" });
+    const r = transition(t, { type: "user_cancel_current_phase" });
+    expect(r.ok).toBe(false);
+  });
+
   it("user_cancel: any non-terminal → cancelled", () => {
     for (const s of ["backlog", "brainstorming", "planning", "executing", "verifying", "verification_failed", "ready_to_ship"] as const) {
       const t = mkTask(s, { workflow: "backend-feature" });

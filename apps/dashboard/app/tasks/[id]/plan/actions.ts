@@ -30,6 +30,7 @@ export async function requestPlanChanges(taskId: string, comment: string): Promi
 export async function restartPlan(taskId: string, note?: string): Promise<void> {
   await orchestrator.restartPlan(taskId, note ? { note } : {});
   revalidatePath(`/tasks/${taskId}/plan`);
+  revalidatePath(`/tasks/${taskId}`);
 }
 
 export async function editPlanArtifact(taskId: string, body: string): Promise<void> {
