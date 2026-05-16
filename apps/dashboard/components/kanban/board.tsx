@@ -2,9 +2,17 @@
 
 import type { Task, TaskPriority, TaskStatus, Workflow } from "@pi-harness/shared";
 import { useMemo, useState } from "react";
+import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/react";
 import { mutations } from "@/lib/client/queries";
 import { KanbanColumn } from "./column";
-import type { BoardTransition } from "./transition-types";
+import {
+  columnDropId,
+  isColumnDropData,
+  isTaskDragData,
+  taskDragId,
+} from "./drag-types";
+import type { BoardTransition, BoardTransitionAction } from "./transition-types";
 
 export type BoardFilters = {
   workflow?: Workflow;
@@ -49,11 +57,15 @@ export function KanbanBoard({
   onTransition?: BoardTransition;
   initialFilters?: BoardFilters;
 }) {
-  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState<BoardFilters>(initialFilters);
   const transitionTask = onTransition ?? createDefaultTransition();
   const visibleTasks = useMemo(() => filterTasks(tasks, filters), [tasks, filters]);
+  const activeDragTask = useMemo(
+    () => visibleTasks.find((task) => task.id === activeDragTaskId) ?? null,
+    [activeDragTaskId, visibleTasks],
+  );
   const staleCount = useMemo(() => countStaleTasks(tasks, Date.now()), [tasks]);
   const hasFilters = filters.workflow !== undefined || filters.priority !== undefined;
 
@@ -72,6 +84,25 @@ export function KanbanBoard({
     }
   }
 
+  const handleDragStart = (event: DragStartEvent): void => {
+    const data = event.operation.source?.data;
+    setActiveDragTaskId(isTaskDragData(data) ? data.taskId : null);
+  };
+
+  const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
+    setActiveDragTaskId(null);
+    const source = event.operation.source?.data;
+    const target = event.operation.target?.data;
+    if (event.canceled || !isTaskDragData(source) || !isColumnDropData(target)) return;
+    if (target.status !== "brainstorming" || pendingTaskId !== null) return;
+    setPendingTaskId(source.taskId);
+    try {
+      await transitionTask(source.taskId, START_BRAINSTORM);
+    } finally {
+      setPendingTaskId(null);
+    }
+  };
+
   return (
     <main className="relative">
       <BoardToolbar
@@ -80,36 +111,35 @@ export function KanbanBoard({
         onRemoveWorkflow={() => setFilters((curr) => withoutWorkflow(curr))}
         onRemovePriority={() => setFilters((curr) => withoutPriority(curr))}
       />
-      <div className="no-scrollbar overflow-x-auto px-5 pb-20 pt-3">
-        <div
-          className="grid min-w-max gap-3"
-          style={{
-            gridTemplateColumns: `repeat(${COLUMN_ORDER.length}, minmax(280px, 1fr))`,
-          }}
-        >
-          {COLUMN_ORDER.map((status) => (
-            <KanbanColumn
-              key={status}
-              status={status}
-              tasks={byStatus[status] ?? []}
-              count={bucketedCounts[status] ?? 0}
-              draggedTaskId={draggedTaskId}
-              pendingTaskId={pendingTaskId}
-              onDragStart={setDraggedTaskId}
-              onDragEnd={() => setDraggedTaskId(null)}
-              onTransition={async (taskId, action) => {
-                setPendingTaskId(taskId);
-                try {
-                  await transitionTask(taskId, action);
-                } finally {
-                  setPendingTaskId(null);
-                  setDraggedTaskId(null);
-                }
-              }}
-            />
-          ))}
+      <DragDropProvider
+        onDragStart={handleDragStart}
+        onDragEnd={(event) => {
+          void handleDragEnd(event);
+        }}
+      >
+        <div className="no-scrollbar overflow-x-auto px-5 pb-20 pt-3">
+          <div
+            className="grid min-w-max gap-3"
+            style={{
+              gridTemplateColumns: `repeat(${COLUMN_ORDER.length}, minmax(280px, 1fr))`,
+            }}
+          >
+            {COLUMN_ORDER.map((status) => (
+              <KanbanColumn
+                key={status}
+                status={status}
+                tasks={byStatus[status] ?? []}
+                count={bucketedCounts[status] ?? 0}
+                activeDragTaskId={activeDragTaskId}
+                pendingTaskId={pendingTaskId}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+        <DragOverlay dropAnimation={null}>
+          {activeDragTask && <TaskDragPreview task={activeDragTask} />}
+        </DragOverlay>
+      </DragDropProvider>
       {/* Right-edge fade hints there's more content beyond the viewport. */}
       <div
         aria-hidden="true"
@@ -118,6 +148,28 @@ export function KanbanBoard({
     </main>
   );
 }
+
+function TaskDragPreview({ task }: { readonly task: Task }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="w-[260px] rounded-md border border-line-hover bg-card px-3 py-2.5 text-[13px] font-medium leading-[1.4] text-fg"
+      data-drag-id={taskDragId(task.id)}
+      data-drop-id={columnDropId("brainstorming")}
+    >
+      <div className="mb-2 flex items-center gap-1.5 font-mono text-[10.5px] text-fg-mute">
+        <span>T-{task.id.slice(0, 4).toUpperCase()}</span>
+        <span className="ml-auto">to Brainstorming</span>
+      </div>
+      <div className="line-clamp-2 [line-clamp:2]">{task.title}</div>
+    </div>
+  );
+}
+
+const START_BRAINSTORM: BoardTransitionAction = {
+  type: "user_start_brainstorm",
+  workflow: "backend-feature",
+};
 
 function BoardToolbar({
   filters,

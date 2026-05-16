@@ -2,7 +2,11 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { Task } from "@pi-harness/shared";
 import { clsx } from "clsx";
+import { useDraggable } from "@dnd-kit/react";
+import { useCallback } from "react";
 import { formatRelativeCompact } from "@/lib/format";
+import type { KanbanDndData } from "./drag-types";
+import { taskDragId } from "./drag-types";
 
 const LIVE_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "brainstorming",
@@ -22,40 +26,37 @@ const FAILED_STATUSES: ReadonlySet<Task["status"]> = new Set([
 export function TaskCard({
   task,
   pending,
-  onDragStart,
-  onDragEnd,
 }: {
   task: Task;
   pending: boolean;
-  onDragStart: (taskId: string) => void;
-  onDragEnd: () => void;
 }) {
   const age = formatRelativeCompact(task.updatedAt ?? task.createdAt);
   const draggable = task.status === "backlog";
   const stripe = stripeFor(task);
   const priority = priorityGlyph(task);
   const subMeta = subMetaFor(task);
+  const { handleRef, isDragging, ref } = useDraggable<KanbanDndData>({
+    id: taskDragId(task.id),
+    data: { kind: "task", taskId: task.id, status: task.status },
+    disabled: !draggable || pending,
+  });
+  const setDragRefs = useCallback(
+    (element: HTMLElement | null) => {
+      ref(element);
+      handleRef(draggable ? element : null);
+    },
+    [draggable, handleRef, ref],
+  );
 
   return (
     <article
+      ref={setDragRefs}
       data-testid={`task-card-${task.id}`}
-      draggable={draggable}
-      onDragStart={(event) => {
-        if (!draggable) return;
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("application/x-pi-task-id", task.id);
-        onDragStart(task.id);
-      }}
-      onMouseDown={() => {
-        if (draggable) onDragStart(task.id);
-      }}
-      onMouseUp={onDragEnd}
-      onDragEnd={onDragEnd}
       className={clsx(
         "group relative overflow-hidden rounded-md border border-line bg-card px-3 py-2.5 pl-3.5",
         "transition-colors duration-150 hover:border-line-hover hover:bg-card-hover",
-        draggable && "cursor-grab active:cursor-grabbing",
-        pending && "opacity-60",
+        draggable && !pending && "cursor-grab active:cursor-grabbing",
+        (pending || isDragging) && "opacity-60",
       )}
     >
       {stripe && (

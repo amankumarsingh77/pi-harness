@@ -1,8 +1,68 @@
-import { describe, it, expect } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { KanbanBoard } from "@/components/kanban/board";
 import type { Task } from "@pi-harness/shared";
+
+type MockDndEntity = {
+  readonly id: string;
+  readonly data?: unknown;
+};
+
+type MockDragEndEvent = {
+  readonly canceled: boolean;
+  readonly operation: {
+    readonly source: MockDndEntity | null;
+    readonly target: MockDndEntity | null;
+  };
+};
+
+type MockDraggableInput = MockDndEntity & {
+  readonly disabled?: boolean;
+};
+
+const dndKitMock = vi.hoisted(() => ({
+  draggables: new Map<string, MockDraggableInput>(),
+  droppables: new Map<string, MockDndEntity>(),
+  onDragStart: null as ((event: Omit<MockDragEndEvent, "canceled">) => void) | null,
+  onDragEnd: null as ((event: MockDragEndEvent) => void) | null,
+}));
+
+vi.mock("@dnd-kit/react", () => ({
+  DragDropProvider: ({
+    children,
+    onDragStart,
+    onDragEnd,
+  }: {
+    readonly children: React.ReactNode;
+    readonly onDragStart?: (event: Omit<MockDragEndEvent, "canceled">) => void;
+    readonly onDragEnd?: (event: MockDragEndEvent) => void;
+  }) => {
+    dndKitMock.onDragStart = onDragStart ?? null;
+    dndKitMock.onDragEnd = onDragEnd ?? null;
+    return children;
+  },
+  DragOverlay: () => null,
+  useDraggable: (input: MockDraggableInput) => {
+    dndKitMock.draggables.set(input.id, input);
+    return {
+      draggable: { id: input.id, data: input.data },
+      handleRef: vi.fn(),
+      isDragging: false,
+      isDragSource: false,
+      isDropping: false,
+      ref: vi.fn(),
+    };
+  },
+  useDroppable: (input: MockDndEntity) => {
+    dndKitMock.droppables.set(input.id, input);
+    return {
+      droppable: { id: input.id, data: input.data },
+      isDropTarget: false,
+      ref: vi.fn(),
+    };
+  },
+}));
 
 const baseTask = (overrides: Partial<Task>): Task => ({
   id: overrides.id ?? "t",
@@ -22,6 +82,13 @@ const baseTask = (overrides: Partial<Task>): Task => ({
 });
 
 describe("KanbanBoard", () => {
+  beforeEach(() => {
+    dndKitMock.draggables.clear();
+    dndKitMock.droppables.clear();
+    dndKitMock.onDragStart = null;
+    dndKitMock.onDragEnd = null;
+  });
+
   it("renders all 8 columns (Linear-style capitalized titles)", () => {
     render(<KanbanBoard tasks={[]} counts={{}} />);
     expect(screen.getByText("Backlog")).toBeInTheDocument();
@@ -95,17 +162,51 @@ describe("KanbanBoard", () => {
     expect(screen.queryByText(/Long detail belongs/)).not.toBeInTheDocument();
   });
 
-  it("only backlog cards are draggable", () => {
+  it("only backlog cards are draggable as whole cards", () => {
     const tasks = [
       baseTask({ id: "backlog", title: "Can start", status: "backlog" }),
       baseTask({ id: "running", title: "Cannot move", status: "executing" }),
     ];
     render(<KanbanBoard tasks={tasks} counts={{ backlog: 1, executing: 1 }} />);
-    expect(screen.getByTestId("task-card-backlog")).toHaveAttribute("draggable", "true");
-    expect(screen.getByTestId("task-card-running")).toHaveAttribute("draggable", "false");
+    expect(screen.queryByRole("button", { name: /drag .* to brainstorming/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-card-backlog")).not.toHaveAttribute("draggable", "true");
+    expect(screen.getByTestId("task-card-running")).not.toHaveAttribute("draggable", "true");
+    expect(dndKitMock.draggables.get("task:backlog")?.disabled).toBe(false);
+    expect(dndKitMock.draggables.get("task:running")?.disabled).toBe(true);
   });
 
-  it("starts brainstorm when a backlog card is dropped on Brainstorming", async () => {
+  it("highlights the Brainstorming drop area while a backlog card is active", async () => {
+    const tasks = [baseTask({ id: "drag-me", title: "Drag me", status: "backlog" })];
+    render(<KanbanBoard tasks={tasks} counts={{ backlog: 1 }} />);
+
+    await act(async () => {
+      simulateDndStart("task:drag-me");
+    });
+
+    expect(screen.getByTestId("kanban-column-brainstorming")).toHaveTextContent(
+      "drop to start brainstorm",
+    );
+  });
+
+  it("keeps card click navigation separate from drag start", () => {
+    const transitions: { taskId: string; action: unknown }[] = [];
+    const tasks = [baseTask({ id: "open-me", title: "Open without dragging", status: "backlog" })];
+    render(
+      <KanbanBoard
+        tasks={tasks}
+        counts={{ backlog: 1 }}
+        onTransition={async (taskId, action) => {
+          transitions.push({ taskId, action });
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Open Open without dragging" }));
+
+    expect(transitions).toEqual([]);
+  });
+
+  it("starts brainstorm exactly once when a backlog card is dropped on Brainstorming", async () => {
     const transitions: { taskId: string; action: unknown }[] = [];
     const tasks = [baseTask({ id: "drag-me", title: "Drag me", status: "backlog" })];
     render(
@@ -118,19 +219,37 @@ describe("KanbanBoard", () => {
       />,
     );
 
-    const dataTransfer = new DataTransfer();
     await act(async () => {
-      fireEvent.dragStart(screen.getByTestId("task-card-drag-me"), { dataTransfer });
-      fireEvent.dragOver(screen.getByTestId("kanban-column-brainstorming"), { dataTransfer });
-      fireEvent.drop(screen.getByTestId("kanban-column-brainstorming"), { dataTransfer });
+      simulateDndDrop("task:drag-me", "column:brainstorming");
     });
 
-    expect(transitions).toEqual([
+    await waitFor(() => expect(transitions).toEqual([
       {
         taskId: "drag-me",
         action: { type: "user_start_brainstorm", workflow: "backend-feature" },
       },
-    ]);
+    ]));
+  });
+
+  it("does not start brainstorm when drag is cancelled or dropped away from Brainstorming", async () => {
+    const transitions: { taskId: string; action: unknown }[] = [];
+    const tasks = [baseTask({ id: "drag-me", title: "Drag me", status: "backlog" })];
+    render(
+      <KanbanBoard
+        tasks={tasks}
+        counts={{ backlog: 1 }}
+        onTransition={async (taskId, action) => {
+          transitions.push({ taskId, action });
+        }}
+      />,
+    );
+
+    await act(async () => {
+      simulateDndDrop("task:drag-me", "column:planning");
+      simulateDndDrop("task:drag-me", "column:brainstorming", { canceled: true });
+    });
+
+    expect(transitions).toEqual([]);
   });
 
   it("verification_failed card uses a blocked stripe without retry meta or red border", () => {
@@ -233,3 +352,31 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("No workflow task")).toBeInTheDocument();
   });
 });
+
+function simulateDndDrop(
+  sourceId: string,
+  targetId: string | null,
+  options: { readonly canceled?: boolean } = {},
+): void {
+  const source = dndKitMock.draggables.get(sourceId);
+  if (!source) throw new Error(`Missing draggable ${sourceId}`);
+  const target = targetId === null ? null : dndKitMock.droppables.get(targetId) ?? null;
+  dndKitMock.onDragEnd?.({
+    canceled: options.canceled ?? false,
+    operation: {
+      source,
+      target,
+    },
+  });
+}
+
+function simulateDndStart(sourceId: string): void {
+  const source = dndKitMock.draggables.get(sourceId);
+  if (!source) throw new Error(`Missing draggable ${sourceId}`);
+  dndKitMock.onDragStart?.({
+    operation: {
+      source,
+      target: null,
+    },
+  });
+}
