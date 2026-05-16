@@ -1,7 +1,6 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { getModelCatalog } from "@pi-harness/pi-bridge";
-import type { Logger as PinoLogger } from "pino";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
@@ -33,7 +32,7 @@ export type ServerDeps = {
   // pino instance shared with the rest of the orchestrator. Fastify uses it
   // for HTTP request logging and per-request `req.log` children. When omitted
   // (tests), Fastify falls back to a quiet warn-level logger.
-  pinoLogger?: PinoLogger;
+  pinoLogger?: FastifyBaseLogger;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -42,15 +41,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // child-on-request feature gives every route a `req.log` with a reqId
   // attached automatically.
   //
-  // The `as FastifyInstance` widens away the logger generic Fastify infers
-  // from `loggerInstance`. Without it the route-register helpers refuse the
-  // narrower type under `exactOptionalPropertyTypes`. We don't use that
-  // narrower view anywhere, so the cast is purely cosmetic.
-  const app = Fastify(
+  const app: FastifyInstance = Fastify(
     deps.pinoLogger
       ? { loggerInstance: deps.pinoLogger, disableRequestLogging: false }
       : { logger: { level: "warn" }, disableRequestLogging: false },
-  ) as unknown as FastifyInstance;
+  );
 
   // CORS so the Next.js dashboard (Plan 4) can call us in dev.
   void app.register(cors, { origin: true });

@@ -38,10 +38,6 @@ export function statusKindFor(status: TaskStatus): StatusKind {
   return KIND_FOR_STATUS[status];
 }
 
-export function statusColorFor(status: TaskStatus): string {
-  return COLOR_FOR_KIND[statusKindFor(status)];
-}
-
 const LIVE_KINDS: ReadonlySet<StatusKind> = new Set(["progress"]);
 
 export function StatusIcon({

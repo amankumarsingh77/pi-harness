@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type, type Static, type TSchema } from "typebox";
 import yaml from "js-yaml";
-import { ScenarioFileSchema, type Artifact } from "@pi-harness/shared";
+import { BlastRadiusFileSchema, ScenarioFileSchema, type Artifact } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
 
@@ -83,7 +83,7 @@ export function makeMarkReadyTool(deps: {
     name: "mark_ready",
     label: "Mark plan ready",
     description:
-      "Signal that plan.md and scenarios.yaml are complete. The harness validates required sections, parses scenarios.yaml against ScenarioFileSchema, and dispatches claim-verifier (capped at 2 attempts) before flipping artifact status to ready.",
+      "Signal that plan.md, scenarios.yaml, and blast-radius.yaml are complete. The harness validates required sections, parses YAML artifacts against their schemas, and dispatches claim-verifier (capped at 2 attempts) before flipping artifact status to ready.",
     parameters: MarkReadyParams,
     async execute() {
       // 1. Load both artifacts.
@@ -91,11 +91,14 @@ export function makeMarkReadyTool(deps: {
       if (!plan) return reject("plan.md not found");
       const scenarios = await store.readArtifact(cwd, taskId, "scenarios");
       if (!scenarios) return reject("scenarios.yaml not found");
+      const blastRadius = await store.readArtifact(cwd, taskId, "blast-radius");
+      if (!blastRadius) return reject("blast-radius.yaml not found");
 
       // 2. Frontmatter status invariant: must be draft or ready.
       for (const [name, art] of [
         ["plan.md", plan],
         ["scenarios.yaml", scenarios],
+        ["blast-radius.yaml", blastRadius],
       ] as const) {
         if (art.fm.status !== "draft" && art.fm.status !== "ready") {
           return reject(`${name} frontmatter status invalid (got: ${art.fm.status})`);
@@ -109,6 +112,8 @@ export function makeMarkReadyTool(deps: {
       // 4. scenarios.yaml schema.
       const scenariosError = validateScenariosYaml(scenarios.body);
       if (scenariosError) return reject(`scenarios.yaml: ${scenariosError}`);
+      const blastRadiusError = validateBlastRadiusYaml(blastRadius.body);
+      if (blastRadiusError) return reject(`blast-radius.yaml: ${blastRadiusError}`);
 
       // 5. claim-verifier gate. The vendored claim-verifier subagent reviews
       //    plan.md for unsupported claims; if any come back Falsified the
@@ -132,7 +137,9 @@ export function makeMarkReadyTool(deps: {
 
       // Already-ready: skip the status flip but still terminate.
       const alreadyReady =
-        plan.fm.status === "ready" && scenarios.fm.status === "ready";
+        plan.fm.status === "ready" &&
+        scenarios.fm.status === "ready" &&
+        blastRadius.fm.status === "ready";
       if (alreadyReady) {
         return {
           content: [{ type: "text", text: "ready" }],
@@ -143,7 +150,7 @@ export function makeMarkReadyTool(deps: {
 
       // 6. Flip both artifacts to ready, write back, publish status_changed.
       const now = new Date().toISOString();
-      for (const cur of [plan, scenarios] as const) {
+      for (const cur of [plan, scenarios, blastRadius] as const) {
         const next: Artifact = {
           fm: {
             ...cur.fm,
@@ -203,13 +210,21 @@ function findMissingSection(body: string): string | null {
 // parseArtifact) and validate against ScenarioFileSchema. Returns null on
 // success, an error message string on failure.
 function validateScenariosYaml(body: string): string | null {
+  return validateYamlBody(body, ScenarioFileSchema);
+}
+
+function validateBlastRadiusYaml(body: string): string | null {
+  return validateYamlBody(body, BlastRadiusFileSchema);
+}
+
+function validateYamlBody(body: string, schema: typeof ScenarioFileSchema | typeof BlastRadiusFileSchema): string | null {
   let parsed: unknown;
   try {
     parsed = yaml.load(body);
   } catch (err) {
     return `YAML parse error: ${(err as Error).message}`;
   }
-  const result = ScenarioFileSchema.safeParse(parsed);
+  const result = schema.safeParse(parsed);
   if (!result.success) {
     const first = result.error.issues[0];
     if (!first) return "schema validation failed";
@@ -271,6 +286,11 @@ function parseFalsifiedClaims(findings: string): string[] {
   let lastHeader: string | null = null;
   for (const raw of lines) {
     const line = raw.trim();
+    const row = parseFindingRow(line);
+    if (row && row.tag === "Falsified") {
+      out.push(`${row.id}: ${row.justification}`);
+      continue;
+    }
     if (line.startsWith("### ") || line.startsWith("## ")) {
       lastHeader = line.replace(/^#+\s+/, "");
       continue;
@@ -282,6 +302,22 @@ function parseFalsifiedClaims(findings: string): string[] {
   return out;
 }
 
+function parseFindingRow(line: string): {
+  id: string;
+  tag: "Verified" | "Weakened" | "Falsified";
+  justification: string;
+} | null {
+  if (!line.startsWith("FINDING ")) return null;
+  const parts = line.split("|").map((part) => part.trim());
+  if (parts.length < 3) return null;
+  const id = parts[0]!.replace(/^FINDING\s+/, "").trim();
+  const tag = parts[1];
+  const justification = parts.slice(2).join(" | ").trim();
+  if (id.length === 0 || justification.length === 0) return null;
+  if (tag !== "Verified" && tag !== "Weakened" && tag !== "Falsified") return null;
+  return { id, tag, justification };
+}
+
 // Re-export for convenience: tests use these to construct fixtures and assert
 // the same constants the tool consumes.
-export { findMissingSection, validateScenariosYaml, parseFalsifiedClaims };
+export { findMissingSection, validateScenariosYaml, parseFalsifiedClaims, parseFindingRow };

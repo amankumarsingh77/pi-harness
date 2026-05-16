@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useEvents } from "@/lib/use-events";
 
@@ -26,6 +26,10 @@ beforeEach(() => {
   globalThis.EventSource = MockEventSource;
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("useEvents", () => {
   it("appends incoming events to state", async () => {
     const { result } = renderHook(() => useEvents("run-1"));
@@ -43,5 +47,61 @@ describe("useEvents", () => {
     renderHook(() => useEvents("run-2"));
     const es = MockEventSource.instances[0]!;
     expect(es.url).toBe("/api/sse/run-2");
+  });
+
+  it("exposes the latest event timestamp", async () => {
+    const { result } = renderHook(() => useEvents("run-3"));
+    const es = MockEventSource.instances[0]!;
+
+    act(() => {
+      es.emit(JSON.stringify({
+        id: "1",
+        runId: "run-3",
+        taskId: "task-1",
+        ts: "2026-05-15T10:00:00.000Z",
+        kind: "log",
+        level: "info",
+        text: "hi",
+      }));
+    });
+
+    await waitFor(() => {
+      expect(result.current.lastEventAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z");
+    });
+  });
+
+  it("throttles last-event timestamp publishing to once per second", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useEvents("run-4"));
+    const es = MockEventSource.instances[0]!;
+
+    act(() => {
+      es.emit(JSON.stringify({
+        id: "1",
+        runId: "run-4",
+        taskId: "task-1",
+        ts: "2026-05-15T10:00:00.000Z",
+        kind: "log",
+        level: "info",
+        text: "first",
+      }));
+      es.emit(JSON.stringify({
+        id: "2",
+        runId: "run-4",
+        taskId: "task-1",
+        ts: "2026-05-15T10:00:00.500Z",
+        kind: "log",
+        level: "info",
+        text: "second",
+      }));
+    });
+
+    expect(result.current.lastEventAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z");
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(result.current.lastEventAt?.toISOString()).toBe("2026-05-15T10:00:00.500Z");
   });
 });

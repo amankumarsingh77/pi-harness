@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
+import { mkEvent } from "../src/domain/events.js";
+import { scaffoldPlan } from "../src/runner/scaffold-plan.js";
 
 // Build a real git worktree with both artifacts in `status: ready`. Used by
 // tests that exercise the brainstorm approval gate — the route enforces the
@@ -47,6 +49,29 @@ async function makeDraftWorktree(taskId: string): Promise<string> {
   await git.commit("scaffold");
   return wt;
 }
+
+function makePagedMock(taskId: string, mockId = "mock-a") {
+  return {
+    mockId,
+    title: "Split pane",
+    summary: "Shows options beside artifacts.",
+    recommended: true,
+    createdAt: "2026-05-13T00:00:00.000Z",
+    miniature: {
+      kind: "rows" as const,
+      rows: [{ status: "pass" as const, label: "preview renders" }],
+    },
+    pages: [
+      {
+        pageId: "task-detail",
+        title: "Task detail",
+        htmlPath: `.harness/${taskId}/mocks/${mockId}/task-detail.html`,
+      },
+    ],
+  };
+}
+
+const PAGED_MOCK_HTML = [{ pageId: "task-detail", html: "<h1>Mock A</h1>" }];
 
 async function makeReadyWorktree(taskId: string): Promise<string> {
   const wt = await mkdtemp(join(tmpdir(), "pi-harness-bs-"));
@@ -111,12 +136,28 @@ describe("http", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { title: "from http", description: "x" },
+      payload: {
+        title: "from http",
+        description: "x",
+        priority: "urgent",
+        tags: ["Bug Fix", "bug-fix", "Needs Design", "  "],
+      },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.status).toBe("backlog");
     expect(body.id).toMatch(/[0-9a-f-]{36}/);
+    expect(body.priority).toBe("urgent");
+    expect(body.tags).toEqual(["bug-fix", "needs-design"]);
+  });
+
+  it("POST /api/tasks rejects invalid priority", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "bad priority", priority: "highest" },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it("GET /api/model-catalog returns providers and defaults", async () => {
@@ -142,11 +183,18 @@ describe("http", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { title: "with phase models", phaseModels },
+      payload: {
+        title: "with phase models",
+        priority: "high",
+        tags: ["Model Choice"],
+        phaseModels,
+      },
     });
 
     expect(res.statusCode).toBe(201);
     const body = res.json();
+    expect(body.priority).toBe("high");
+    expect(body.tags).toEqual(["model-choice"]);
     expect(body.phaseModels).toEqual(phaseModels);
   });
 
@@ -157,6 +205,26 @@ describe("http", () => {
       payload: {
         title: "bad phase model",
         phaseModels: { brainstorm: { provider: "crofai", model: "not-real" } },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "validation" });
+  });
+
+  it("POST /api/tasks rejects unsupported thinking levels for the selected model", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "bad thinking",
+        phaseModels: {
+          brainstorm: {
+            provider: "crofai",
+            model: "deepseek-v3.2",
+            thinkingLevel: "high",
+          },
+        },
       },
     });
 
@@ -181,6 +249,80 @@ describe("http", () => {
     const body = res.json();
     expect(body.tasks).toHaveLength(2);
     expect(body.counts.backlog).toBe(2);
+  });
+
+  it("GET /api/tasks includes dashboard telemetry summary", async () => {
+    const runningTask = await runs.createTask({ title: "running" });
+    const reviewTask = await runs.createTask({ title: "review" });
+    await runs.updateTask(runningTask.id, { status: "executing" });
+    await runs.updateTask(reviewTask.id, { status: "ready_to_ship" });
+    const run = await runs.createRun({ taskId: runningTask.id, phase: "code" });
+    await runs.updateRun(run.id, { status: "running", costUsd: 1.5 });
+    await events.append({
+      ...mkEvent({
+        runId: run.id,
+        taskId: runningTask.id,
+        kind: "log",
+        level: "info",
+        text: "latest",
+      }),
+      ts: new Date("2026-05-15T10:00:00.000Z"),
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.summary).toMatchObject({
+      runningCount: 1,
+      reviewCount: 1,
+      blockedCount: 0,
+      costUsd: 1.5,
+      costCapUsd: 10,
+      activeRunIds: [run.id],
+    });
+    expect(body.summary.lastEventAt).toBe("2026-05-15T10:00:00.000Z");
+  });
+
+  it("GET /api/tasks marks user-gated tasks as requiring human intervention", async () => {
+    const t = await runs.createTask({ title: "review brainstorm" });
+    const wt = await makeReadyWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      worktreePath: wt,
+      branchName: `pi/${t.id}`,
+      workflow: "backend-feature",
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().humanInterventionTaskIds).toEqual([t.id]);
+  });
+
+  it("GET /api/tasks marks unanswered brainstorm questions as requiring human intervention", async () => {
+    const t = await runs.createTask({ title: "answer brainstorm" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      worktreePath: wt,
+      branchName: `pi/${t.id}`,
+      workflow: "backend-feature",
+    });
+    const run = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    await runs.updateRun(run.id, { status: "running" });
+    await events.append(mkEvent({
+      runId: run.id,
+      taskId: t.id,
+      kind: "brainstorm_question",
+      questionId: "q-scope",
+      prompt: "Choose a workflow",
+      options: [],
+      sectionTarget: { artifact: "design", section: "Scope" },
+      batchId: "b-scope",
+    }));
+
+    const res = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().humanInterventionTaskIds).toEqual([t.id]);
   });
 
   it("POST /api/tasks/:id/transitions runs state-machine + persists", async () => {
@@ -284,6 +426,82 @@ describe("http", () => {
     const ended = replay.find((e) => e.kind === "phase_ended");
     expect(ended).toBeDefined();
     expect((ended as { status?: string } | undefined)?.status).toBe("cancelled");
+  });
+
+  it("user_cancel_current_phase: cancels active brainstorm run but leaves task in brainstorming", async () => {
+    const t = await runs.createTask({ title: "phase-cancel-brainstorm" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+    const activeRun = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+
+    const controller = cancellation.register(t.id);
+    expect(controller.signal.aborted).toBe(false);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/transitions`,
+      payload: { type: "user_cancel_current_phase" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().task.status).toBe("brainstorming");
+    expect(controller.signal.aborted).toBe(true);
+
+    const refreshed = await runs.getRun(activeRun.id);
+    expect(refreshed.status).toBe("cancelled");
+    expect(refreshed.endedAt).not.toBeNull();
+
+    const replay = await events.listForRun(activeRun.id);
+    const ended = replay.find((e) => e.kind === "phase_ended");
+    expect(ended).toBeDefined();
+    expect((ended as { status?: string } | undefined)?.status).toBe("cancelled");
+  });
+
+  it("brainstorm restart accepts a latest cancelled run while task remains brainstorming", async () => {
+    const t = await runs.createTask({ title: "restart-cancelled-brainstorm" });
+    const worktree = await makeReadyWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+      branchName: `pi/${t.id}`,
+    });
+    const cancelledRun = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    await runs.updateRun(cancelledRun.id, { status: "cancelled", endedAt: new Date() });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/restart`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ archivedRunId: cancelledRun.id });
+
+    const active = await runs.findActiveRun(t.id, "brainstorm");
+    expect(active).not.toBeNull();
+  });
+
+  it("plan restart accepts a latest cancelled run while task remains planning", async () => {
+    const t = await runs.createTask({ title: "restart-cancelled-plan" });
+    const worktree = await makeReadyWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "planning",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+      branchName: `pi/${t.id}`,
+    });
+    await scaffoldPlan({ cwd: worktree, taskId: t.id, branch: `pi/${t.id}` });
+    const cancelledRun = await runs.createRun({ taskId: t.id, phase: "plan" });
+    await runs.updateRun(cancelledRun.id, { status: "cancelled", endedAt: new Date() });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/plan/restart`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ archivedRunId: cancelledRun.id });
+
+    const active = await runs.findActiveRun(t.id, "plan");
+    expect(active).not.toBeNull();
   });
 
   it("user_approve_brainstorm: 409 when gate is closed (artifacts not ready)", async () => {
@@ -590,14 +808,12 @@ describe("http", () => {
     // Pretend the agent persisted a session file too.
     await writeFile(join(worktree, ".harness", t.id, "pi-session.jsonl"), "session\n");
     const preRestartStore = new ArtifactsStore();
-    await preRestartStore.writeBrainstormMock(worktree, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await preRestartStore.writeBrainstormMock(
+      worktree,
+      t.id,
+      makePagedMock(t.id),
+      PAGED_MOCK_HTML,
+    );
 
     const res = await app.inject({
       method: "POST",
@@ -622,7 +838,7 @@ describe("http", () => {
     expect(existsSync(join(archive, "design.md"))).toBe(true);
     expect(existsSync(join(archive, "spec.md"))).toBe(true);
     expect(existsSync(join(archive, "pi-session.jsonl"))).toBe(true);
-    expect(existsSync(join(archive, "mocks", "mock-a.html"))).toBe(true);
+    expect(existsSync(join(archive, "mocks", "mock-a", "task-detail.html"))).toBe(true);
     expect(existsSync(join(archive, "mocks", "manifest.json"))).toBe(true);
 
     // Fresh artifacts re-scaffolded in draft state.
@@ -799,42 +1015,28 @@ describe("http", () => {
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
     const store = new ArtifactsStore();
-    await store.writeBrainstormMock(wt, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
     await store.selectBrainstormMock(wt, t.id, "mock-a");
 
     const res = await app.inject({ method: "GET", url: `/api/tasks/${t.id}/brainstorm/mocks` });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
-      mocks: [{ mockId: "mock-a", title: "Split pane" }],
+      mocks: [{ mockId: "mock-a", title: "Split pane", miniature: { kind: "rows" } }],
       selectedMockId: "mock-a",
     });
   });
 
-  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/html returns mock HTML", async () => {
+  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/pages/:pageId/html returns page HTML", async () => {
     const t = await runs.createTask({ title: "mock task" });
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
     const store = new ArtifactsStore();
-    await store.writeBrainstormMock(wt, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
 
     const res = await app.inject({
       method: "GET",
-      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/html`,
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/pages/task-detail/html`,
     });
 
     expect(res.statusCode).toBe(200);
@@ -846,6 +1048,8 @@ describe("http", () => {
     const t = await runs.createTask({ title: "mock task" });
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
     const enqueue = vi.fn();
     const testApp = buildServer({
       runs,
@@ -866,19 +1070,33 @@ describe("http", () => {
     expect(jsonl).toContain("brainstorm_mock_edit_requested");
   });
 
+  it("POST /api/tasks/:id/brainstorm/mocks/:mockId/select rejects a mock with a submitted edit", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    const mock = makePagedMock(t.id);
+    await store.writeBrainstormMock(wt, t.id, mock, PAGED_MOCK_HTML);
+    await writeFile(
+      join(wt, ".harness", t.id, "brainstorm.jsonl"),
+      `${JSON.stringify({ ts: "2026-05-13T00:00:00.000Z", kind: "brainstorm_mock_proposed", mock })}\n${JSON.stringify({ ts: "2026-05-13T00:00:01.000Z", kind: "brainstorm_mock_edit_requested", requestId: "mer_1", mockId: "mock-a", comment: "Narrow it." })}\n`,
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/select`,
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("mock_edit_already_submitted");
+  });
+
   it("POST /api/tasks/:id/brainstorm/mocks/:mockId/select updates manifest and enqueues", async () => {
     const t = await runs.createTask({ title: "mock task" });
     const wt = await makeDraftWorktree(t.id);
     await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
     const store = new ArtifactsStore();
-    await store.writeBrainstormMock(wt, t.id, {
-      mockId: "mock-a",
-      title: "Split pane",
-      summary: "Shows options beside artifacts.",
-      htmlPath: `.harness/${t.id}/mocks/mock-a.html`,
-      recommended: true,
-      createdAt: "2026-05-13T00:00:00.000Z",
-    }, "<h1>Mock A</h1>");
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), PAGED_MOCK_HTML);
     const enqueue = vi.fn();
     const testApp = buildServer({
       runs,
@@ -964,6 +1182,16 @@ describe("http", () => {
       method: "PATCH",
       url: `/api/tasks/${t.id}`,
       payload: { phaseModels: { deploy: { thinkingLevel: "high" } } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("PATCH /api/tasks/:id rejects maxTurns phase model overrides", async () => {
+    const t = await runs.createTask({ title: "pm-max-turns" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${t.id}`,
+      payload: { phaseModels: { brainstorm: { maxTurns: 50 } } },
     });
     expect(res.statusCode).toBe(400);
   });

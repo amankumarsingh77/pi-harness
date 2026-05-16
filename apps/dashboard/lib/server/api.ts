@@ -51,7 +51,7 @@ export const orchestrator: Api = {
       return await real.getArtifact<T>(taskId, name);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404 && name === "brainstorm") {
-        return MOCK_BRAINSTORM_ARTIFACT as unknown as T;
+        return MOCK_BRAINSTORM_ARTIFACT as T;
       }
       throw e;
     }
@@ -72,7 +72,8 @@ export const orchestrator: Api = {
   getBrainstormDiff: (taskId, kind) => real.getBrainstormDiff(taskId, kind),
   submitArtifactEdit: (taskId, payload) => real.submitArtifactEdit(taskId, payload),
   getBrainstormMocks: (taskId) => real.getBrainstormMocks(taskId),
-  getBrainstormMockHtml: (taskId, mockId) => real.getBrainstormMockHtml(taskId, mockId),
+  getBrainstormMockPageHtml: (taskId, mockId, pageId) =>
+    real.getBrainstormMockPageHtml(taskId, mockId, pageId),
   submitBrainstormMockEdit: (taskId, mockId, payload) =>
     real.submitBrainstormMockEdit(taskId, mockId, payload),
   selectBrainstormMock: (taskId, mockId) => real.selectBrainstormMock(taskId, mockId),

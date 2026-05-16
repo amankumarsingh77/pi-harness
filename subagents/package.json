@@ -12,7 +12,7 @@
     "build": "tsc",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'no lint configured'"
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@pi-harness/shared": "workspace:*"

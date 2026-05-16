@@ -3,6 +3,7 @@ export * from "./types/run.js";
 export * from "./types/event.js";
 export * from "./types/scenario.js";
 export * from "./schemas/scenario.js";
+export * from "./schemas/blast-radius.js";
 export * from "./types/artifacts.js";
 export * from "./types/artifact.js";
 export { parseArtifact, stringifyArtifact } from "./frontmatter.js";
@@ -13,6 +14,7 @@ export {
   type ModelCatalog,
   type ModelCatalogModel,
   type ModelCatalogProvider,
+  type ModelAuthStatus,
   type ModelCost,
   type PhaseModelConfig,
   type ThinkingLevel,

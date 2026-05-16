@@ -447,6 +447,16 @@ function renderToolCall(tool: string, rawTool: string, input: unknown): string {
       const dir = stringField(obj, ["dir", "path"]);
       return `read repo layout · ${dir ?? "—"}`;
     }
+    case "pi_web_search":
+    case "searxng_search": {
+      const query = stringField(obj, ["query"]);
+      return `${rawTool}("${truncate(query ?? "—", 72)}")`;
+    }
+    case "pi_web_fetch":
+    case "searxng_fetch": {
+      const url = stringField(obj, ["url"]);
+      return `${rawTool}(${truncate(url ?? "—", 90)})`;
+    }
     default: {
       const arg = summarizeArg(obj);
       return arg ? `${rawTool}(${arg})` : `${rawTool}()`;
@@ -522,9 +532,12 @@ function renderNonToolMessage(e: AgentEvent): string {
 function renderBrainstormSystem(
   e: Extract<AgentEvent, { kind: "brainstorm_system" }>,
 ): string {
-  const data = e.data as { reason?: string; status?: string } | undefined;
+  const data = e.data as { reason?: string; status?: string; kind?: string } | undefined;
   switch (e.systemKind) {
     case "probe_complete":
+      if (data?.kind === "web_research") {
+        return `web research · ${data.status ?? "unknown"}`;
+      }
       return "probed repo";
     case "self_critique_passed":
       return "self-critique passed";

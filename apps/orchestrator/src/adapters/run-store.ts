@@ -1,6 +1,6 @@
 import { eq, asc, desc, and, inArray } from "drizzle-orm";
 import { tasks, runs, type DbClient } from "@pi-harness/db";
-import type { Task, TaskStatus, Run, Phase } from "@pi-harness/shared";
+import type { Task, TaskStatus, Run, Phase, TaskPriority } from "@pi-harness/shared";
 import { TASK_STATUSES } from "@pi-harness/shared";
 import { NotFoundError } from "../domain/errors.js";
 
@@ -12,13 +12,17 @@ export class RunStore {
   async createTask(input: {
     title: string;
     description?: string;
-    phaseModels?: Record<string, unknown>;
+    priority?: TaskPriority;
+    tags?: readonly string[];
+    phaseModels?: Task["phaseModels"];
   }): Promise<Task> {
     const [row] = await this.db
       .insert(tasks)
       .values({
         title: input.title,
         description: input.description ?? "",
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        ...(input.tags !== undefined ? { tags: [...input.tags] } : {}),
         ...(input.phaseModels !== undefined ? { phaseModels: input.phaseModels } : {}),
       })
       .returning();
@@ -37,9 +41,14 @@ export class RunStore {
   }
 
   async updateTask(id: string, patch: Partial<Task>): Promise<Task> {
+    const { tags, ...rest } = patch;
     const [row] = await this.db
       .update(tasks)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({
+        ...rest,
+        ...(tags !== undefined ? { tags: [...tags] } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(tasks.id, id))
       .returning();
     if (!row) throw new NotFoundError("task", id);
@@ -65,6 +74,20 @@ export class RunStore {
     const init = Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])) as Record<TaskStatus, number>;
     for (const t of rows) init[t.status]++;
     return init;
+  }
+
+  async listActiveRunIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(inArray(runs.status, ["pending", "running"]))
+      .orderBy(asc(runs.startedAt));
+    return rows.map((r) => r.id);
+  }
+
+  async totalCostUsd(): Promise<number> {
+    const rows = (await this.db.select({ costUsd: runs.costUsd }).from(runs)) as { costUsd: number }[];
+    return rows.reduce((total, r) => total + r.costUsd, 0);
   }
 
   async createRun(input: { taskId: string; phase: Phase }): Promise<Run> {
@@ -115,6 +138,22 @@ export class RunStore {
           eq(runs.taskId, taskId),
           eq(runs.phase, phase),
           inArray(runs.status, ["pending", "running"]),
+        ),
+      )
+      .orderBy(desc(runs.startedAt))
+      .limit(1);
+    return (rows[0] as Run | undefined) ?? null;
+  }
+
+  async findLatestRun(taskId: string, phase: Phase, status: Run["status"]): Promise<Run | null> {
+    const rows = await this.db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          eq(runs.taskId, taskId),
+          eq(runs.phase, phase),
+          eq(runs.status, status),
         ),
       )
       .orderBy(desc(runs.startedAt))

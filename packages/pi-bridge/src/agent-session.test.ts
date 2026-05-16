@@ -1,11 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentSession, AuthError, type PiBridgeEvent } from "./agent-session.js";
+import {
+  createAgentSession,
+  AuthError,
+  __resetRegistryCache,
+  type PiBridgeEvent,
+} from "./agent-session.js";
 import { __resetAuthCache } from "./auth.js";
 import { createFakeAdapter } from "./_test/fake-sdk.js";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 // The fake-sdk adapter satisfies SdkBoundary structurally and lets each test
 // drive the SDK event stream directly. We assert observable outcomes only:
@@ -36,21 +41,33 @@ const baseModel = { provider: "anthropic", model: "claude-opus-4-5" };
 
 let envDir: string;
 let prevCwd: string;
+let prevHome: string | undefined;
 
 beforeEach(() => {
   envDir = mkdtempSync(join(tmpdir(), "pi-bridge-env-"));
   prevCwd = process.cwd();
+  prevHome = process.env["HOME"];
+  process.env["HOME"] = envDir;
   process.chdir(envDir);
   writeFileSync(join(envDir, ".env.harness"), "ANTHROPIC_API_KEY=test-key\n");
   __resetAuthCache();
+  __resetRegistryCache();
 });
 
 afterEach(() => {
   process.chdir(prevCwd);
+  if (prevHome === undefined) {
+    delete process.env["HOME"];
+  } else {
+    process.env["HOME"] = prevHome;
+  }
   rmSync(envDir, { recursive: true, force: true });
   __resetAuthCache();
+  __resetRegistryCache();
   delete process.env["ANTHROPIC_API_KEY"];
   delete process.env["OPENAI_API_KEY"];
+  delete process.env["CROFAI_API_KEY"];
+  vi.restoreAllMocks();
 });
 
 describe("createAgentSession", () => {
@@ -121,6 +138,30 @@ describe("createAgentSession", () => {
     expect(result).toEqual({ kind: "tool_result", tool: "foo", ok: true, output: { y: 2 } });
   });
 
+  it("tool allowlist keeps custom tools available", async () => {
+    const adapter = createFakeAdapter();
+    await createAgentSession(
+      {
+        cwd: "/tmp",
+        model: baseModel,
+        tools: ["read", "write"],
+        customTools: [
+          {
+            name: "submit_questions",
+            label: "Submit questions",
+            description: "Ask structured questions",
+            parameters: {} as never,
+            execute: async () => ({ content: [], details: {} }),
+          },
+        ],
+        onEvent: () => {},
+      },
+      adapter,
+    );
+
+    expect(adapter.state.createOpts?.tools).toEqual(["read", "write", "submit_questions"]);
+  });
+
   it("tool error: emits tool_result with ok=false and error payload", async () => {
     const adapter = createFakeAdapter();
     const events: PiBridgeEvent[] = [];
@@ -186,7 +227,7 @@ describe("createAgentSession", () => {
     expect(usage.costUsd).toBe(0.001);
   });
 
-  it("maxTurns enforced: rejects in-flight prompt and aborts the SDK session", async () => {
+  it("legacy maxTurns option does not abort an in-flight prompt", async () => {
     const adapter = createFakeAdapter();
     const events: PiBridgeEvent[] = [];
     const session = await createAgentSession(
@@ -197,9 +238,14 @@ describe("createAgentSession", () => {
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
     adapter.emit({ type: "turn_start" } as AgentSessionEvent);
-    await expect(p).rejects.toThrow(/maxTurns exceeded/);
-    expect(adapter.state.abortCalls).toBeGreaterThanOrEqual(1);
-    expect(events.some((e) => e.kind === "error")).toBe(true);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(2, 3, 0.001)],
+    } as AgentSessionEvent);
+
+    await expect(p).resolves.toEqual({ inputTokens: 2, outputTokens: 3, costUsd: 0.001 });
+    expect(adapter.state.abortCalls).toBe(0);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
   });
 
   it("auth missing: throws AuthError when SDK rejects on missing credential", async () => {
@@ -320,16 +366,51 @@ describe("createAgentSession", () => {
 
   it("crofai auth present: assertCredential passes when CROFAI_API_KEY is set", async () => {
     process.env["CROFAI_API_KEY"] = "test-crofai-key";
-    try {
-      const adapter = createFakeAdapter();
-      const session = await createAgentSession(
-        { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+    const setRuntimeApiKey = vi.spyOn(AuthStorage.prototype, "setRuntimeApiKey");
+    const adapter = createFakeAdapter();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+      adapter,
+    );
+    await session.close();
+    expect(setRuntimeApiKey).toHaveBeenCalledWith("crofai", "test-crofai-key");
+  });
+
+  it("programmatically shares .env.harness CROFAI_API_KEY with AuthStorage", async () => {
+    writeFileSync(join(envDir, ".env.harness"), "CROFAI_API_KEY=file-crofai-key\n");
+    __resetAuthCache();
+    __resetRegistryCache();
+    const setRuntimeApiKey = vi.spyOn(AuthStorage.prototype, "setRuntimeApiKey");
+    const adapter = createFakeAdapter();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: { provider: "crofai", model: "kimi-k2.6" }, onEvent: () => {} },
+      adapter,
+    );
+    await session.close();
+    expect(setRuntimeApiKey).toHaveBeenCalledWith("crofai", "file-crofai-key");
+  });
+
+  it("openai-codex oauth present: assertCredential passes with auth.json token", async () => {
+    const authDir = join(envDir, ".pi", "agent");
+    mkdirSync(authDir, { recursive: true });
+    writeFileSync(join(authDir, "auth.json"), JSON.stringify({ "openai-codex": { type: "oauth" } }));
+
+    const adapter = createFakeAdapter();
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: { provider: "openai-codex", model: "gpt-5.5" }, onEvent: () => {} },
+      adapter,
+    );
+    await session.close();
+  });
+
+  it("openai-codex oauth missing: AuthError points to login instead of env key", async () => {
+    const adapter = createFakeAdapter();
+    await expect(
+      createAgentSession(
+        { cwd: "/tmp", model: { provider: "openai-codex", model: "gpt-5.5" }, onEvent: () => {} },
         adapter,
-      );
-      await session.close();
-    } finally {
-      delete process.env["CROFAI_API_KEY"];
-    }
+      ),
+    ).rejects.toThrow(/missing subscription login for openai-codex/);
   });
 
   it("abort: rejects pending prompt with 'aborted' and forwards to sdk", async () => {

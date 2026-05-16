@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 describe("scaffoldPlan", () => {
-  it("writes plan.md and scenarios.yaml with draft frontmatter", async () => {
+  it("writes plan.md, scenarios.yaml, and blast-radius.yaml with draft frontmatter", async () => {
     const r = await scaffoldPlan({ cwd: scratch, taskId: "T-001", branch: "pi/T-001" });
     expect(r.created).toBe(true);
 
@@ -47,6 +47,15 @@ describe("scaffoldPlan", () => {
     expect(scenarios).toContain("parent: plan.md");
     expect(scenarios).toContain("status: draft");
     expect(scenarios).toContain("scenarios: []");
+
+    const blastRadius = await readFile(
+      join(scratch, ".harness", "T-001", "blast-radius.yaml"),
+      "utf8",
+    );
+    expect(blastRadius).toContain("kind: blast-radius");
+    expect(blastRadius).toContain("parent: spec.md");
+    expect(blastRadius).toContain("status: draft");
+    expect(blastRadius).toContain("items: []");
   });
 
   it("writes a per-task .gitignore that excludes research/", async () => {

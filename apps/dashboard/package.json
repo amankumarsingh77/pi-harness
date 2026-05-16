@@ -9,11 +9,11 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "lint": "echo \"no lint configured\""
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
+    "@dnd-kit/react": "^0.4.0",
     "@pi-harness/shared": "workspace:*",
-    "@pi-harness/subagents": "workspace:*",
     "@tanstack/react-query": "^5.59.0",
     "clsx": "^2.1.1",
     "next": "^15.0.0",
@@ -21,14 +21,13 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "zod": "^3.23.0"
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@tailwindcss/postcss": "^4.0.0-beta.4",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.0",
-    "@testing-library/user-event": "^14.5.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

@@ -109,7 +109,7 @@ async function dispatchBrainstorm(
   opts: DispatchOpts & { branch: string },
 ): Promise<Task> {
   const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
-  let task = opts.task;
+  const task = opts.task;
 
   // Lay down design.md / spec.md scaffolding + initial commit. Idempotent.
   await scaffoldBrainstorm({ cwd: worktree.path, taskId: task.id, branch });
@@ -196,7 +196,7 @@ async function dispatchPlan(
   opts: DispatchOpts & { branch: string; enqueue?: (taskId: string) => void },
 ): Promise<Task> {
   const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
-  let task = opts.task;
+  const task = opts.task;
 
   await scaffoldPlan({ cwd: worktree.path, taskId: task.id, branch });
 
@@ -257,12 +257,15 @@ async function dispatchPlan(
     // Skipped when artifacts are already ready (the gate check at the top of
     // runLoop will short-circuit on the next tick anyway, so it's harmless,
     // but no point burning a tick).
-    const [plan, scenarios] = await Promise.all([
+    const [plan, scenarios, blastRadius] = await Promise.all([
       phaseDeps.store.readArtifact(worktree.path, task.id, "plan"),
       phaseDeps.store.readArtifact(worktree.path, task.id, "scenarios"),
+      phaseDeps.store.readArtifact(worktree.path, task.id, "blast-radius"),
     ]);
     const ready =
-      plan?.fm.status === "ready" && scenarios?.fm.status === "ready";
+      plan?.fm.status === "ready" &&
+      scenarios?.fm.status === "ready" &&
+      blastRadius?.fm.status === "ready";
     if (!ready && opts.enqueue) opts.enqueue(task.id);
     return task;
   }

@@ -25,6 +25,7 @@ const PHASE_LABELS: Record<Phase, string> = {
 export function PhaseModelPicker({ catalog }: { catalog: ModelCatalog }) {
   const [config, setConfig] = useState<PhaseModels>(() => initialConfig(catalog));
   const serialized = useMemo(() => JSON.stringify(config), [config]);
+  const phases = catalog.phases.length > 0 ? catalog.phases : PHASES;
 
   return (
     <div className="overflow-hidden rounded-md border border-line bg-input/30">
@@ -34,7 +35,7 @@ export function PhaseModelPicker({ catalog }: { catalog: ModelCatalog }) {
         <HeaderCell>Provider</HeaderCell>
         <HeaderCell>Model</HeaderCell>
         <HeaderCell>Thinking</HeaderCell>
-        {PHASES.map((phase) => (
+        {phases.map((phase) => (
           <PhaseRow
             key={phase}
             phase={phase}
@@ -86,7 +87,7 @@ function PhaseRow({
         >
           {catalog.providers.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name}
+              {providerOptionLabel(p)}
             </option>
           ))}
         </select>
@@ -183,6 +184,10 @@ function findProvider(catalog: ModelCatalog, providerId: string): ModelCatalogPr
 
 function findModel(provider: ModelCatalogProvider, modelId: string): ModelCatalogModel | undefined {
   return provider.models.find((model) => model.id === modelId);
+}
+
+function providerOptionLabel(provider: ModelCatalogProvider): string {
+  return `${provider.name} (${provider.authStatus.configured ? "auth ready" : "missing auth"})`;
 }
 
 function isThinkingLevel(value: string): value is ThinkingLevel {

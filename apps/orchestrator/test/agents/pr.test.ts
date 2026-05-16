@@ -29,7 +29,7 @@ describe("runPr", () => {
         ok: true,
         scenarios: [{ id: "ok", type: "api" as const, ok: true, evidence: {} }],
       })),
-    } as unknown as ArtifactsStore;
+    } as ArtifactsStore;
 
     const result = await runPr({
       taskId: "t-1",
@@ -69,7 +69,7 @@ describe("runPr", () => {
       readProofReport: vi.fn(async () => ({
         runId: "r1", ok: true, scenarios: [],
       })),
-    } as unknown as ArtifactsStore;
+    } as ArtifactsStore;
 
     const result = await runPr({
       taskId: "t",

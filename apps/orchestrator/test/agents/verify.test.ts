@@ -33,7 +33,7 @@ describe("runVerify", () => {
       suggestedWorkflow: "backend-feature" as const,
     }));
     const writeProofReport = vi.fn(async () => {});
-    const store = { readPlan, writeProofReport, proofDir: () => "/tmp/proof" } as unknown as ArtifactsStore;
+    const store = { readPlan, writeProofReport, proofDir: () => "/tmp/proof" } as ArtifactsStore;
 
     const runApiScenario = vi.fn(async (o: { scenario: { id: string } }) => ({
       id: o.scenario.id,
@@ -81,7 +81,7 @@ describe("runVerify", () => {
       suggestedWorkflow: "backend-feature" as const,
     }));
     const writeProofReport = vi.fn(async () => {});
-    const store = { readPlan, writeProofReport, proofDir: () => "/tmp" } as unknown as ArtifactsStore;
+    const store = { readPlan, writeProofReport, proofDir: () => "/tmp" } as ArtifactsStore;
 
     const result = await runVerify({
       taskId: "t-1",

@@ -10,15 +10,20 @@ import {
   type CreateAgentSessionOptions,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { findEnvKeys, getEnvApiKey, getModel } from "@earendil-works/pi-ai";
+import { findEnvKeys, getEnvApiKey, getModels, getProviders } from "@earendil-works/pi-ai";
 import type { AssistantMessage, KnownProvider, Usage } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AuthError, loadEnvHarness } from "./auth.js";
 import {
   CROFAI_API_KEY_ENV,
-  CROFAI_PROVIDER_CONFIG,
   CROFAI_PROVIDER_NAME,
 } from "./providers/crofai.js";
+import {
+  createHarnessModelRegistry,
+  registryUsesCrofaiFallback,
+} from "./model-catalog.js";
 
 export { AuthError };
 export type { ThinkingLevel, ToolDefinition };
@@ -42,12 +47,14 @@ export type AgentSessionOptions = {
   cwd: string;
   model: { provider: string; model: string };
   thinkingLevel?: ThinkingLevel;
+  // Deprecated no-op. Kept so older orchestrator callers do not break, but
+  // turn-count caps are no longer enforced anywhere in the pipeline.
   maxTurns?: number;
   systemPrompt?: string;
   customTools?: ToolDefinition[];
-  // Allowlist of built-in tool names. When provided, only these built-ins
-  // are enabled (custom tools are always available). Omit to keep the SDK's
-  // default builtins: read, bash, edit, write.
+  // Allowlist of SDK tool names. The pi SDK applies this filter to both
+  // built-ins and custom tools, so openSession augments it with custom tool
+  // names before constructing the SDK session.
   tools?: string[];
   sessionPath?: string;
   onEvent: (e: PiBridgeEvent) => void;
@@ -78,8 +85,13 @@ export type SdkBoundaryCreateOptions = {
   sessionPath?: string;
 };
 
+export type BridgeSdkSession = Pick<
+  SdkAgentSession,
+  "abort" | "dispose" | "isStreaming" | "prompt" | "sessionFile" | "subscribe"
+>;
+
 export type SdkBoundary = {
-  create: (opts: SdkBoundaryCreateOptions) => Promise<{ session: SdkAgentSession }>;
+  create: (opts: SdkBoundaryCreateOptions) => Promise<{ session: BridgeSdkSession }>;
 };
 
 // Providers we register with the SDK at runtime (not in pi-ai's static MODELS).
@@ -89,19 +101,27 @@ const CUSTOM_PROVIDER_ENV: Record<string, string> = {
   [CROFAI_PROVIDER_NAME]: CROFAI_API_KEY_ENV,
 };
 
+const OAUTH_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
+const KNOWN_PROVIDERS = new Set<string>(getProviders());
+
 // Lazy per-process registry. Built once on first session creation; reused for
 // every subsequent session so the orchestrator doesn't re-register providers
 // each phase tick. The registry resolves credentials via setRuntimeApiKey
 // (populated from .env.harness) — that's why loadEnvHarness must run first.
+let authStorage: AuthStorage | null = null;
 let registryPromise: Promise<ModelRegistry> | null = null;
 
 function buildCustomRegistry(): ModelRegistry {
-  // Each provider's ProviderConfigInput declares its own apiKey as an env-var
-  // name; the SDK resolves it from process.env at request time. AuthStorage
-  // is just a placeholder here — we don't persist credentials.
-  const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
-  registry.registerProvider(CROFAI_PROVIDER_NAME, CROFAI_PROVIDER_CONFIG);
-  return registry;
+  return createHarnessModelRegistry(getAuthStorage());
+}
+
+function getAuthStorage(): AuthStorage {
+  authStorage ??= AuthStorage.create();
+  return authStorage;
+}
+
+function isKnownProvider(provider: string): provider is KnownProvider {
+  return KNOWN_PROVIDERS.has(provider);
 }
 
 async function getRegistry(): Promise<ModelRegistry> {
@@ -114,6 +134,7 @@ async function getRegistry(): Promise<ModelRegistry> {
 // Test-only: clear the cached registry between tests so .env.harness changes
 // take effect. Mirrors __resetAuthCache from auth.ts.
 export function __resetRegistryCache(): void {
+  authStorage = null;
   registryPromise = null;
 }
 
@@ -127,6 +148,7 @@ const defaultBoundary: SdkBoundary = {
     const sdkOpts: CreateAgentSessionOptions = {
       cwd: opts.cwd,
       model,
+      authStorage: getAuthStorage(),
       modelRegistry: registry,
       sessionManager,
       customTools: opts.customTools ?? [],
@@ -146,7 +168,9 @@ export async function createAgentSession(
   boundary: SdkBoundary = defaultBoundary,
 ): Promise<AgentSession> {
   loadEnvHarness();
-  assertCredential(opts.model.provider);
+  syncRuntimeApiKey(opts.model.provider);
+  const registry = await getRegistry();
+  assertCredential(opts.model.provider, registry);
 
   const sdkSession = await openSession(boundary, opts);
 
@@ -157,7 +181,6 @@ export async function createAgentSession(
     settled: boolean;
   };
   let pending: Pending | null = null;
-  const maxTurns = opts.maxTurns;
 
   const settle = (fn: (p: Pending) => void): void => {
     if (!pending || pending.settled) return;
@@ -172,11 +195,6 @@ export async function createAgentSession(
       case "turn_start": {
         if (!pending) return;
         pending.turnCount += 1;
-        if (maxTurns !== undefined && pending.turnCount > maxTurns) {
-          opts.onEvent({ kind: "error", text: "maxTurns exceeded" });
-          void sdkSession.abort().catch(() => {});
-          settle((p) => p.reject(new Error("maxTurns exceeded")));
-        }
         return;
       }
       case "message_update": {
@@ -252,30 +270,24 @@ function resolveModel(spec: { provider: string; model: string }, registry: Model
   // Custom providers (registered at runtime via ModelRegistry) aren't in
   // pi-ai's static MODELS, so getModel would throw. Consult the registry
   // first; fall back to pi-ai for built-in providers.
+  const registered = registry.find(spec.provider, spec.model);
+  if (registered) {
+    return registered;
+  }
+
   if (spec.provider in CUSTOM_PROVIDER_ENV) {
-    const found = registry.find(spec.provider, spec.model);
-    if (!found) {
-      throw new AuthError(
-        `unknown model ${spec.provider}/${spec.model}: not registered in custom provider registry`,
-      );
-    }
-    return found;
-  }
-  // The SDK's `getModel` is generic over the literal provider/model union and
-  // refuses bare strings at the type level. We accept arbitrary provider/model
-  // strings at our boundary (orchestrator config is dynamic) and let the SDK
-  // throw at runtime if the pair is unknown — that error is caught and rewrapped
-  // as AuthError so callers get a uniform failure type.
-  try {
-    return (getModel as unknown as (p: string, m: string) => ReturnType<typeof getModel<KnownProvider, never>>)(
-      spec.provider,
-      spec.model,
-    );
-  } catch (err) {
     throw new AuthError(
-      `unknown model ${spec.provider}/${spec.model}: ${(err as Error).message}`,
+      `unknown model ${spec.provider}/${spec.model}: not registered in custom provider registry`,
     );
   }
+  if (isKnownProvider(spec.provider)) {
+    const found = getModels(spec.provider).find((model) => model.id === spec.model);
+    if (found) {
+      return found;
+    }
+  }
+
+  throw new AuthError(`unknown model ${spec.provider}/${spec.model}: not registered in pi-ai`);
 }
 
 // The SDK throws on missing credentials. We catch and rewrap as AuthError so
@@ -286,7 +298,7 @@ function resolveModel(spec: { provider: string; model: string }, registry: Model
 async function openSession(
   boundary: SdkBoundary,
   opts: AgentSessionOptions,
-): Promise<SdkAgentSession> {
+): Promise<BridgeSdkSession> {
   try {
     const create: SdkBoundaryCreateOptions = {
       cwd: opts.cwd,
@@ -294,7 +306,7 @@ async function openSession(
       ...(opts.thinkingLevel !== undefined ? { thinkingLevel: opts.thinkingLevel } : {}),
       ...(opts.systemPrompt !== undefined ? { systemPrompt: opts.systemPrompt } : {}),
       ...(opts.customTools !== undefined ? { customTools: opts.customTools } : {}),
-      ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
+      ...(opts.tools !== undefined ? { tools: allowlistedTools(opts.tools, opts.customTools) } : {}),
       ...(opts.sessionPath !== undefined ? { sessionPath: opts.sessionPath } : {}),
     };
     const { session } = await boundary.create(create);
@@ -309,21 +321,90 @@ async function openSession(
   }
 }
 
+function allowlistedTools(
+  tools: readonly string[],
+  customTools: readonly ToolDefinition[] | undefined,
+): string[] {
+  const out = new Set(tools);
+  for (const tool of customTools ?? []) {
+    out.add(tool.name);
+  }
+  return [...out];
+}
+
+function syncRuntimeApiKey(provider: string): void {
+  if (OAUTH_PROVIDERS.has(provider)) return;
+  const apiKey = apiKeyFromEnv(provider);
+  if (apiKey) {
+    getAuthStorage().setRuntimeApiKey(provider, apiKey);
+  }
+}
+
+function apiKeyFromEnv(provider: string): string | undefined {
+  const customEnv = CUSTOM_PROVIDER_ENV[provider];
+  if (customEnv !== undefined) {
+    return nonEmptyEnv(customEnv);
+  }
+
+  for (const envKey of findEnvKeys(provider) ?? []) {
+    const apiKey = nonEmptyEnv(envKey);
+    if (apiKey) return apiKey;
+  }
+  return getEnvApiKey(provider) || undefined;
+}
+
+function nonEmptyEnv(key: string): string | undefined {
+  const value = process.env[key];
+  return value && value.length > 0 ? value : undefined;
+}
+
 // Upfront credential check using the SDK's own provider→env-var registry
 // (findEnvKeys / getEnvApiKey). Throws AuthError before the SDK is touched so
 // brainstorm.ts can route the failure into a phase_blocked state without
 // spinning up a session.
-function assertCredential(provider: string): void {
+function assertCredential(provider: string, registry: ModelRegistry): void {
   // Custom providers aren't in pi-ai's env-key registry; check our own map first.
   const customEnv = CUSTOM_PROVIDER_ENV[provider];
   if (customEnv !== undefined) {
-    if (process.env[customEnv]) return;
+    if (process.env[customEnv] || getAuthStorage().hasAuth(provider)) return;
+    if (provider === CROFAI_PROVIDER_NAME && registryUsesCrofaiFallback(registry)) {
+      throw new AuthError(`missing API key for ${provider} (expected ${customEnv} in .env.harness)`);
+    }
+    if (registry.getProviderAuthStatus(provider).configured) return;
     throw new AuthError(`missing API key for ${provider} (expected ${customEnv} in .env.harness)`);
+  }
+  if (OAUTH_PROVIDERS.has(provider)) {
+    if (hasOAuthCredential(provider)) return;
+    throw new AuthError(`missing subscription login for ${provider} (run /login in pi)`);
   }
   if (getEnvApiKey(provider)) return;
   const envVars = findEnvKeys(provider);
+  if (!isKnownProvider(provider) && registry.getAll().some((model) => model.provider === provider)) {
+    const status = registry.getProviderAuthStatus(provider);
+    if (status.configured) return;
+    throw new AuthError(
+      `missing API key for ${provider} (configure auth.json, environment, or models.json)`,
+    );
+  }
   const expected = envVars && envVars.length > 0 ? envVars.join(" or ") : "<unknown>";
   throw new AuthError(`missing API key for ${provider} (expected ${expected} in .env.harness)`);
+}
+
+function hasOAuthCredential(provider: string): boolean {
+  const path = join(process.env["HOME"] ?? "", ".pi", "agent", "auth.json");
+  if (!existsSync(path)) return false;
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const entry = raw[provider];
+    return (
+      typeof entry === "object" &&
+      entry !== null &&
+      "type" in entry &&
+      (entry as { type?: unknown }).type === "oauth"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function looksLikeAuthFailure(message: string): boolean {

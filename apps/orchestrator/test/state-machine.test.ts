@@ -12,6 +12,8 @@ function mkTask(status: Task["status"], overrides: Partial<Task> = {}): Task {
     worktreePath: null,
     branchName: null,
     retryCount: 0,
+    priority: "none",
+    tags: [],
     phaseModels: {},
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -159,6 +161,21 @@ describe("transition", () => {
   it("user_retry_failed from a non-failed status is rejected", () => {
     const t = mkTask("brainstorming", { workflow: "backend-feature" });
     const r = transition(t, { type: "user_retry_failed" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("user_cancel_current_phase keeps brainstorm and plan in their current stage", () => {
+    for (const s of ["brainstorming", "planning"] as const) {
+      const t = mkTask(s, { workflow: "backend-feature" });
+      const r = transition(t, { type: "user_cancel_current_phase" });
+      expect(r.ok, `from ${s}`).toBe(true);
+      if (r.ok) expect(r.task.status).toBe(s);
+    }
+  });
+
+  it("user_cancel_current_phase rejects non-brainstorm/plan statuses", () => {
+    const t = mkTask("executing", { workflow: "backend-feature" });
+    const r = transition(t, { type: "user_cancel_current_phase" });
     expect(r.ok).toBe(false);
   });
 

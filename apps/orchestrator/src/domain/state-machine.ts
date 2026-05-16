@@ -9,6 +9,7 @@ export type TransitionAction =
   | { type: "user_approve_plan" }
   | { type: "user_request_plan_changes"; comment: string }
   | { type: "user_approve_scenarios" }
+  | { type: "user_cancel_current_phase" }
   | { type: "user_cancel" }
   | { type: "user_retry_failed" }
   | { type: "agent_phase_succeeded"; phase: Phase }
@@ -79,6 +80,12 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
       // for v2 when scenario review becomes its own step.
       if (task.status !== "planning") return reject("must be in planning");
       return advance("executing");
+
+    case "user_cancel_current_phase":
+      if (task.status !== "brainstorming" && task.status !== "planning") {
+        return reject("must be in brainstorming or planning");
+      }
+      return advance(task.status);
 
     case "user_cancel":
       if (task.status === "done" || task.status === "cancelled") {

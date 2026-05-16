@@ -13,6 +13,7 @@ import {
 import { QuestionBatch } from "./question-card";
 import { NudgeInput } from "./nudge-input";
 import { ActivityLine, deriveActivity, type ActivityState } from "./activity-line";
+import { createTimelineMocks } from "./use-brainstorm-timeline";
 
 // Renders the brainstorm transcript from JSONL events. Live updates: the
 // page passes the server-rendered snapshot as `initialEvents`, and we
@@ -109,10 +110,6 @@ export function ChatPanel({
   type QuestionEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>;
   type NudgeEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_user_nudge" }>;
   type ReplyEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_agent_reply" }>;
-  type MockProposalEvent = Extract<
-    BrainstormJsonlEvent,
-    { kind: "brainstorm_mock_proposed" | "brainstorm_mock_revised" }
-  >;
 
   const batchById = new Map<
     string,
@@ -122,6 +119,14 @@ export function ChatPanel({
   const repliesByNudgeId = new Map<string, ReplyEvent[]>();
   const standaloneReplies: ReplyEvent[] = [];
   const selectedMockIds = new Set<string>();
+  const lockedMockIds = new Set<string>();
+  const mockEventById = new Map<
+    string,
+    { ts: string; mock: BrainstormMock; editRequestId?: string }
+  >();
+  const activeMockIds = new Set(
+    createTimelineMocks(events, taskStatus).map((entry) => entry.mock.mockId),
+  );
 
   for (const e of events) {
     if (e.kind === "brainstorm_question") {
@@ -148,6 +153,22 @@ export function ChatPanel({
       }
     } else if (e.kind === "brainstorm_mock_selected") {
       selectedMockIds.add(e.mockId);
+    }
+  }
+  for (const e of events) {
+    if (e.kind === "brainstorm_mock_proposed" || e.kind === "brainstorm_mock_revised") {
+      mockEventById.set(e.mock.mockId, {
+        ts: e.ts,
+        mock: e.mock,
+        ...(e.kind === "brainstorm_mock_revised" ? { editRequestId: e.editRequestId } : {}),
+      });
+    } else if (e.kind === "brainstorm_mock_edit_requested") {
+      lockedMockIds.add(e.mockId);
+    } else if (
+      e.kind === "brainstorm_mock_selected" ||
+      e.kind === "brainstorm_revision_requested"
+    ) {
+      for (const mockId of mockEventById.keys()) lockedMockIds.add(mockId);
     }
   }
   // A reply whose parent nudge never arrived becomes standalone (otherwise it
@@ -193,16 +214,11 @@ export function ChatPanel({
       }
     } else if (e.kind === "brainstorm_revision_requested") {
       timeline.push({ kind: "revision", ts: e.ts, comment: e.comment });
-    } else if (e.kind === "brainstorm_mock_proposed") {
-      timeline.push({ kind: "mock", ts: e.ts, mock: e.mock });
-    } else if (e.kind === "brainstorm_mock_revised") {
-      timeline.push({
-        kind: "mock",
-        ts: e.ts,
-        mock: e.mock,
-        editRequestId: e.editRequestId,
-      });
     }
+  }
+  for (const mockEvent of mockEventById.values()) {
+    if (!activeMockIds.has(mockEvent.mock.mockId)) continue;
+    timeline.push({ kind: "mock", ...mockEvent });
   }
   for (const b of batchById.values()) {
     timeline.push({ kind: "batch", ts: b.ts, batchId: b.batchId, questions: b.questions });
@@ -352,7 +368,9 @@ export function ChatPanel({
                 taskId={taskId}
                 mock={item.mock}
                 selected={selectedMockIds.has(item.mock.mockId)}
-                editable={taskStatus === "brainstorming"}
+                editable={
+                  taskStatus === "brainstorming" && !lockedMockIds.has(item.mock.mockId)
+                }
               />
             );
           }
@@ -484,6 +502,19 @@ function MockCard({
             )}
           </div>
           <div className="mt-1 text-[12.5px] leading-[1.45] text-fg-mute">{mock.summary}</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {mock.pages.map((page) => (
+              <span
+                key={page.pageId}
+                className="rounded border border-line bg-white/[0.02] px-2 py-0.5 font-mono text-[10.5px] text-fg-subtle"
+              >
+                {page.title}
+              </span>
+            ))}
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-fg-subtle">
+            {mock.pages.length} {mock.pages.length === 1 ? "page" : "pages"}
+          </div>
           {mock.derivedFrom && (
             <div className="mt-1 font-mono text-[10.5px] text-fg-subtle">
               derived from {mock.derivedFrom}
@@ -638,11 +669,17 @@ function projectAgentEvent(e: AgentEvent): BrainstormJsonlEvent | null {
           : {}),
       };
     case "brainstorm_mock_proposed":
-      return { kind: "brainstorm_mock_proposed", ts, mock: e.mock };
+      return {
+        kind: "brainstorm_mock_proposed",
+        ts,
+        ...(e.mockSetId !== undefined ? { mockSetId: e.mockSetId } : {}),
+        mock: e.mock,
+      };
     case "brainstorm_mock_revised":
       return {
         kind: "brainstorm_mock_revised",
         ts,
+        ...(e.mockSetId !== undefined ? { mockSetId: e.mockSetId } : {}),
         mock: e.mock,
         editRequestId: e.editRequestId,
       };

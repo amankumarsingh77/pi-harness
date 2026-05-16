@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { PhaseModelPicker } from "@/components/new-task/phase-model-picker";
 import type { ModelCatalog } from "@pi-harness/shared";
 
 const catalog: ModelCatalog = {
+  phases: ["brainstorm", "plan", "code", "verify", "pr"],
+  thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"],
   defaults: {
     brainstorm: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "medium" },
     plan: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high" },
@@ -16,6 +17,7 @@ const catalog: ModelCatalog = {
     {
       id: "crofai",
       name: "CrofAI",
+      authStatus: { configured: true, source: "environment" },
       models: [
         {
           id: "kimi-k2.6",
@@ -31,6 +33,7 @@ const catalog: ModelCatalog = {
     {
       id: "openai",
       name: "OpenAI",
+      authStatus: { configured: false },
       models: [
         {
           id: "gpt-x",
@@ -55,11 +58,17 @@ describe("PhaseModelPicker", () => {
     }
   });
 
-  it("changes provider and model for only the selected phase", async () => {
-    const user = userEvent.setup();
+  it("shows provider auth status in the provider selector", () => {
     render(<PhaseModelPicker catalog={catalog} />);
 
-    await user.selectOptions(screen.getByLabelText("Brainstorm provider"), "openai");
+    expect(screen.getAllByRole("option", { name: "CrofAI (auth ready)" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("option", { name: "OpenAI (missing auth)" }).length).toBeGreaterThan(0);
+  });
+
+  it("changes provider and model for only the selected phase", () => {
+    render(<PhaseModelPicker catalog={catalog} />);
+
+    fireEvent.change(screen.getByLabelText("Brainstorm provider"), { target: { value: "openai" } });
 
     const hidden = screen.getByDisplayValue(/\{"brainstorm"/);
     expect(hidden).toHaveAttribute("name", "phaseModels");

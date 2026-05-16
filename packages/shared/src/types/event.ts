@@ -15,14 +15,40 @@ export type BrainstormOption = {
   description?: string;
 };
 
+export type BrainstormMockPage = {
+  pageId: string;
+  title: string;
+  summary?: string;
+  htmlPath: string;
+};
+
+export type BrainstormMockMiniature =
+  | {
+      kind: "rows";
+      rows: ReadonlyArray<{
+        status: "pass" | "fail" | "muted";
+        label: string;
+        sub?: string;
+        action?: string;
+      }>;
+    }
+  | {
+      kind: "grid+drawer";
+      cells: ReadonlyArray<{ status: "pass" | "fail" }>;
+      drawerTitle: string;
+      diffLines: ReadonlyArray<{ kind: "plus" | "minus" }>;
+      confirm: string;
+    };
+
 export type BrainstormMock = {
   mockId: string;
   title: string;
   summary: string;
-  htmlPath: string;
   recommended: boolean;
   createdAt: string;
   derivedFrom?: string;
+  miniature?: BrainstormMockMiniature;
+  pages: BrainstormMockPage[];
 };
 
 export type BrainstormMockManifest = {
@@ -130,10 +156,12 @@ export type AgentEvent =
     })
   | (AgentEventBase & {
       kind: "brainstorm_mock_proposed";
+      mockSetId?: string;
       mock: BrainstormMock;
     })
   | (AgentEventBase & {
       kind: "brainstorm_mock_revised";
+      mockSetId?: string;
       mock: BrainstormMock;
       editRequestId: string;
     })

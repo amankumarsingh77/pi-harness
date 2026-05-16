@@ -4,7 +4,7 @@
 // the full docs read them on demand from disk.
 //
 // Section headings are the ones the brainstorm system prompt instructs the
-// agent to emit (subagents/ours/brainstorm.md). If a section is missing the
+// agent to emit (subagents/prompts/phase/brainstorm.md). If a section is missing the
 // digest degrades gracefully — falls back to the raw ticket title +
 // description, never throws.
 

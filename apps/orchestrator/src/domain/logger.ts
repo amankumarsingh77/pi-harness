@@ -52,12 +52,6 @@ export function createPinoLogger(opts: CreateLoggerOptions): PinoLogger {
   return pino(pinoOpts);
 }
 
-// Build a pino-backed Logger. JSON in prod (LOG_FORMAT=json), human-readable
-// in dev via pino-pretty.
-export function createLogger(opts: CreateLoggerOptions): Logger {
-  return wrap(createPinoLogger(opts));
-}
-
 // Wrap an existing pino instance — useful when Fastify or another framework
 // already constructed one and we want to expose the same level/transport
 // through the project's Logger surface.

@@ -1,8 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import { DEFAULT_PHASE_MODELS, PHASES, type Phase, type PhaseModelConfig } from "@pi-harness/shared";
-import { getModelCatalog, modelCatalogContains } from "@pi-harness/pi-bridge";
+import {
+  DEFAULT_PHASE_MODELS,
+  PHASES,
+  type AgentEvent,
+  type DashboardSummary,
+  type Phase,
+  type PhaseModelConfig,
+  type Task,
+  type TaskStatus,
+} from "@pi-harness/shared";
+import {
+  getModelCatalog,
+  modelCatalogContains,
+  modelCatalogSupportsThinkingLevel,
+} from "@pi-harness/pi-bridge";
 import type { RunStore } from "../../adapters/run-store.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
@@ -28,8 +41,31 @@ export function registerTaskRoutes(
   const { runs, events: eventStore, artifacts, scheduler, cancellation } = deps;
 
   app.get("/api/tasks", async () => {
-    const [tasks, counts] = await Promise.all([runs.listTasks(), runs.countByStatus()]);
-    return { tasks, counts };
+    const [tasks, counts, activeRunIds, costUsd, lastEventAt] = await Promise.all([
+      runs.listTasks(),
+      runs.countByStatus(),
+      runs.listActiveRunIds(),
+      runs.totalCostUsd(),
+      eventStore.latestEventAt(),
+    ]);
+    const [reviewCount, humanInterventionTaskIds] = await Promise.all([
+      deriveReviewCount(tasks, artifacts),
+      deriveHumanInterventionTaskIds(tasks, artifacts, eventStore, runs),
+    ]);
+    return {
+      tasks,
+      counts,
+      humanInterventionTaskIds,
+      summary: {
+        runningCount: runningCount(counts),
+        reviewCount,
+        blockedCount: blockedCount(counts),
+        costUsd,
+        costCapUsd: costCapUsd(process.env.HARNESS_COST_CAP_USD),
+        lastEventAt,
+        activeRunIds,
+      } satisfies DashboardSummary,
+    };
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (req) => {
@@ -50,7 +86,11 @@ export function registerTaskRoutes(
     const t = await runs.createTask({
       title: parsed.title,
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
-      ...(parsed.phaseModels !== undefined ? { phaseModels: parsed.phaseModels } : {}),
+      priority: parsed.priority,
+      tags: parsed.tags,
+      ...(parsed.phaseModels !== undefined
+        ? { phaseModels: asPhaseModelOverrides(parsed.phaseModels) }
+        : {}),
     });
     reply.code(201);
     return t;
@@ -82,13 +122,10 @@ export function registerTaskRoutes(
     const updated = await runs.updateTask(task.id, {
       ...(patch.title !== undefined ? { title: patch.title } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
-      // Zod's .partial().strict() infers each field as `T | undefined`, but
-      // Task.phaseModels' Partial<PhaseModelConfig> shape (under exactOptionalPropertyTypes)
-      // wants `T` only. The values are structurally identical at runtime.
+      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+      ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
       ...(patch.phaseModels !== undefined
-        ? {
-            phaseModels: patch.phaseModels as Partial<Record<Phase, Partial<PhaseModelConfig>>>,
-          }
+        ? { phaseModels: asPhaseModelOverrides(patch.phaseModels) }
         : {}),
     });
     return updated;
@@ -157,6 +194,7 @@ export function registerTaskRoutes(
           details: result.error.details,
         };
       }
+      let shouldEnqueue = true;
 
       // Revision requests do three things, in this order:
       //   1) Append brainstorm_revision_requested to brainstorm.jsonl so the
@@ -246,6 +284,45 @@ export function registerTaskRoutes(
         }
       }
 
+      if (action.type === "user_cancel_current_phase") {
+        const phase = currentCancelablePhase(task.status);
+        if (!phase) {
+          reply.code(409);
+          return {
+            error: "invalid_transition",
+            message: "task must be in brainstorming or planning",
+          };
+        }
+
+        const activeRun = await runs.findActiveRun(task.id, phase);
+        if (!activeRun) {
+          reply.code(409);
+          return {
+            error: "no_active_run",
+            message: `no active ${phase} run to cancel`,
+          };
+        }
+
+        if (scheduler) {
+          await scheduler.cancelAndDrain(task.id);
+        } else {
+          cancellation?.abort(task.id);
+        }
+
+        const ts = new Date();
+        await runs.updateRun(activeRun.id, { status: "cancelled", endedAt: ts });
+        await eventStore.append({
+          id: crypto.randomUUID(),
+          runId: activeRun.id,
+          taskId: task.id,
+          ts,
+          kind: "phase_ended",
+          phase,
+          status: "cancelled",
+        });
+        shouldEnqueue = false;
+      }
+
       // Approval ends the brainstorm phase. The run-loop intentionally leaves
       // the brainstorm run in `running` across all ticks so the dashboard's
       // SSE subscription survives a request-changes round-trip; we close it
@@ -300,7 +377,7 @@ export function registerTaskRoutes(
       // Tell the scheduler to look. enqueue is fire-and-forget and idempotent
       // — if there's already a tick in flight, this just sets the queued flag.
       // Tests that build the server without a scheduler skip this.
-      scheduler?.enqueue(task.id);
+      if (shouldEnqueue) scheduler?.enqueue(task.id);
       return { task: updated };
     },
   );
@@ -313,7 +390,6 @@ type ParsedPhaseModels = Partial<
       provider?: string | undefined;
       model?: string | undefined;
       thinkingLevel?: PhaseModelConfig["thinkingLevel"] | undefined;
-      maxTurns?: number | undefined;
     }
   >
 >;
@@ -328,13 +404,184 @@ function validatePhaseModels(phaseModels: ParsedPhaseModels): void {
         phase,
         provider: override?.provider ?? defaults.provider,
         model: override?.model ?? defaults.model,
+        thinkingLevel: override?.thinkingLevel ?? defaults.thinkingLevel,
       };
     })
     .find(({ provider, model }) => !modelCatalogContains(catalog, provider, model));
-  if (!invalid) return;
-  throw new ValidationError("unknown phase model", {
-    phase: invalid.phase,
-    provider: invalid.provider,
-    model: invalid.model,
+  if (invalid) {
+    throw new ValidationError("unknown phase model", {
+      phase: invalid.phase,
+      provider: invalid.provider,
+      model: invalid.model,
+    });
+  }
+
+  const unsupportedThinkingLevel = PHASES
+    .map((phase) => {
+      const defaults = DEFAULT_PHASE_MODELS[phase];
+      const override = phaseModels[phase];
+      return {
+        phase,
+        provider: override?.provider ?? defaults.provider,
+        model: override?.model ?? defaults.model,
+        thinkingLevel: override?.thinkingLevel ?? defaults.thinkingLevel,
+      };
+    })
+    .find(
+      ({ provider, model, thinkingLevel }) =>
+        !modelCatalogSupportsThinkingLevel(catalog, provider, model, thinkingLevel),
+    );
+  if (!unsupportedThinkingLevel) return;
+  throw new ValidationError("unsupported phase model thinking level", {
+    phase: unsupportedThinkingLevel.phase,
+    provider: unsupportedThinkingLevel.provider,
+    model: unsupportedThinkingLevel.model,
+    thinkingLevel: unsupportedThinkingLevel.thinkingLevel,
   });
+}
+
+function asPhaseModelOverrides(
+  value: ParsedPhaseModels,
+): Partial<Record<Phase, Partial<PhaseModelConfig>>> {
+  // Zod's .partial().strict() infers optional fields as `T | undefined`, while
+  // exactOptionalPropertyTypes wants optional fields to be present only as `T`.
+  return value as Partial<Record<Phase, Partial<PhaseModelConfig>>>;
+}
+
+const RUNNING_STATUSES: readonly TaskStatus[] = [
+  "brainstorming",
+  "planning",
+  "executing",
+  "verifying",
+];
+
+const BLOCKED_STATUSES: readonly TaskStatus[] = [
+  "brainstorm_failed",
+  "plan_failed",
+  "code_failed",
+  "verification_failed",
+  "pr_failed",
+];
+
+function runningCount(counts: Partial<Record<TaskStatus, number>>): number {
+  return sumStatuses(counts, RUNNING_STATUSES);
+}
+
+function blockedCount(counts: Partial<Record<TaskStatus, number>>): number {
+  return sumStatuses(counts, BLOCKED_STATUSES);
+}
+
+function sumStatuses(
+  counts: Partial<Record<TaskStatus, number>>,
+  statuses: readonly TaskStatus[],
+): number {
+  return statuses.reduce((total, status) => total + (counts[status] ?? 0), 0);
+}
+
+function currentCancelablePhase(status: TaskStatus): "brainstorm" | "plan" | null {
+  if (status === "brainstorming") return "brainstorm";
+  if (status === "planning") return "plan";
+  return null;
+}
+
+async function deriveReviewCount(
+  tasks: readonly Task[],
+  artifacts: ArtifactsStore,
+): Promise<number> {
+  const reviews = await Promise.all(tasks.map((task) => isAwaitingReview(task, artifacts)));
+  return reviews.filter(Boolean).length;
+}
+
+async function isAwaitingReview(task: Task, artifacts: ArtifactsStore): Promise<boolean> {
+  if (task.status === "ready_to_ship") return true;
+  if (!task.worktreePath) return false;
+  if (task.status === "brainstorming") {
+    return (await deriveBrainstormGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
+  }
+  if (task.status === "planning") {
+    return (await derivePlanGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
+  }
+  return false;
+}
+
+async function deriveHumanInterventionTaskIds(
+  tasks: readonly Task[],
+  artifacts: ArtifactsStore,
+  eventStore: EventStore,
+  runs: RunStore,
+): Promise<readonly string[]> {
+  const required = await Promise.all(
+    tasks.map(async (task) => ({
+      taskId: task.id,
+      required: await requiresHumanIntervention(task, artifacts, eventStore, runs),
+    })),
+  );
+  return required.filter((item) => item.required).map((item) => item.taskId);
+}
+
+async function requiresHumanIntervention(
+  task: Task,
+  artifacts: ArtifactsStore,
+  eventStore: EventStore,
+  runs: RunStore,
+): Promise<boolean> {
+  if (task.status === "planning") return isPlanningAwaitingUser(task, artifacts);
+  if (task.status === "brainstorming") {
+    return isBrainstormAwaitingUser(task, artifacts, eventStore, runs);
+  }
+  return false;
+}
+
+async function isPlanningAwaitingUser(
+  task: Task,
+  artifacts: ArtifactsStore,
+): Promise<boolean> {
+  if (!task.worktreePath) return false;
+  return (await derivePlanGate(task.worktreePath, task.id, artifacts)) === "awaiting_user";
+}
+
+async function isBrainstormAwaitingUser(
+  task: Task,
+  artifacts: ArtifactsStore,
+  eventStore: EventStore,
+  runs: RunStore,
+): Promise<boolean> {
+  if (!task.worktreePath) return false;
+  const gate = await deriveBrainstormGate(task.worktreePath, task.id, artifacts);
+  if (gate === "awaiting_user") return true;
+
+  const activeRun = await runs.findActiveRun(task.id, "brainstorm");
+  if (!activeRun) return false;
+
+  const events = await eventStore.listForRun(activeRun.id);
+  return hasUnansweredBrainstormQuestion(events) || needsBrainstormMockSelection(events);
+}
+
+function hasUnansweredBrainstormQuestion(events: readonly AgentEvent[]): boolean {
+  const answeredQuestionIds = new Set(
+    events
+      .filter((event) => event.kind === "brainstorm_answer")
+      .map((event) => event.questionId),
+  );
+
+  return events.some(
+    (event) =>
+      event.kind === "brainstorm_question" && !answeredQuestionIds.has(event.questionId),
+  );
+}
+
+function needsBrainstormMockSelection(events: readonly AgentEvent[]): boolean {
+  const selectedMock = events.some((event) => event.kind === "brainstorm_mock_selected");
+  if (selectedMock) return false;
+
+  return events.some(
+    (event) =>
+      event.kind === "brainstorm_mock_proposed" ||
+      event.kind === "brainstorm_mock_revised",
+  );
+}
+
+function costCapUsd(raw: string | undefined): number {
+  const parsed = raw ? Number.parseFloat(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
 }

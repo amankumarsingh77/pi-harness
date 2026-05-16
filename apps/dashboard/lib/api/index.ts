@@ -1,4 +1,5 @@
 import type {
+  DashboardSummary,
   Task,
   Run,
   AgentEvent,
@@ -36,6 +37,7 @@ export type PlanBundle = {
   status: Task["status"];
   plan: Artifact | null;
   scenarios: Artifact | null;
+  blastRadius: Artifact | null;
   research: Record<string, string | null>;
   events: PlanJsonlEvent[];
 };
@@ -161,11 +163,13 @@ export type BrainstormJsonlEvent =
   | {
       kind: "brainstorm_mock_proposed";
       ts: string;
+      mockSetId?: string;
       mock: BrainstormMock;
     }
   | {
       kind: "brainstorm_mock_revised";
       ts: string;
+      mockSetId?: string;
       mock: BrainstormMock;
       editRequestId: string;
     }
@@ -203,14 +207,15 @@ export type RunFile = {
 
 export type Api = {
   getModelCatalog: () => Promise<ModelCatalog>;
-  listTasks: () => Promise<{ tasks: Task[]; counts: Record<string, number> }>;
+  listTasks: () => Promise<TaskListResult>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
-  createTask: (input: {
-    title: string;
-    description?: string;
-    phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
-  }) => Promise<Task>;
+  createTask: (
+    input: Pick<Task, "title"> &
+      Partial<Pick<Task, "description" | "priority" | "tags">> & {
+        phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
+      },
+  ) => Promise<Task>;
   transitionTask: (
     id: string,
     action:
@@ -219,6 +224,7 @@ export type Api = {
       | { type: "user_request_brainstorm_changes"; comment: string }
       | { type: "user_approve_plan" }
       | { type: "user_request_plan_changes"; comment: string }
+      | { type: "user_cancel_current_phase" }
       | { type: "user_cancel" }
       | { type: "user_retry_failed" },
   ) => Promise<{ task: Task }>;
@@ -253,7 +259,11 @@ export type Api = {
     payload: { kind: "design" | "spec"; body: string },
   ) => Promise<{ ok: true; commitSha: string }>;
   getBrainstormMocks: (taskId: string) => Promise<BrainstormMockBundle>;
-  getBrainstormMockHtml: (taskId: string, mockId: string) => Promise<string>;
+  getBrainstormMockPageHtml: (
+    taskId: string,
+    mockId: string,
+    pageId: string,
+  ) => Promise<string>;
   submitBrainstormMockEdit: (
     taskId: string,
     mockId: string,
@@ -273,6 +283,13 @@ export type Api = {
     taskId: string,
     payload: { note?: string },
   ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
+};
+
+export type TaskListResult = {
+  readonly tasks: Task[];
+  readonly counts: Record<string, number>;
+  readonly humanInterventionTaskIds: readonly string[];
+  readonly summary: DashboardSummary;
 };
 
 export type BrainstormDiff = {
@@ -300,8 +317,13 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
   return {
     getModelCatalog: () => send<ModelCatalog>("/api/model-catalog"),
     listTasks: async () => {
-      const r = await send<{ tasks: Task[]; counts: Record<string, number> }>("/api/tasks");
-      return { tasks: r.tasks.map(hydrateTask), counts: r.counts };
+      const r = await send<TaskListResult>("/api/tasks");
+      return {
+        tasks: r.tasks.map(hydrateTask),
+        counts: r.counts,
+        humanInterventionTaskIds: r.humanInterventionTaskIds,
+        summary: hydrateDashboardSummary(r.summary),
+      };
     },
     getTask: async (id) => {
       const r = await send<{ task: Task; runs: Run[] }>(`/api/tasks/${id}`);
@@ -355,8 +377,10 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       ),
     getBrainstormMocks: (taskId) =>
       send<BrainstormMockBundle>(`/api/tasks/${taskId}/brainstorm/mocks`),
-    getBrainstormMockHtml: async (taskId, mockId) => {
-      const res = await f(url(`/api/tasks/${taskId}/brainstorm/mocks/${mockId}/html`));
+    getBrainstormMockPageHtml: async (taskId, mockId, pageId) => {
+      const res = await f(
+        url(`/api/tasks/${taskId}/brainstorm/mocks/${mockId}/pages/${pageId}/html`),
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
         throw new ApiError(res.status, body.message ?? res.statusText, body.error);
@@ -408,7 +432,13 @@ function toDate(v: unknown): Date {
 }
 
 function hydrateTask(t: Task): Task {
-  return { ...t, createdAt: toDate(t.createdAt), updatedAt: toDate(t.updatedAt) };
+  return {
+    ...t,
+    priority: t.priority ?? "none",
+    tags: t.tags ?? [],
+    createdAt: toDate(t.createdAt),
+    updatedAt: toDate(t.updatedAt),
+  };
 }
 
 function hydrateRun(r: Run): Run {
@@ -421,4 +451,11 @@ function hydrateRun(r: Run): Run {
 
 function hydrateEvent(e: AgentEvent): AgentEvent {
   return { ...e, ts: toDate(e.ts) };
+}
+
+function hydrateDashboardSummary(summary: DashboardSummary): DashboardSummary {
+  return {
+    ...summary,
+    lastEventAt: summary.lastEventAt ? toDate(summary.lastEventAt) : null,
+  };
 }

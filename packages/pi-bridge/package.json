@@ -19,7 +19,7 @@
     "build": "tsc",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'no lint configured'"
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.74.0",

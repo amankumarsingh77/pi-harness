@@ -11,6 +11,8 @@ export const tasks = pgTable(
     worktreePath: text("worktree_path"),
     branchName: text("branch_name"),
     retryCount: integer("retry_count").notNull().default(0),
+    priority: text("priority").notNull().default("none"),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
     // Per-phase model overrides. Empty {} means "use DEFAULT_PHASE_MODELS".
     // Frozen after the first run row exists for this task (enforced at API).
     phaseModels: jsonb("phase_models").notNull().default({}),

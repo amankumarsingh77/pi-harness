@@ -14,7 +14,18 @@ export type PhaseModelConfig = {
   provider: string;
   model: string;
   thinkingLevel: ThinkingLevel;
-  maxTurns?: number;
+};
+
+export type ModelAuthStatus = {
+  readonly configured: boolean;
+  readonly source?:
+    | "stored"
+    | "runtime"
+    | "environment"
+    | "fallback"
+    | "models_json_key"
+    | "models_json_command";
+  readonly label?: string;
 };
 
 export type ModelCost = {
@@ -37,10 +48,13 @@ export type ModelCatalogModel = {
 export type ModelCatalogProvider = {
   readonly id: string;
   readonly name: string;
+  readonly authStatus: ModelAuthStatus;
   readonly models: ReadonlyArray<ModelCatalogModel>;
 };
 
 export type ModelCatalog = {
+  readonly phases: ReadonlyArray<Phase>;
+  readonly thinkingLevels: ReadonlyArray<ThinkingLevel>;
   readonly providers: ReadonlyArray<ModelCatalogProvider>;
   readonly defaults: Record<Phase, PhaseModelConfig>;
 };
@@ -56,6 +70,11 @@ export const DEFAULT_PHASE_MODELS: Record<Phase, PhaseModelConfig> = {
   code:       { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "medium" },
   verify:     { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high"   },
   pr:         { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "off"    },
+  // brainstorm: { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium" },
+  // plan:       { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium"   },
+  // code:       { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium" },
+  // verify:     { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "high"   },
+  // pr:         { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "off"    },
 };
 
 export function mergePhaseModels(

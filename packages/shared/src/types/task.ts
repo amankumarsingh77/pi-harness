@@ -19,6 +19,9 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const TASK_PRIORITIES = ["none", "urgent", "high", "medium", "low"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
 // Single source of truth: which phase the next dispatch should run, given
 // a task's current status. `null` means the task is terminal or gated on
 // human input — the run-loop must not auto-dispatch.
@@ -50,10 +53,22 @@ export type Task = {
   worktreePath: string | null;
   branchName: string | null;
   retryCount: number;
+  priority: TaskPriority;
+  tags: readonly string[];
   // Per-phase model overrides. Empty object = use DEFAULT_PHASE_MODELS for
   // every phase. Phase keys are optional; per-phase fields are also optional
   // so partial overrides merge with defaults via mergePhaseModels.
   phaseModels: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type DashboardSummary = {
+  runningCount: number;
+  reviewCount: number;
+  blockedCount: number;
+  costUsd: number;
+  costCapUsd: number;
+  lastEventAt: Date | null;
+  activeRunIds: readonly string[];
 };

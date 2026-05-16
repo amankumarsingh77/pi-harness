@@ -49,14 +49,16 @@ export function registerPlanRoutes(
         status: task.status,
         plan: null,
         scenarios: null,
+        blastRadius: null,
         research: emptyResearch(),
         events: [],
       };
     }
 
-    const [plan, scenarios, events, gate, research] = await Promise.all([
+    const [plan, scenarios, blastRadius, events, gate, research] = await Promise.all([
       deps.artifacts.readArtifact(cwd, task.id, "plan"),
       deps.artifacts.readArtifact(cwd, task.id, "scenarios"),
+      deps.artifacts.readArtifact(cwd, task.id, "blast-radius"),
       readJsonl(join(cwd, ".harness", task.id, "plan.jsonl")),
       derivePlanGate(cwd, task.id, deps.artifacts),
       readResearch(cwd, task.id),
@@ -67,6 +69,7 @@ export function registerPlanRoutes(
       status: task.status,
       plan,
       scenarios,
+      blastRadius,
       research,
       events,
     };
@@ -236,20 +239,24 @@ export function registerPlanRoutes(
       await deps.scheduler.cancelAndDrain(task.id);
     }
 
-    const activeRun = await deps.runs.findActiveRun(task.id, "plan");
-    if (!activeRun) {
+    const restartRun =
+      (await deps.runs.findActiveRun(task.id, "plan")) ??
+      (await deps.runs.findLatestRun(task.id, "plan", "cancelled"));
+    if (!restartRun) {
       reply.code(409);
       return {
         error: "no_active_run",
-        message: "no active plan run to restart",
+        message: "no active or cancelled plan run to restart",
       };
     }
-    await deps.runs.updateRun(activeRun.id, {
-      status: "cancelled",
-      endedAt: new Date(),
-    });
+    if (restartRun.status !== "cancelled") {
+      await deps.runs.updateRun(restartRun.id, {
+        status: "cancelled",
+        endedAt: new Date(),
+      });
+    }
 
-    await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, activeRun.id);
+    await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id);
 
     const branch = task.branchName ?? `pi/${task.id}`;
     await scaffoldPlan({
@@ -266,7 +273,7 @@ export function registerPlanRoutes(
       kind: "plan_system",
       systemKind: "session_reset",
       data: {
-        archivedRunId: activeRun.id,
+        archivedRunId: restartRun.id,
         ...(note ? { note } : {}),
       },
     });
@@ -276,7 +283,7 @@ export function registerPlanRoutes(
 
     return {
       ok: true,
-      archivedRunId: activeRun.id,
+      archivedRunId: restartRun.id,
       newRunId: newRun.id,
     };
   });
