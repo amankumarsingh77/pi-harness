@@ -67,6 +67,7 @@ export const TransitionSchema = z.discriminatedUnion("type", [
     comment: z.string().min(10).max(2000),
   }),
   z.object({ type: z.literal("user_approve_scenarios") }),
+  z.object({ type: z.literal("user_cancel_current_phase") }),
   z.object({ type: z.literal("user_cancel") }),
   z.object({ type: z.literal("user_retry_failed") }),
 ]);

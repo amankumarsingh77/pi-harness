@@ -222,6 +222,7 @@ export type Api = {
       | { type: "user_request_brainstorm_changes"; comment: string }
       | { type: "user_approve_plan" }
       | { type: "user_request_plan_changes"; comment: string }
+      | { type: "user_cancel_current_phase" }
       | { type: "user_cancel" }
       | { type: "user_retry_failed" },
   ) => Promise<{ task: Task }>;

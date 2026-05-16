@@ -4,9 +4,11 @@ import Link from "next/link";
 import type { AgentEvent, Artifact, Run, Task } from "@pi-harness/shared";
 import type { PlanGate, PlanJsonlEvent } from "@/lib/api";
 import { StatusIcon } from "@/components/kanban/status-icon";
+import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
 import { PreflightAgentConsole } from "./preflight-agent-console";
 import { PlanArtifactConsole } from "./plan-artifact-console";
 import { PlannerLogPanel } from "./planner-log-panel";
+import { RestartPlanButton } from "./restart-plan-button";
 
 export function PlanConsole({
   task,
@@ -38,6 +40,10 @@ export function PlanConsole({
   readonly plannerLogDefaultOpen: boolean;
 }) {
   const planRun = [...runs].reverse().find((run) => run.phase === "plan") ?? null;
+  const canCancel = task.status === "planning" && planRun?.status === "running";
+  const canRestart =
+    (task.status === "planning" || task.status === "plan_failed") &&
+    (planRun?.status === "running" || planRun?.status === "cancelled");
 
   return (
     <main className="scroll-hide min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-5">
@@ -70,16 +76,26 @@ export function PlanConsole({
               Preflight agents validate the implementation path before the planner marks artifacts ready.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            <MetaPill label="status" value={headerStatus} />
-            <MetaPill label="gate" value={gate} />
-            <MetaPill label="branch" value={task.branchName ?? "—"} />
-            <MetaPill label="cost" value={planRun ? `$${planRun.costUsd.toFixed(3)}` : "—"} />
-            <MetaPill label="stream" value={connected ? "live" : "replay"} />
+          <div className="flex flex-col items-start gap-2 lg:items-end">
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <MetaPill label="status" value={headerStatus} />
+              <MetaPill label="gate" value={gate} />
+              <MetaPill label="branch" value={task.branchName ?? "—"} />
+              <MetaPill label="cost" value={planRun ? `$${planRun.costUsd.toFixed(3)}` : "—"} />
+              <MetaPill label="stream" value={connected ? "live" : "replay"} />
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              {canCancel && (
+                <CancelPhaseRunButton taskId={task.id} phase="plan" disabled={false} />
+              )}
+              <RestartPlanButton taskId={task.id} disabled={!canRestart} />
+            </div>
           </div>
         </section>
 
         <PreflightAgentConsole
+          taskId={task.id}
+          canCancelRun={canCancel}
           research={research}
           planEvents={planEvents}
           liveEvents={liveEvents}

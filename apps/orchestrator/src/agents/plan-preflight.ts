@@ -70,6 +70,7 @@ export type PreflightOpts = {
 export type PreflightSubagentResult = {
   subagent: PreflightSubagent;
   ok: boolean;
+  cancelled?: boolean;
   error?: string;
   findingsPath: string;
   costUsd: number;
@@ -83,6 +84,7 @@ export type PreflightResult = {
   // True when any required subagent failed. The caller treats this as
   // "preflight failed" and fails the phase into plan_failed.
   failed: boolean;
+  cancelled?: boolean;
 };
 
 // Dispatches plan preflight in two stages: first codebase-scout, then a
@@ -103,7 +105,11 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
   });
 
   if (!scoutResult.ok) {
-    return { results: [scoutResult], failed: true };
+    return {
+      results: [scoutResult],
+      failed: true,
+      ...(scoutResult.cancelled === true ? { cancelled: true } : {}),
+    };
   }
 
   await ensureBlastRadiusArtifact({ opts, researchDir });
@@ -115,7 +121,12 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
 
   const results = [scoutResult, ...(await Promise.all(tasks))];
   const failedCount = results.filter((r) => !r.ok).length;
-  return { results, failed: failedCount > 0 };
+  const cancelled = results.some((r) => r.cancelled === true);
+  return {
+    results,
+    failed: failedCount > 0,
+    ...(cancelled ? { cancelled: true } : {}),
+  };
 }
 
 async function runSubagentWithEvents(args: {
@@ -157,10 +168,13 @@ async function runSubagentWithEvents(args: {
       durationMs: Date.now() - startedAt,
     };
   } catch (err) {
+    const message = (err as Error).message;
+    const cancelled = opts.signal?.aborted || message === "aborted";
     result = {
       subagent,
       ok: false,
-      error: (err as Error).message,
+      ...(cancelled ? { cancelled: true } : {}),
+      error: message,
       findingsPath,
       costUsd: 0,
       inputTokens: 0,

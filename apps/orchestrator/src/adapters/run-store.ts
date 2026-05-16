@@ -143,6 +143,22 @@ export class RunStore {
     return (rows[0] as Run | undefined) ?? null;
   }
 
+  async findLatestRun(taskId: string, phase: Phase, status: Run["status"]): Promise<Run | null> {
+    const rows = await this.db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          eq(runs.taskId, taskId),
+          eq(runs.phase, phase),
+          eq(runs.status, status),
+        ),
+      )
+      .orderBy(desc(runs.startedAt))
+      .limit(1);
+    return (rows[0] as Run | undefined) ?? null;
+  }
+
   // All non-terminal runs for a task across all phases. Used by user_cancel
   // to settle every active run in one pass.
   async findActiveRunsForTask(taskId: string): Promise<Run[]> {

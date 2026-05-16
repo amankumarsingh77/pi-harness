@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AgentEvent } from "@pi-harness/shared";
 import type { PlanJsonlEvent } from "@/lib/api";
 import { StatusIcon } from "@/components/kanban/status-icon";
+import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
 import { AgentFindings } from "./agent-findings";
 import { SUBAGENTS, deriveKind, type DotKind } from "./preflight-progress";
 import { buildLogRows, LogRows, RawJsonlRows } from "./plan-log-rows";
@@ -19,10 +20,14 @@ type AgentSummary = {
 type DrawerTab = "timeline" | "findings" | "raw";
 
 export function PreflightAgentConsole({
+  taskId,
+  canCancelRun,
   research,
   planEvents,
   liveEvents,
 }: {
+  readonly taskId: string;
+  readonly canCancelRun: boolean;
   readonly research: Record<string, string | null>;
   readonly planEvents: readonly PlanJsonlEvent[];
   readonly liveEvents: readonly AgentEvent[];
@@ -96,6 +101,8 @@ export function PreflightAgentConsole({
           <AgentPane
             key={summary.name}
             summary={summary}
+            taskId={taskId}
+            canCancelRun={canCancelRun}
             onOpen={(agentName) => {
               setSelectedAgent(agentName);
               setTab(summary.findingsBody === null ? "timeline" : "findings");
@@ -118,9 +125,13 @@ export function PreflightAgentConsole({
 
 function AgentPane({
   summary,
+  taskId,
+  canCancelRun,
   onOpen,
 }: {
   readonly summary: AgentSummary;
+  readonly taskId: string;
+  readonly canCancelRun: boolean;
   readonly onOpen: (agentName: string) => void;
 }) {
   const rows = buildLogRows(summary.events);
@@ -151,13 +162,24 @@ function AgentPane({
             ))}
           </div>
         </div>
-        <button
-          type="button"
-          className="ml-auto min-h-[26px] rounded-[7px] border border-line bg-white/[0.02] px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
-          onClick={() => onOpen(summary.name)}
-        >
-          {summary.kind === "progress" ? "Follow live" : "Full log"}
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {canCancelRun && summary.kind === "progress" && (
+            <CancelPhaseRunButton
+              taskId={taskId}
+              phase="plan"
+              disabled={false}
+              compact
+              source="preflight-agent"
+            />
+          )}
+          <button
+            type="button"
+            className="min-h-[26px] rounded-[7px] border border-line bg-white/[0.02] px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
+            onClick={() => onOpen(summary.name)}
+          >
+            {summary.kind === "progress" ? "Follow live" : "Full log"}
+          </button>
+        </div>
       </header>
 
       <div className="scroll-hide h-[174px] overflow-y-auto px-3 py-2.5">

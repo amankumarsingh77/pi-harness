@@ -10,6 +10,7 @@ type Action =
   | { type: "user_approve_brainstorm" }
   | { type: "user_request_brainstorm_changes"; comment: string }
   | { type: "user_approve_plan" }
+  | { type: "user_cancel_current_phase" }
   | { type: "user_cancel" }
   | { type: "user_retry_failed" };
 
@@ -23,6 +24,14 @@ export async function transitionTask(
   await orchestrator.transitionTask(taskId, action);
   revalidatePath("/");
   revalidatePath(`/tasks/${taskId}`);
+}
+
+export async function cancelCurrentPhaseAction(taskId: string): Promise<void> {
+  await orchestrator.transitionTask(taskId, { type: "user_cancel_current_phase" });
+  revalidatePath("/");
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+  revalidatePath(`/tasks/${taskId}/plan`);
 }
 
 // Brainstorm-specific actions used by chat-panel and approval-gate. These

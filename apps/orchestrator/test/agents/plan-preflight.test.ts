@@ -303,6 +303,7 @@ describe("runPreflight", () => {
 
     const result = await resultPromise;
     expect(result.failed).toBe(true);
+    expect(result.cancelled).toBe(true);
     expect(aborts).toBe(1);
   });
 

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
 import { mkEvent } from "../src/domain/events.js";
+import { scaffoldPlan } from "../src/runner/scaffold-plan.js";
 
 // Build a real git worktree with both artifacts in `status: ready`. Used by
 // tests that exercise the brainstorm approval gate — the route enforces the
@@ -311,6 +312,82 @@ describe("http", () => {
     const ended = replay.find((e) => e.kind === "phase_ended");
     expect(ended).toBeDefined();
     expect((ended as { status?: string } | undefined)?.status).toBe("cancelled");
+  });
+
+  it("user_cancel_current_phase: cancels active brainstorm run but leaves task in brainstorming", async () => {
+    const t = await runs.createTask({ title: "phase-cancel-brainstorm" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+    const activeRun = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+
+    const controller = cancellation.register(t.id);
+    expect(controller.signal.aborted).toBe(false);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/transitions`,
+      payload: { type: "user_cancel_current_phase" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().task.status).toBe("brainstorming");
+    expect(controller.signal.aborted).toBe(true);
+
+    const refreshed = await runs.getRun(activeRun.id);
+    expect(refreshed.status).toBe("cancelled");
+    expect(refreshed.endedAt).not.toBeNull();
+
+    const replay = await events.listForRun(activeRun.id);
+    const ended = replay.find((e) => e.kind === "phase_ended");
+    expect(ended).toBeDefined();
+    expect((ended as { status?: string } | undefined)?.status).toBe("cancelled");
+  });
+
+  it("brainstorm restart accepts a latest cancelled run while task remains brainstorming", async () => {
+    const t = await runs.createTask({ title: "restart-cancelled-brainstorm" });
+    const worktree = await makeReadyWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+      branchName: `pi/${t.id}`,
+    });
+    const cancelledRun = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    await runs.updateRun(cancelledRun.id, { status: "cancelled", endedAt: new Date() });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/restart`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ archivedRunId: cancelledRun.id });
+
+    const active = await runs.findActiveRun(t.id, "brainstorm");
+    expect(active).not.toBeNull();
+  });
+
+  it("plan restart accepts a latest cancelled run while task remains planning", async () => {
+    const t = await runs.createTask({ title: "restart-cancelled-plan" });
+    const worktree = await makeReadyWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "planning",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+      branchName: `pi/${t.id}`,
+    });
+    await scaffoldPlan({ cwd: worktree, taskId: t.id, branch: `pi/${t.id}` });
+    const cancelledRun = await runs.createRun({ taskId: t.id, phase: "plan" });
+    await runs.updateRun(cancelledRun.id, { status: "cancelled", endedAt: new Date() });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/plan/restart`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ archivedRunId: cancelledRun.id });
+
+    const active = await runs.findActiveRun(t.id, "plan");
+    expect(active).not.toBeNull();
   });
 
   it("user_approve_brainstorm: 409 when gate is closed (artifacts not ready)", async () => {
