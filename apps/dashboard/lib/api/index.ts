@@ -47,17 +47,25 @@ export type PlanJsonlEvent =
         | "preflight_started"
         | "preflight_complete"
         | "planner_started"
+        | "planner_turn_completed"
         | "status_changed"
         | "blocked"
         | "session_reset";
       data?: Record<string, unknown>;
     }
-  | { kind: "plan_subagent_started"; ts: string; subagent: string; sessionId: string }
+  | {
+      kind: "plan_subagent_started";
+      ts: string;
+      subagent: string;
+      sessionId: string;
+      attemptId?: string;
+    }
   | {
       kind: "plan_subagent_ended";
       ts: string;
       subagent: string;
       sessionId: string;
+      attemptId?: string;
       ok: boolean;
       durationMs: number;
       costUsd: number;
