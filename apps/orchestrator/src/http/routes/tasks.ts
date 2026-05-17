@@ -238,6 +238,7 @@ export function registerTaskRoutes(
         });
         await artifacts.setArtifactStatus(cwd, task.id, "plan", "draft", "user-revision");
         await artifacts.setArtifactStatus(cwd, task.id, "scenarios", "draft", "user-revision");
+        await artifacts.setArtifactStatus(cwd, task.id, "execution-dag", "draft", "user-revision");
         const activeRun = await runs.findActiveRun(task.id, "plan");
         if (activeRun) {
           await eventStore.append({

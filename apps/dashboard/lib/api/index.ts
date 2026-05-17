@@ -35,6 +35,7 @@ export type PlanBundle = {
   plan: Artifact | null;
   scenarios: Artifact | null;
   blastRadius: Artifact | null;
+  executionDag: Artifact | null;
   research: Record<string, string | null>;
   events: PlanJsonlEvent[];
 };

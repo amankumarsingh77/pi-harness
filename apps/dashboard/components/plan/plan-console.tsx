@@ -20,6 +20,7 @@ export function PlanConsole({
   plan,
   blastRadius,
   scenarios,
+  executionDag,
   research,
   planEvents,
   liveEvents,
@@ -35,6 +36,7 @@ export function PlanConsole({
   readonly plan: Artifact | null;
   readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
+  readonly executionDag: Artifact | null;
   readonly research: Record<string, string | null>;
   readonly planEvents: readonly PlanJsonlEvent[];
   readonly liveEvents: readonly AgentEvent[];
@@ -106,6 +108,7 @@ export function PlanConsole({
           plan={plan}
           blastRadius={blastRadius}
           scenarios={scenarios}
+          executionDag={executionDag}
         />
 
         <PlannerLogPanel defaultOpen={plannerLogDefaultOpen} />

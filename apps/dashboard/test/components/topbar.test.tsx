@@ -26,7 +26,7 @@ describe("Topbar", () => {
     router.push.mockReset();
   });
 
-  it("renders telemetry cells in the required order and removes legacy done-today text", () => {
+  it("renders the two-level navigation and focused telemetry", () => {
     render(<Topbar summary={summary} />);
 
     const strip = screen.getByTestId("topbar-telemetry-strip");
@@ -35,13 +35,17 @@ describe("Topbar", () => {
       "running",
       "review",
       "blocked",
-      "cost",
-      "last",
     ]);
+    expect(screen.getByRole("navigation")).toHaveTextContent("Board");
+    expect(screen.getByRole("navigation")).toHaveTextContent("Runs");
+    expect(screen.getByRole("navigation")).toHaveTextContent("Scenarios");
     expect(strip).toHaveTextContent("running 3");
     expect(strip).toHaveTextContent("review 2");
     expect(strip).toHaveTextContent("blocked 1");
-    expect(strip).toHaveTextContent("cost $1.25 / $10.00");
+    expect(screen.queryByText(/Worktrees/i)).not.toBeInTheDocument();
+    expect(strip).not.toHaveTextContent(/cost/i);
+    expect(strip).not.toHaveTextContent("$1.25 / $10.00");
+    expect(strip).not.toHaveTextContent(/last/i);
     expect(screen.queryByText(/done today/i)).not.toBeInTheDocument();
   });
 

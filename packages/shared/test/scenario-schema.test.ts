@@ -19,6 +19,24 @@ describe("ScenarioFileSchema", () => {
     expect(parsed.scenarios[0]!.type).toBe("api");
   });
 
+  it("parses an api scenario with a root-relative URL", () => {
+    const input = {
+      scenarios: [
+        {
+          id: "api-relative",
+          type: "api",
+          name: "POST /api/ingest returns 200",
+          request: { method: "POST", url: "/api/ingest" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const parsed = ScenarioFileSchema.parse(input);
+
+    expect(parsed.scenarios[0]!.type).toBe("api");
+  });
+
   it("parses requirement and blast radius references", () => {
     const input = {
       scenarios: [

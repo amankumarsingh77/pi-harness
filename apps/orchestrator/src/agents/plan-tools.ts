@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type, type Static, type TSchema } from "typebox";
 import yaml from "js-yaml";
-import { BlastRadiusFileSchema, ScenarioFileSchema, type Artifact } from "@pi-harness/shared";
+import {
+  BlastRadiusFileSchema,
+  ExecutionDagSchema,
+  ScenarioFileSchema,
+  type Artifact,
+} from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
 
@@ -98,12 +103,15 @@ export function makeMarkReadyTool(deps: {
       if (!scenarios) return reject("scenarios.yaml not found");
       const blastRadius = await store.readArtifact(cwd, taskId, "blast-radius");
       if (!blastRadius) return reject("blast-radius.yaml not found");
+      const executionDag = await store.readArtifact(cwd, taskId, "execution-dag");
+      if (!executionDag) return reject("execution-dag.yaml not found");
 
       // 2. Frontmatter status invariant: must be draft or ready.
       for (const [name, art] of [
         ["plan.md", plan],
         ["scenarios.yaml", scenarios],
         ["blast-radius.yaml", blastRadius],
+        ["execution-dag.yaml", executionDag],
       ] as const) {
         if (art.fm.status !== "draft" && art.fm.status !== "ready") {
           return reject(`${name} frontmatter status invalid (got: ${art.fm.status})`);
@@ -119,6 +127,10 @@ export function makeMarkReadyTool(deps: {
       if (scenariosError) return reject(`scenarios.yaml: ${scenariosError}`);
       const blastRadiusError = validateBlastRadiusYaml(blastRadius.body);
       if (blastRadiusError) return reject(`blast-radius.yaml: ${blastRadiusError}`);
+      const executionDagError = validateExecutionDagYaml(executionDag.body);
+      if (executionDagError) return reject(`execution-dag.yaml: ${executionDagError}`);
+      const planDagError = validatePlanStepsCoveredByDag(plan.body, executionDag.body);
+      if (planDagError) return reject(`execution-dag.yaml: ${planDagError}`);
 
       // 5. claim-verifier gate. The vendored claim-verifier subagent reviews
       //    plan.md for unsupported claims; if any come back Falsified the
@@ -149,7 +161,8 @@ export function makeMarkReadyTool(deps: {
       const alreadyReady =
         plan.fm.status === "ready" &&
         scenarios.fm.status === "ready" &&
-        blastRadius.fm.status === "ready";
+        blastRadius.fm.status === "ready" &&
+        executionDag.fm.status === "ready";
       if (alreadyReady) {
         return {
           content: [{ type: "text", text: "ready" }],
@@ -160,7 +173,7 @@ export function makeMarkReadyTool(deps: {
 
       // 6. Flip both artifacts to ready, write back, publish status_changed.
       const now = new Date().toISOString();
-      for (const cur of [plan, scenarios, blastRadius] as const) {
+      for (const cur of [plan, scenarios, blastRadius, executionDag] as const) {
         const next: Artifact = {
           fm: {
             ...cur.fm,
@@ -227,7 +240,14 @@ function validateBlastRadiusYaml(body: string): string | null {
   return validateYamlBody(body, BlastRadiusFileSchema);
 }
 
-function validateYamlBody(body: string, schema: typeof ScenarioFileSchema | typeof BlastRadiusFileSchema): string | null {
+export function validateExecutionDagYaml(body: string): string | null {
+  return validateYamlBody(body, ExecutionDagSchema);
+}
+
+function validateYamlBody(
+  body: string,
+  schema: typeof ScenarioFileSchema | typeof BlastRadiusFileSchema | typeof ExecutionDagSchema,
+): string | null {
   let parsed: unknown;
   try {
     parsed = yaml.load(body);
@@ -242,6 +262,32 @@ function validateYamlBody(body: string, schema: typeof ScenarioFileSchema | type
     return `${path}: ${first.message}`;
   }
   return null;
+}
+
+function validatePlanStepsCoveredByDag(planBody: string, executionDagBody: string): string | null {
+  const stepIds = extractPlanStepIds(planBody);
+  if (stepIds.length === 0) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(executionDagBody);
+  } catch {
+    return null;
+  }
+  const dag = ExecutionDagSchema.safeParse(parsed);
+  if (!dag.success) return null;
+  const dagIds = new Set(dag.data.nodes.map((node) => node.id));
+  const missing = stepIds.filter((id) => !dagIds.has(id));
+  return missing.length > 0
+    ? `plan step(s) missing matching DAG node(s): ${missing.join(", ")}`
+    : null;
+}
+
+function extractPlanStepIds(planBody: string): string[] {
+  return planBody
+    .split("\n")
+    .map((line) => line.match(/^\s*(?:\d+\.|-)\s+(C-\d+)\b/)?.[1])
+    .filter((id): id is string => id !== undefined);
 }
 
 type ClaimVerifierOutcome =

@@ -12,11 +12,12 @@ import { BrainstormEventBus } from "../agents/brainstorm-event-bus.js";
 import { runBrainstorm } from "../agents/brainstorm.js";
 import { PlanEventBus } from "../agents/plan-event-bus.js";
 import { runPlan } from "../agents/plan.js";
+import { runCode } from "../agents/code.js";
 
 // Common deps every phase needs. The orchestrator constructs this once and
 // passes it into runPhase.
 //
-// Today only brainstorm has a real driver. plan / code / verify / pr return a
+// Brainstorm, plan, and code have real drivers. verify / pr return a
 // structured `not_implemented` until each migrates to `createAgentSession`.
 // The legacy `createSession` / `runSubagent` plumbing was removed — its
 // runtime stubs always threw, so it had no production callers anyway.
@@ -24,7 +25,7 @@ export type PhaseDeps = {
   cwd: string;
   onEvent: (e: PiBridgeEvent) => void;
   // Generic agent session (Phase 2 bridge). Brainstorm uses this; other
-  // phases will route through it as each is migrated.
+  // phases route through it as each is migrated.
   createAgentSession: (opts: AgentSessionOptions) => Promise<AgentSession>;
   store: ArtifactsStore;
   eventStore: EventStore;
@@ -169,7 +170,39 @@ export async function runPhase(
         ...(r.cancelled ? { cancelled: true } : {}),
       };
     }
-    case "code":
+    case "code": {
+      if (!input.phaseModel) {
+        return {
+          ok: false,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          error: "code phase requires phaseModel",
+        };
+      }
+      const r = await runCode({
+        taskId: input.taskId,
+        runId: input.runId,
+        cwd: deps.cwd,
+        store: deps.store,
+        eventStore: deps.eventStore,
+        phaseModel: input.phaseModel,
+        createAgentSession: deps.createAgentSession,
+        ...(input.ticketTitle !== undefined ? { ticketTitle: input.ticketTitle } : {}),
+        ...(input.ticketDescription !== undefined
+          ? { ticketDescription: input.ticketDescription }
+          : {}),
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+      });
+      return {
+        ok: r.ok,
+        costUsd: r.costUsd,
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        ...(r.error !== undefined ? { error: r.error } : {}),
+        ...(r.cancelled ? { cancelled: true } : {}),
+      };
+    }
     case "verify":
     case "pr":
       return NOT_IMPLEMENTED(phase);

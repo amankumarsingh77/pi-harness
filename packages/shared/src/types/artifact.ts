@@ -10,6 +10,7 @@ export const ArtifactKindSchema = z.enum([
   "plan",
   "scenarios",
   "blast-radius",
+  "execution-dag",
 ]);
 export type ArtifactKind = z.infer<typeof ArtifactKindSchema>;
 

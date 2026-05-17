@@ -121,7 +121,9 @@ function toBrainstormMiniature(
 // plan phase's structured scenarios file (consumed by the verify phase).
 // Centralized so callers never compose a path themselves.
 export function artifactFileName(kind: ArtifactKind): string {
-  if (kind === "scenarios" || kind === "blast-radius") return `${kind}.yaml`;
+  if (kind === "scenarios" || kind === "blast-radius" || kind === "execution-dag") {
+    return `${kind}.yaml`;
+  }
   return `${kind}.md`;
 }
 
@@ -177,7 +179,14 @@ export class ArtifactsStore {
   async listArtifacts(
     cwd: string,
     taskId: string,
-    kinds: readonly ArtifactKind[] = ["design", "spec", "plan", "scenarios", "blast-radius"],
+    kinds: readonly ArtifactKind[] = [
+      "design",
+      "spec",
+      "plan",
+      "scenarios",
+      "blast-radius",
+      "execution-dag",
+    ],
   ): Promise<Artifact[]> {
     const out: Artifact[] = [];
     for (const kind of kinds) {
@@ -496,6 +505,7 @@ function archiveFileNames(phase: "brainstorm" | "plan"): ReadonlyArray<string> {
     "plan.md",
     "scenarios.yaml",
     "blast-radius.yaml",
+    "execution-dag.yaml",
     "plan.jsonl",
     "pi-session-plan.jsonl",
   ];

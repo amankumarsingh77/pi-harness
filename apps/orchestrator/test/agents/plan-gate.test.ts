@@ -11,17 +11,32 @@ let scratch: string;
 let cwd: string;
 let store: ArtifactsStore;
 
-const seedArtifact = (kind: "plan" | "scenarios" | "blast-radius", status: string): Artifact => ({
+const seedArtifact = (
+  kind: "plan" | "scenarios" | "blast-radius" | "execution-dag",
+  status: string,
+): Artifact => ({
   fm: {
     task: "T-1",
     kind,
-    parent: kind === "plan" ? "design.md" : kind === "scenarios" ? "plan.md" : "spec.md",
+    parent:
+      kind === "plan"
+        ? "design.md"
+        : kind === "scenarios" || kind === "execution-dag"
+          ? "plan.md"
+          : "spec.md",
     status: status as never,
     branch: "pi/T-1",
     last_updated: new Date().toISOString(),
     last_updated_by: "test",
   },
-  body: kind === "plan" ? "# Plan\n" : kind === "scenarios" ? "scenarios: []\n" : "items: []\n",
+  body:
+    kind === "plan"
+      ? "# Plan\n"
+      : kind === "scenarios"
+        ? "scenarios: []\n"
+        : kind === "execution-dag"
+          ? "version: 1\nnodes: []\n"
+          : "items: []\n",
 });
 
 async function appendJsonl(line: object) {
@@ -57,6 +72,7 @@ describe("derivePlanGate", () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "draft"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "draft"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "draft"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("execution-dag", "draft"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("running");
   });
 
@@ -64,6 +80,7 @@ describe("derivePlanGate", () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "draft"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("execution-dag", "ready"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("running");
   });
 
@@ -71,6 +88,7 @@ describe("derivePlanGate", () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("execution-dag", "ready"));
     await appendJsonl({
       ts: new Date().toISOString(),
       kind: "plan_system",
@@ -84,6 +102,7 @@ describe("derivePlanGate", () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("execution-dag", "ready"));
     await appendJsonl({
       ts: "2026-05-10T10:00:00.000Z",
       kind: "plan_system",
@@ -102,6 +121,7 @@ describe("derivePlanGate", () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("execution-dag", "ready"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("awaiting_user");
   });
 
@@ -109,6 +129,7 @@ describe("derivePlanGate", () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "human_edited"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "approved"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("execution-dag", "ready"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("awaiting_user");
   });
 });

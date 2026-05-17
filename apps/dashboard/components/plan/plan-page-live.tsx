@@ -64,6 +64,7 @@ export function PlanPageLive({
         plan={bundle.plan}
         blastRadius={bundle.blastRadius}
         scenarios={bundle.scenarios}
+        executionDag={bundle.executionDag}
         plannerLogDefaultOpen={task.status === "planning"}
       />
       <PlanApprovalGate taskId={task.id} gate={bundle.gate} taskStatus={task.status} />

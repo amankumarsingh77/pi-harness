@@ -7,6 +7,12 @@ const ScenarioRefsSchema = {
   blastRadiusRefs: z.array(BlastRadiusRefSchema).optional(),
 };
 
+const AbsoluteUrlSchema = z.string().url();
+const RootRelativeUrlSchema = z
+  .string()
+  .startsWith("/")
+  .refine((value) => !value.startsWith("//"), "URL must be root-relative");
+
 const ApiScenarioSchema = z.object({
   id: z.string().min(1),
   type: z.literal("api"),
@@ -15,7 +21,7 @@ const ApiScenarioSchema = z.object({
   setup: SetupSchema,
   request: z.object({
     method: z.string(),
-    url: z.string().url().or(z.string().startsWith("http")),
+    url: z.union([AbsoluteUrlSchema, RootRelativeUrlSchema]),
     headers: z.record(z.string()).optional(),
     body: z.unknown().optional(),
   }),

@@ -257,15 +257,17 @@ async function dispatchPlan(
     // Skipped when artifacts are already ready (the gate check at the top of
     // runLoop will short-circuit on the next tick anyway, so it's harmless,
     // but no point burning a tick).
-    const [plan, scenarios, blastRadius] = await Promise.all([
+    const [plan, scenarios, blastRadius, executionDag] = await Promise.all([
       phaseDeps.store.readArtifact(worktree.path, task.id, "plan"),
       phaseDeps.store.readArtifact(worktree.path, task.id, "scenarios"),
       phaseDeps.store.readArtifact(worktree.path, task.id, "blast-radius"),
+      phaseDeps.store.readArtifact(worktree.path, task.id, "execution-dag"),
     ]);
     const ready =
       plan?.fm.status === "ready" &&
       scenarios?.fm.status === "ready" &&
-      blastRadius?.fm.status === "ready";
+      blastRadius?.fm.status === "ready" &&
+      executionDag?.fm.status === "ready";
     if (!ready && opts.enqueue) opts.enqueue(task.id);
     return task;
   }
@@ -286,7 +288,7 @@ async function dispatchPlan(
 async function dispatchGenericPhase(
   opts: DispatchOpts & { phase: Phase },
 ): Promise<Task> {
-  const { task, phase, worktree, runs, events, phaseDeps, retryCap } = opts;
+  const { task, phase, worktree, runs, events, phaseDeps, retryCap, cancellation } = opts;
 
   const run = await runs.createRun({ taskId: task.id, phase });
   await events.append({
@@ -298,15 +300,26 @@ async function dispatchGenericPhase(
     phase,
   });
 
+  const phaseModel = mergePhaseModels(task.phaseModels, phase);
+  const controller = cancellation.register(task.id);
   const phaseInput: PhaseInput = {
     taskId: task.id,
     runId: run.id,
     ticketTitle: task.title,
     ticketDescription: task.description,
     ...(task.branchName ? { branch: task.branchName } : {}),
+    phaseModel,
+    signal: controller.signal,
   };
 
-  const result = await runPhase(phase, phaseInput, { ...phaseDeps, cwd: worktree.path });
+  let result: PhaseOutput;
+  try {
+    result = await runPhase(phase, phaseInput, { ...phaseDeps, cwd: worktree.path });
+  } finally {
+    cancellation.release(task.id, controller);
+  }
+
+  if (result.cancelled) return task;
 
   await runs.updateRun(run.id, {
     endedAt: new Date(),

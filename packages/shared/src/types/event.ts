@@ -232,4 +232,34 @@ export type AgentEvent =
       artifact: "plan" | "scenarios";
       commitSha: string;
       sizeDelta: number;
+    })
+  // Code-phase DAG execution events. The code runner emits one start/end pair
+  // per execution-dag node and one cumulative usage event after the phase
+  // settles so dashboard logs can replay scheduler progress.
+  | (AgentEventBase & {
+      kind: "code_node_started";
+      nodeId: string;
+      title: string;
+      phaseName: string;
+      lane: string;
+      safety: "parallel-safe" | "exclusive";
+      sessionId: string;
+    })
+  | (AgentEventBase & {
+      kind: "code_node_ended";
+      nodeId: string;
+      ok: boolean;
+      status: "succeeded" | "failed" | "blocked";
+      durationMs: number;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      commitSha?: string;
+      error?: string;
+    })
+  | (AgentEventBase & {
+      kind: "code_usage";
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
     });

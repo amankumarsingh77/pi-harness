@@ -8,6 +8,7 @@ import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { PlanEventBus } from "../../src/agents/plan-event-bus.js";
 import {
   makeMarkReadyTool,
+  validateExecutionDagYaml,
   validateScenariosYaml,
   parseFalsifiedClaims,
   type ClaimVerifierState,
@@ -65,6 +66,34 @@ const validBlastRadiusYaml = `items:
       - s1
 `;
 
+const validExecutionDagYaml = `version: 1
+nodes:
+  - id: C-001
+    title: Add backoff helper
+    phase: Foundation
+    kind: api
+    lane: orchestrator
+    safety: exclusive
+    dependsOn: []
+    writes:
+      - src/webhooks.ts
+    reads:
+      - src/foo.ts
+    verifies:
+      - pnpm test
+    covers:
+      - REQ-001
+    blastRadius:
+      - BR-001
+    assertion: webhook test passes with 5 retries
+waves:
+  - id: W-001
+    name: Foundation
+    policy: sequential
+    nodes:
+      - C-001
+`;
+
 const validPlanBody = [
   "# Plan",
   "",
@@ -108,6 +137,7 @@ async function writePlanArtifacts(
   planBody: string,
   scenariosBody: string,
   blastRadiusBody = validBlastRadiusYaml,
+  executionDagBody = validExecutionDagYaml,
 ) {
   const plan: Artifact = {
     fm: {
@@ -145,9 +175,22 @@ async function writePlanArtifacts(
     },
     body: blastRadiusBody,
   };
+  const executionDag: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "execution-dag",
+      parent: "plan.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "orchestrator",
+    },
+    body: executionDagBody,
+  };
   await store.writeArtifact(cwd, "T-1", plan);
   await store.writeArtifact(cwd, "T-1", scenarios);
   await store.writeArtifact(cwd, "T-1", blastRadius);
+  await store.writeArtifact(cwd, "T-1", executionDag);
 }
 
 beforeEach(async () => {
@@ -249,6 +292,56 @@ describe("mark_ready", () => {
     expect(result.details.missing).toBe("blast-radius.yaml not found");
   });
 
+  it("rejects when execution-dag.yaml is missing", async () => {
+    const plan: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "plan",
+        parent: "design.md",
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "orchestrator",
+      },
+      body: validPlanBody,
+    };
+    const scenarios: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "scenarios",
+        parent: "plan.md",
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "orchestrator",
+      },
+      body: validScenariosYaml,
+    };
+    const blastRadius: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "blast-radius",
+        parent: "spec.md",
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "orchestrator",
+      },
+      body: validBlastRadiusYaml,
+    };
+    await store.writeArtifact(cwd, "T-1", plan);
+    await store.writeArtifact(cwd, "T-1", scenarios);
+    await store.writeArtifact(cwd, "T-1", blastRadius);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toBe("execution-dag.yaml not found");
+  });
+
   it("rejects when a required section is missing", async () => {
     const planMissing = validPlanBody.replace("## Out of scope\n- Inbound webhook receipts", "");
     await writePlanArtifacts(planMissing, validScenariosYaml);
@@ -323,6 +416,34 @@ describe("mark_ready", () => {
     expect(result.details.missing).toContain("blast-radius.yaml");
   });
 
+  it("rejects when execution-dag.yaml fails schema", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml, validBlastRadiusYaml, "version: 1\nnodes: []\n");
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("execution-dag.yaml");
+  });
+
+  it("rejects when a C-step is missing a matching DAG node", async () => {
+    const planWithCStep = validPlanBody.replace(
+      "1. Add backoff helper",
+      "1. C-002 Add backoff helper",
+    );
+    await writePlanArtifacts(planWithCStep, validScenariosYaml);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("C-002");
+  });
+
   it("rejects when claim-verifier flags Falsified claims", async () => {
     await writePlanArtifacts(validPlanBody, validScenariosYaml);
     const dispatcher = vi.fn(async () => ({
@@ -390,7 +511,7 @@ describe("mark_ready", () => {
     expect(dispatcher).toHaveBeenCalledTimes(2);
   });
 
-  it("succeeds: flips both artifacts to ready and publishes status_changed event", async () => {
+  it("succeeds: flips all plan artifacts to ready and publishes status_changed event", async () => {
     await writePlanArtifacts(validPlanBody, validScenariosYaml);
     const tool = makeMarkReadyTool({
       store, bus, cwd, taskId: "T-1",
@@ -404,9 +525,11 @@ describe("mark_ready", () => {
     const plan = await store.readArtifact(cwd, "T-1", "plan");
     const scenarios = await store.readArtifact(cwd, "T-1", "scenarios");
     const blastRadius = await store.readArtifact(cwd, "T-1", "blast-radius");
+    const executionDag = await store.readArtifact(cwd, "T-1", "execution-dag");
     expect(plan?.fm.status).toBe("ready");
     expect(scenarios?.fm.status).toBe("ready");
     expect(blastRadius?.fm.status).toBe("ready");
+    expect(executionDag?.fm.status).toBe("ready");
     expect(plan?.fm.last_updated_by).toBe("plan-agent");
 
     const events = await eventStore.list("r-1");
@@ -453,9 +576,22 @@ describe("mark_ready", () => {
       },
       body: validBlastRadiusYaml,
     };
+    const executionDagReady: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "execution-dag",
+        parent: "plan.md",
+        status: "ready",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "plan-agent",
+      },
+      body: validExecutionDagYaml,
+    };
     await store.writeArtifact(cwd, "T-1", planReady);
     await store.writeArtifact(cwd, "T-1", scenariosReady);
     await store.writeArtifact(cwd, "T-1", blastRadiusReady);
+    await store.writeArtifact(cwd, "T-1", executionDagReady);
 
     const tool = makeMarkReadyTool({
       store, bus, cwd, taskId: "T-1",
@@ -478,6 +614,16 @@ describe("validateScenariosYaml", () => {
 
   it("returns a schema error when scenarios is empty", () => {
     expect(validateScenariosYaml("scenarios: []")).toContain("scenarios");
+  });
+});
+
+describe("validateExecutionDagYaml", () => {
+  it("returns null on a valid file", () => {
+    expect(validateExecutionDagYaml(validExecutionDagYaml)).toBeNull();
+  });
+
+  it("returns a schema error when the DAG has no nodes", () => {
+    expect(validateExecutionDagYaml("version: 1\nnodes: []")).toContain("nodes");
   });
 });
 

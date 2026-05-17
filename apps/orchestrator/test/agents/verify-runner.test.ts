@@ -57,6 +57,22 @@ describe("runApiScenario", () => {
     expect(responseBody).toContain("received");
   });
 
+  it("resolves root-relative request URLs against the API base URL", async () => {
+    const result = await runApiScenario({
+      scenario: {
+        id: "relative-ok",
+        type: "api",
+        name: "relative ok",
+        request: { method: "POST", url: "/ok", body: {} },
+        expect: { status: 200, body_contains: ["received"] },
+      },
+      proofDir,
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it("fails when status doesn't match", async () => {
     const result = await runApiScenario({
       scenario: {

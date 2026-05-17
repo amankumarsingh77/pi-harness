@@ -9,5 +9,13 @@ test("create task → start brainstorm transition", async ({ page }) => {
 
   await page.goto(`/tasks/${task.id}`);
   await expect(page.getByText("e2e-flow-task")).toBeVisible();
-  await expect(page.getByText(/PHASE TIMELINE/)).toBeVisible();
+  await expect(page.getByLabel("Task phases")).toBeVisible();
+  await page.getByRole("button", { name: "Start brainstorm" }).click();
+
+  await expect.poll(async () => {
+    const response = await api.get(`/api/tasks/${task.id}`);
+    return (await response.json()).task.status;
+  }).toBe("brainstorming");
+
+  await expect(page.getByRole("button", { name: "Start brainstorm" })).toHaveCount(0);
 });

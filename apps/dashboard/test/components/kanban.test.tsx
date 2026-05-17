@@ -19,6 +19,7 @@ type MockDragEndEvent = {
 
 type MockDraggableInput = MockDndEntity & {
   readonly disabled?: boolean;
+  readonly sensors?: readonly unknown[];
 };
 
 const dndKitMock = vi.hoisted(() => ({
@@ -43,6 +44,9 @@ vi.mock("@dnd-kit/react", () => ({
     return children;
   },
   DragOverlay: () => null,
+  PointerSensor: {
+    configure: (options: unknown) => ({ kind: "pointer-sensor", options }),
+  },
   useDraggable: (input: MockDraggableInput) => {
     dndKitMock.draggables.set(input.id, input);
     return {
@@ -61,6 +65,17 @@ vi.mock("@dnd-kit/react", () => ({
       isDropTarget: false,
       ref: vi.fn(),
     };
+  },
+}));
+
+vi.mock("@dnd-kit/dom", () => ({
+  PointerActivationConstraints: {
+    Delay: class MockDelayConstraint {
+      readonly options: unknown;
+      constructor(options: unknown) {
+        this.options = options;
+      }
+    },
   },
 }));
 
@@ -173,6 +188,31 @@ describe("KanbanBoard", () => {
     expect(screen.getByTestId("task-card-running")).not.toHaveAttribute("draggable", "true");
     expect(dndKitMock.draggables.get("task:backlog")?.disabled).toBe(false);
     expect(dndKitMock.draggables.get("task:running")?.disabled).toBe(true);
+  });
+
+  it("requires a 500ms hold before pointer dragging a backlog card", () => {
+    const tasks = [
+      baseTask({ id: "backlog", title: "Can start", status: "backlog" }),
+      baseTask({ id: "running", title: "Cannot move", status: "executing" }),
+    ];
+    render(<KanbanBoard tasks={tasks} counts={{ backlog: 1, executing: 1 }} />);
+
+    const backlogSensors = dndKitMock.draggables.get("task:backlog")?.sensors;
+    const runningSensors = dndKitMock.draggables.get("task:running")?.sensors;
+
+    expect(backlogSensors).toEqual([
+      {
+        kind: "pointer-sensor",
+        options: {
+          activationConstraints: [
+            {
+              options: { value: 500, tolerance: 6 },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(runningSensors).toBeUndefined();
   });
 
   it("highlights the Brainstorming drop area while a backlog card is active", async () => {

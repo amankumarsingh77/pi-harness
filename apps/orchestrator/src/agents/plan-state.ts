@@ -9,6 +9,7 @@ export type PlanArtifactsSnapshot = {
   readonly plan: Artifact | null;
   readonly scenarios: Artifact | null;
   readonly blastRadius: Artifact | null;
+  readonly executionDag: Artifact | null;
 };
 
 export type PlannerDecision =
@@ -93,7 +94,8 @@ function areArtifactsReady(artifacts: PlanArtifactsSnapshot): boolean {
   return (
     artifacts.plan?.fm.status === "ready" &&
     artifacts.scenarios?.fm.status === "ready" &&
-    artifacts.blastRadius?.fm.status === "ready"
+    artifacts.blastRadius?.fm.status === "ready" &&
+    artifacts.executionDag?.fm.status === "ready"
   );
 }
 

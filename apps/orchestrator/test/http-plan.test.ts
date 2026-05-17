@@ -41,6 +41,28 @@ const validPlanBody = [
   "- o",
 ].join("\n");
 
+const validExecutionDagBody = `version: 1
+nodes:
+  - id: C-001
+    title: Plan route impact
+    phase: Foundation
+    kind: api
+    lane: orchestrator
+    safety: exclusive
+    dependsOn: []
+    writes:
+      - apps/orchestrator/src/http/routes/plan.ts
+    reads:
+      - apps/orchestrator/src/agents/artifacts-store.ts
+    verifies:
+      - pnpm --filter @pi-harness/orchestrator test http-plan
+    covers:
+      - REQ-001
+    blastRadius:
+      - BR-001
+    assertion: Plan bundle includes executionDag.
+`;
+
 async function makePlanWorktree(
   taskId: string,
   planStatus: ArtifactStatus,
@@ -133,6 +155,18 @@ async function makePlanWorktree(
     verificationRefs: []
 `,
   });
+  await store.writeArtifact(wt, taskId, {
+    fm: {
+      task: taskId,
+      kind: "execution-dag",
+      parent: "plan.md",
+      branch: `pi/${taskId}`,
+      status: scenariosStatus,
+      last_updated: new Date().toISOString(),
+      last_updated_by: "test",
+    },
+    body: validExecutionDagBody,
+  });
   await git.raw(["add", "-f", ".harness"]);
   await git.commit("seed plan");
   return wt;
@@ -208,6 +242,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(body.plan).toBeNull();
     expect(body.scenarios).toBeNull();
     expect(body.blastRadius).toBeNull();
+    expect(body.executionDag).toBeNull();
     expect(body.research["codebase-scout"]).toBeNull();
   });
 
@@ -227,6 +262,8 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(body.plan?.fm.status).toBe("ready");
     expect(body.scenarios?.fm.status).toBe("ready");
     expect(body.blastRadius?.fm.status).toBe("ready");
+    expect(body.executionDag?.fm.status).toBe("ready");
+    expect(body.executionDag?.body).toContain("C-001");
     expect(body.blastRadius?.body).toContain("BR-001");
     expect(body.research["codebase-scout"]).toContain("codebase-scout findings");
     expect(body.research["integration-scanner"]).toBeNull();
@@ -251,8 +288,10 @@ describe("http /api/tasks/:id/plan routes", () => {
     const store = new ArtifactsStore();
     const plan = await store.readArtifact(wt, t.id, "plan");
     const scenarios = await store.readArtifact(wt, t.id, "scenarios");
+    const executionDag = await store.readArtifact(wt, t.id, "execution-dag");
     expect(plan?.fm.status).toBe("draft");
     expect(scenarios?.fm.status).toBe("draft");
+    expect(executionDag?.fm.status).toBe("draft");
 
     const jsonl = await readFile(join(wt, ".harness", t.id, "plan.jsonl"), "utf8");
     expect(jsonl).toContain("plan_revision_requested");
@@ -333,6 +372,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(existsSync(join(dir, "plan.md"))).toBe(true);
     expect(existsSync(join(dir, "scenarios.yaml"))).toBe(true);
     expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(true);
+    expect(existsSync(join(dir, "execution-dag.yaml"))).toBe(true);
 
     const archive = join(dir, "runs", activeRun.id);
     expect(existsSync(join(archive, "design.md"))).toBe(false);
@@ -340,6 +380,7 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(existsSync(join(archive, "plan.md"))).toBe(true);
     expect(existsSync(join(archive, "scenarios.yaml"))).toBe(true);
     expect(existsSync(join(archive, "blast-radius.yaml"))).toBe(true);
+    expect(existsSync(join(archive, "execution-dag.yaml"))).toBe(true);
     expect(existsSync(join(archive, "plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "research", "codebase-scout.md"))).toBe(true);
@@ -348,9 +389,11 @@ describe("http /api/tasks/:id/plan routes", () => {
     const plan = await store.readArtifact(wt, t.id, "plan");
     const scenarios = await store.readArtifact(wt, t.id, "scenarios");
     const blastRadius = await store.readArtifact(wt, t.id, "blast-radius");
+    const executionDag = await store.readArtifact(wt, t.id, "execution-dag");
     expect(plan?.fm.status).toBe("draft");
     expect(scenarios?.fm.status).toBe("draft");
     expect(blastRadius?.fm.status).toBe("draft");
+    expect(executionDag?.fm.status).toBe("draft");
 
     const newJsonl = await readFile(join(dir, "plan.jsonl"), "utf8");
     expect(newJsonl).toContain("session_reset");

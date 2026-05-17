@@ -11,6 +11,7 @@ import {
 import { TaskDetailShell } from "@/components/task-detail/task-detail-shell";
 import { TaskFactsPanel } from "@/components/task-detail/task-facts-panel";
 import { TaskPhaseStrip } from "@/components/task-detail/task-phase-strip";
+import { StartBrainstormButton } from "@/components/task-detail/start-brainstorm-button";
 import {
   type TaskIntervention,
   TaskInterventionStrip,
@@ -66,13 +67,16 @@ export function TaskDetailLive({
         runs={data.runs}
         liveRunId={liveRun?.id ?? null}
         inspectorControls={
-          <TaskDetailInspectors
-            events={initialEvents}
-            files={files}
-            artifactSummaries={artifactSummaries}
-            runId={selectedRun?.id ?? "-"}
-            live={liveRun !== null && liveRun.id === selectedRun?.id}
-          />
+          <div className="flex flex-wrap items-start justify-end gap-2">
+            <StartBrainstormButton task={data.task} />
+            <TaskDetailInspectors
+              events={initialEvents}
+              files={files}
+              artifactSummaries={artifactSummaries}
+              runId={selectedRun?.id ?? "-"}
+              live={liveRun !== null && liveRun.id === selectedRun?.id}
+            />
+          </div>
         }
       >
         {initialIntervention && <TaskInterventionStrip intervention={initialIntervention} />}
@@ -123,7 +127,7 @@ function artifactNamesForPhase(phase: ArtifactSummary["phase"]): readonly string
     case "brainstorm":
       return ["design.md", "spec.md"];
     case "plan":
-      return ["plan.md", "blast-radius.yaml", "scenarios.yaml"];
+      return ["plan.md", "blast-radius.yaml", "scenarios.yaml", "execution-dag.yaml"];
     case "verify":
       return ["proof-report.md"];
   }

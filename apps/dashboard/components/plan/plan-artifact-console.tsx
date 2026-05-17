@@ -5,18 +5,21 @@ import type { Artifact } from "@pi-harness/shared";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { StatusIcon } from "@/components/kanban/status-icon";
+import { ExecutionPhasesPreview } from "./execution-phases-preview";
 
-type ArtifactKind = "plan" | "blastRadius" | "scenarios";
+type ArtifactKind = "plan" | "blastRadius" | "scenarios" | "executionDag";
 type ArtifactTab = "rendered" | "raw" | "diff";
 
 export function PlanArtifactConsole({
   plan,
   blastRadius,
   scenarios,
+  executionDag,
 }: {
   readonly plan: Artifact | null;
   readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
+  readonly executionDag: Artifact | null;
 }) {
   const [expanded, setExpanded] = useState<ArtifactKind | null>(null);
   const [tab, setTab] = useState<ArtifactTab>("rendered");
@@ -27,7 +30,9 @@ export function PlanArtifactConsole({
         ? blastRadius
         : expanded === "scenarios"
           ? scenarios
-          : null;
+          : expanded === "executionDag"
+            ? executionDag
+            : null;
   const expandedTitle = expanded ? artifactTitle(expanded) : "";
 
   useEffect(() => {
@@ -41,6 +46,13 @@ export function PlanArtifactConsole({
 
   return (
     <>
+      <ExecutionPhasesPreview
+        artifact={executionDag}
+        onExpand={() => {
+          setExpanded("executionDag");
+          setTab("raw");
+        }}
+      />
       <section
         className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.72fr)_minmax(0,0.72fr)]"
         aria-label="Main artifacts"
@@ -231,6 +243,7 @@ function ArtifactModalBody({
 function artifactTitle(kind: ArtifactKind) {
   if (kind === "plan") return "plan.md";
   if (kind === "blastRadius") return "blast-radius.yaml";
+  if (kind === "executionDag") return "execution-dag.yaml";
   return "scenarios.yaml";
 }
 

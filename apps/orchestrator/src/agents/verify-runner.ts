@@ -15,6 +15,7 @@ import type {
 export async function runApiScenario(opts: {
   scenario: ApiScenario;
   proofDir: string;
+  baseUrl?: string;
 }): Promise<ScenarioResult> {
   const { scenario, proofDir } = opts;
   const start = Date.now();
@@ -29,7 +30,7 @@ export async function runApiScenario(opts: {
 
   let response: Response;
   try {
-    response = await fetch(scenario.request.url, init);
+    response = await fetch(resolveUrl(scenario.request.url, opts.baseUrl ?? defaultApiBaseUrl()), init);
   } catch (e) {
     return {
       id: scenario.id,
@@ -82,9 +83,9 @@ export async function runApiScenario(opts: {
   };
 }
 
-async function walkSteps(page: Page, steps: UiStep[]): Promise<void> {
+async function walkSteps(page: Page, steps: UiStep[], baseUrl: string): Promise<void> {
   for (const step of steps) {
-    if ("navigate" in step) await page.goto(step.navigate);
+    if ("navigate" in step) await page.goto(resolveUrl(step.navigate, baseUrl));
     else if ("fill" in step) await page.fill(step.fill.selector, step.fill.value);
     else if ("click" in step) await page.click(step.click);
     else if ("wait_for_url" in step) await page.waitForURL(step.wait_for_url);
@@ -94,6 +95,7 @@ async function walkSteps(page: Page, steps: UiStep[]): Promise<void> {
 export async function runUiScenario(opts: {
   scenario: UiScenario;
   proofDir: string;
+  baseUrl?: string;
 }): Promise<ScenarioResult> {
   const { scenario, proofDir } = opts;
   const start = Date.now();
@@ -104,7 +106,7 @@ export async function runUiScenario(opts: {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await walkSteps(page, scenario.steps);
+    await walkSteps(page, scenario.steps, opts.baseUrl ?? defaultUiBaseUrl());
 
     if (scenario.expect.url_matches) {
       const url = page.url();
@@ -139,6 +141,7 @@ export async function runUiScenario(opts: {
 export async function runUiVisualScenario(opts: {
   scenario: UiVisualScenario;
   proofDir: string;
+  baseUrl?: string;
 }): Promise<ScenarioResult> {
   const { scenario, proofDir } = opts;
   const start = Date.now();
@@ -148,7 +151,7 @@ export async function runUiVisualScenario(opts: {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await walkSteps(page, scenario.steps);
+    await walkSteps(page, scenario.steps, opts.baseUrl ?? defaultUiBaseUrl());
 
     if (scenario.capture.selector) {
       const handle = page.locator(scenario.capture.selector);
@@ -195,4 +198,16 @@ function matchesGlob(url: string, pattern: string): boolean {
       "$",
   );
   return re.test(url);
+}
+
+function resolveUrl(value: string, baseUrl: string): string {
+  return new URL(value, baseUrl).toString();
+}
+
+function defaultApiBaseUrl(): string {
+  return process.env.ORCHESTRATOR_URL ?? `http://localhost:${process.env.PORT ?? "4000"}`;
+}
+
+function defaultUiBaseUrl(): string {
+  return process.env.DASHBOARD_URL ?? `http://localhost:${process.env.DASHBOARD_PORT ?? "3000"}`;
 }

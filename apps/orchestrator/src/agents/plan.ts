@@ -293,12 +293,13 @@ function isValidBlastRadiusBody(body: string): boolean {
 }
 
 async function readPlanArtifacts(opts: PlanOpts): Promise<PlanArtifactsSnapshot> {
-  const [plan, scenarios, blastRadius] = await Promise.all([
+  const [plan, scenarios, blastRadius, executionDag] = await Promise.all([
     opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
     opts.store.readArtifact(opts.cwd, opts.taskId, "scenarios"),
     opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "execution-dag"),
   ]);
-  return { plan, scenarios, blastRadius };
+  return { plan, scenarios, blastRadius, executionDag };
 }
 
 async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {

@@ -22,6 +22,7 @@ export function PlanBody({
   plan,
   blastRadius,
   scenarios,
+  executionDag,
   plannerLogDefaultOpen,
 }: {
   task: Task;
@@ -35,6 +36,7 @@ export function PlanBody({
   plan: Artifact | null;
   blastRadius: Artifact | null;
   scenarios: Artifact | null;
+  executionDag: Artifact | null;
   plannerLogDefaultOpen: boolean;
 }) {
   const { events: liveEvents, connected } = usePlanEvents();
@@ -50,6 +52,7 @@ export function PlanBody({
       plan={plan}
       blastRadius={blastRadius}
       scenarios={scenarios}
+      executionDag={executionDag}
       research={research}
       planEvents={planEvents}
       liveEvents={liveEvents}

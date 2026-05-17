@@ -10,7 +10,7 @@ import {
 } from "./agent-session.js";
 import { __resetAuthCache } from "./auth.js";
 import { createFakeAdapter } from "./_test/fake-sdk.js";
-import { AuthStorage, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, SessionManager, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 // The fake-sdk adapter satisfies SdkBoundary structurally and lets each test
 // drive the SDK event stream directly. We assert observable outcomes only:
@@ -389,6 +389,27 @@ describe("createAgentSession", () => {
     );
     await session.close();
     expect(setRuntimeApiKey).toHaveBeenCalledWith("crofai", "file-crofai-key");
+  });
+
+  it("opens persisted sessions with the requested cwd override", async () => {
+    const worktreeCwd = join(envDir, "worktree");
+    const sessionPath = join(worktreeCwd, ".harness", "task-1", "pi-session-plan.jsonl");
+    mkdirSync(join(worktreeCwd, ".harness", "task-1"), { recursive: true });
+    const open = vi
+      .spyOn(SessionManager, "open")
+      .mockImplementation((_path, _sessionDir, cwdOverride) =>
+        SessionManager.inMemory(cwdOverride ?? "/wrong-cwd"),
+      );
+
+    const session = await createAgentSession({
+      cwd: worktreeCwd,
+      model: baseModel,
+      sessionPath,
+      onEvent: () => {},
+    });
+    await session.close();
+
+    expect(open).toHaveBeenCalledWith(sessionPath, undefined, worktreeCwd);
   });
 
   it("openai-codex oauth present: assertCredential passes with auth.json token", async () => {

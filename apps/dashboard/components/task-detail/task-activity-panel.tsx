@@ -94,6 +94,10 @@ function tagForEvent(event: AgentEvent): string {
     case "plan_usage":
     case "plan_artifact_edited":
       return "plan";
+    case "code_node_started":
+    case "code_node_ended":
+    case "code_usage":
+      return "code";
     case "message_delta":
       return "stream";
   }
@@ -147,6 +151,12 @@ function messageForEvent(event: AgentEvent): string {
       return `plan usage · ${event.cumulativeInputTokens} in`;
     case "plan_artifact_edited":
       return `${event.artifact}.md edited`;
+    case "code_node_started":
+      return `${event.nodeId} started`;
+    case "code_node_ended":
+      return `${event.nodeId} ${event.status}`;
+    case "code_usage":
+      return `code usage · ${event.inputTokens} in`;
     case "message_delta":
       return event.text;
   }
@@ -155,6 +165,7 @@ function messageForEvent(event: AgentEvent): string {
 function hintForEvent(event: AgentEvent): string {
   if (event.kind === "tool_call" || event.kind === "tool_result") return "inspect";
   if (event.kind === "plan_system" || event.kind === "plan_artifact_edited") return "plan";
+  if (event.kind.startsWith("code")) return "code";
   if (event.kind.startsWith("brainstorm")) return "brainstorm";
   return "open";
 }

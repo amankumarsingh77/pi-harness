@@ -50,6 +50,28 @@ describe("runUiScenario (Playwright)", () => {
     expect(result.evidence.screenshotFile).toContain("login.png");
   });
 
+  it("resolves root-relative navigation steps against the UI base URL", async () => {
+    const result = await runUiScenario({
+      scenario: {
+        id: "relative-login",
+        type: "ui",
+        name: "relative login flow",
+        steps: [
+          { navigate: "/" },
+          { fill: { selector: "input[name=email]", value: "u@x" } },
+          { fill: { selector: "input[name=password]", value: "p" } },
+          { click: "button[type=button]" },
+          { wait_for_url: "**#dashboard" },
+        ],
+        expect: { url_matches: "**#dashboard", screenshot: "relative-login.png" },
+      },
+      proofDir,
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it("ui-visual scenario captures the named file", async () => {
     const result = await runUiVisualScenario({
       scenario: {

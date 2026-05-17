@@ -17,6 +17,7 @@ export type ScaffoldPlanResult = {
   planPath: string;
   scenariosPath: string;
   blastRadiusPath: string;
+  executionDagPath: string;
 };
 
 // Materialize plan.md + scenarios.yaml inside the worktree at
@@ -33,11 +34,15 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
   const planPath = store.artifactPath(opts.cwd, opts.taskId, "plan");
   const scenariosPath = store.artifactPath(opts.cwd, opts.taskId, "scenarios");
   const blastRadiusPath = store.artifactPath(opts.cwd, opts.taskId, "blast-radius");
+  const executionDagPath = store.artifactPath(opts.cwd, opts.taskId, "execution-dag");
   const dir = store.artifactDir(opts.cwd, opts.taskId);
   const gitignorePath = join(dir, ".gitignore");
 
   const filesExist =
-    existsSync(planPath) && existsSync(scenariosPath) && existsSync(blastRadiusPath);
+    existsSync(planPath) &&
+    existsSync(scenariosPath) &&
+    existsSync(blastRadiusPath) &&
+    existsSync(executionDagPath);
   const ts = new Date().toISOString();
 
   if (!filesExist) {
@@ -79,9 +84,22 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
       },
       body: "items: []\n",
     };
+    const executionDag: Artifact = {
+      fm: {
+        task: opts.taskId,
+        kind: "execution-dag",
+        parent: "plan.md",
+        status: "draft",
+        branch: opts.branch,
+        last_updated: ts,
+        last_updated_by: "orchestrator",
+      },
+      body: "version: 1\nnodes: []\n",
+    };
     await store.writeArtifact(opts.cwd, opts.taskId, plan);
     await store.writeArtifact(opts.cwd, opts.taskId, scenarios);
     await store.writeArtifact(opts.cwd, opts.taskId, blastRadius);
+    await store.writeArtifact(opts.cwd, opts.taskId, executionDag);
   }
 
   if (!existsSync(gitignorePath)) {
@@ -100,5 +118,5 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
     },
   );
 
-  return { created, planPath, scenariosPath, blastRadiusPath };
+  return { created, planPath, scenariosPath, blastRadiusPath, executionDagPath };
 }

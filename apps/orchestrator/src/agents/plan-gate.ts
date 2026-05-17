@@ -7,7 +7,8 @@ import type { ArtifactsStore } from "./artifacts-store.js";
 //
 //   artifactsReady = plan.fm.status ∈ {ready, human_edited, approved} AND
 //                    scenarios.fm.status ∈ {ready, human_edited, approved} AND
-//                    blast-radius.fm.status ∈ {ready, human_edited, approved}
+//                    blast-radius.fm.status ∈ {ready, human_edited, approved} AND
+//                    execution-dag.fm.status ∈ {ready, human_edited, approved}
 //   lastReadyAt    = ts of latest plan_system{status_changed, status:ready}
 //   lastRevisionAt = ts of latest plan_revision_requested
 //
@@ -22,10 +23,11 @@ export async function derivePlanGate(
   taskId: string,
   store: ArtifactsStore,
 ): Promise<PlanGate> {
-  const [plan, scenarios, blastRadius] = await Promise.all([
+  const [plan, scenarios, blastRadius, executionDag] = await Promise.all([
     store.readArtifact(cwd, taskId, "plan"),
     store.readArtifact(cwd, taskId, "scenarios"),
     store.readArtifact(cwd, taskId, "blast-radius"),
+    store.readArtifact(cwd, taskId, "execution-dag"),
   ]);
   // Ready, human-edited, or approved all unblock the gate. `approved` is
   // included so that re-derivations after the user clicks Approve remain
@@ -35,7 +37,8 @@ export async function derivePlanGate(
   const artifactsReady =
     isApprovable(plan?.fm.status) &&
     isApprovable(scenarios?.fm.status) &&
-    isApprovable(blastRadius?.fm.status);
+    isApprovable(blastRadius?.fm.status) &&
+    isApprovable(executionDag?.fm.status);
   if (!artifactsReady) return "running";
 
   const events = await readJsonl<JsonlEvent>(

@@ -52,15 +52,17 @@ export function registerPlanRoutes(
         plan: null,
         scenarios: null,
         blastRadius: null,
+        executionDag: null,
         research: emptyResearch(),
         events: [],
       };
     }
 
-    const [plan, scenarios, blastRadius, events, gate, research] = await Promise.all([
+    const [plan, scenarios, blastRadius, executionDag, events, gate, research] = await Promise.all([
       deps.artifacts.readArtifact(cwd, task.id, "plan"),
       deps.artifacts.readArtifact(cwd, task.id, "scenarios"),
       deps.artifacts.readArtifact(cwd, task.id, "blast-radius"),
+      deps.artifacts.readArtifact(cwd, task.id, "execution-dag"),
       readJsonl(join(cwd, ".harness", task.id, "plan.jsonl")),
       derivePlanGate(cwd, task.id, deps.artifacts),
       readResearch(cwd, task.id),
@@ -72,6 +74,7 @@ export function registerPlanRoutes(
       plan,
       scenarios,
       blastRadius,
+      executionDag,
       research,
       events,
     };

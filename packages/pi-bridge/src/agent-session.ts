@@ -144,7 +144,7 @@ const defaultBoundary: SdkBoundary = {
     const registry = await getRegistry();
     const model = resolveModel(opts.model, registry);
     const sessionManager = opts.sessionPath
-      ? SessionManager.open(opts.sessionPath)
+      ? SessionManager.open(opts.sessionPath, undefined, opts.cwd)
       : SessionManager.inMemory(opts.cwd);
     const sdkOpts: CreateAgentSessionOptions = {
       cwd: opts.cwd,

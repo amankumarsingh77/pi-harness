@@ -77,6 +77,16 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     framing: "",
     description: "Reads research findings, authors plan.md + scenarios.yaml",
   },
+  code: {
+    name: "code",
+    role: "phase-driver",
+    promptDir: "phase",
+    promptFile: "code.md",
+    allowedTools: ["read", "grep", "find", "ls", "bash", "edit"],
+    invokedBy: ["code"],
+    framing: "",
+    description: "Executes one execution DAG node without committing",
+  },
   "codebase-scout": {
     name: "codebase-scout",
     role: "preflight-research",

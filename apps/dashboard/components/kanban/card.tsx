@@ -2,11 +2,20 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { Task } from "@pi-harness/shared";
 import { clsx } from "clsx";
-import { useDraggable } from "@dnd-kit/react";
+import { PointerActivationConstraints } from "@dnd-kit/dom";
+import { PointerSensor, useDraggable } from "@dnd-kit/react";
 import { useCallback } from "react";
 import { formatRelativeCompact } from "@/lib/format";
 import type { KanbanDndData } from "./drag-types";
 import { taskDragId } from "./drag-types";
+
+const LONG_PRESS_DRAG_SENSORS = [
+  PointerSensor.configure({
+    activationConstraints: [
+      new PointerActivationConstraints.Delay({ value: 500, tolerance: 6 }),
+    ],
+  }),
+];
 
 const LIVE_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "brainstorming",
@@ -41,6 +50,7 @@ export function TaskCard({
     id: taskDragId(task.id),
     data: { kind: "task", taskId: task.id, status: task.status },
     disabled: !draggable || pending,
+    ...(draggable ? { sensors: LONG_PRESS_DRAG_SENSORS } : {}),
   });
   const setDragRefs = useCallback(
     (element: HTMLElement | null) => {

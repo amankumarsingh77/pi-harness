@@ -317,27 +317,46 @@ describe("ArtifactsStore", () => {
     body: "items: []\n",
   };
 
+  const executionDagSample: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "execution-dag",
+      parent: "plan.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: "2026-05-10T00:00:00.000Z",
+      last_updated_by: "orchestrator",
+    },
+    body: "version: 1\nnodes: []\n",
+  };
+
   it("plan + YAML plan artifacts round-trip with correct file extensions", async () => {
     const store = new ArtifactsStore();
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
     await store.writeArtifact(cwd, "T-1", blastRadiusSample);
+    await store.writeArtifact(cwd, "T-1", executionDagSample);
 
     const planPath = store.artifactPath(cwd, "T-1", "plan");
     const scenariosPath = store.artifactPath(cwd, "T-1", "scenarios");
     const blastRadiusPath = store.artifactPath(cwd, "T-1", "blast-radius");
+    const executionDagPath = store.artifactPath(cwd, "T-1", "execution-dag");
     expect(planPath.endsWith("plan.md")).toBe(true);
     expect(scenariosPath.endsWith("scenarios.yaml")).toBe(true);
     expect(blastRadiusPath.endsWith("blast-radius.yaml")).toBe(true);
+    expect(executionDagPath.endsWith("execution-dag.yaml")).toBe(true);
 
     const plan = await store.readArtifact(cwd, "T-1", "plan");
     const scenarios = await store.readArtifact(cwd, "T-1", "scenarios");
     const blastRadius = await store.readArtifact(cwd, "T-1", "blast-radius");
+    const executionDag = await store.readArtifact(cwd, "T-1", "execution-dag");
     expect(plan?.fm.kind).toBe("plan");
     expect(scenarios?.fm.kind).toBe("scenarios");
     expect(blastRadius?.fm.kind).toBe("blast-radius");
+    expect(executionDag?.fm.kind).toBe("execution-dag");
     expect(scenarios?.body).toContain("scenarios:");
     expect(blastRadius?.body).toContain("items:");
+    expect(executionDag?.body).toContain("version: 1");
   });
 
   it("setArtifactStatus on scenarios commits with the .yaml file path", async () => {
@@ -352,13 +371,14 @@ describe("ArtifactsStore", () => {
     expect(log.latest?.message).toContain("mark scenarios as ready");
   });
 
-  it("listArtifacts returns all five kinds when present", async () => {
+  it("listArtifacts returns all plan kinds when present", async () => {
     const store = new ArtifactsStore();
     await store.writeArtifact(cwd, "T-1", sample);
     await store.writeArtifact(cwd, "T-1", { fm: { ...sample.fm, kind: "spec", parent: "design.md" }, body: "# Spec\n" });
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
     await store.writeArtifact(cwd, "T-1", blastRadiusSample);
+    await store.writeArtifact(cwd, "T-1", executionDagSample);
     const list = await store.listArtifacts(cwd, "T-1");
     expect(list.map((a) => a.fm.kind)).toEqual([
       "design",
@@ -366,6 +386,7 @@ describe("ArtifactsStore", () => {
       "plan",
       "scenarios",
       "blast-radius",
+      "execution-dag",
     ]);
   });
 
@@ -387,6 +408,7 @@ describe("ArtifactsStore", () => {
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
     await store.writeArtifact(cwd, "T-1", blastRadiusSample);
+    await store.writeArtifact(cwd, "T-1", executionDagSample);
     const dir = join(cwd, ".harness", "T-1");
     await writeFile(join(dir, "plan.jsonl"), "{\"kind\":\"x\"}\n");
     await writeFile(join(dir, "pi-session-plan.jsonl"), "session\n");
@@ -402,6 +424,7 @@ describe("ArtifactsStore", () => {
       join(".harness", "T-1", "plan.md"),
       join(".harness", "T-1", "scenarios.yaml"),
       join(".harness", "T-1", "blast-radius.yaml"),
+      join(".harness", "T-1", "execution-dag.yaml"),
       join(".harness", "T-1", "plan.jsonl"),
       join(".harness", "T-1", "pi-session-plan.jsonl"),
     ]);
@@ -415,6 +438,7 @@ describe("ArtifactsStore", () => {
     expect(existsSync(join(dir, "plan.md"))).toBe(false);
     expect(existsSync(join(dir, "scenarios.yaml"))).toBe(false);
     expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(false);
+    expect(existsSync(join(dir, "execution-dag.yaml"))).toBe(false);
     expect(existsSync(join(dir, "plan.jsonl"))).toBe(false);
     expect(existsSync(join(dir, "pi-session-plan.jsonl"))).toBe(false);
     expect(existsSync(join(dir, "research"))).toBe(false);
@@ -425,6 +449,7 @@ describe("ArtifactsStore", () => {
     expect(existsSync(join(archive, "plan.md"))).toBe(true);
     expect(existsSync(join(archive, "scenarios.yaml"))).toBe(true);
     expect(existsSync(join(archive, "blast-radius.yaml"))).toBe(true);
+    expect(existsSync(join(archive, "execution-dag.yaml"))).toBe(true);
     expect(existsSync(join(archive, "plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "research", "codebase-locator.md"))).toBe(true);

@@ -111,6 +111,63 @@ describe("plan_* AgentEvent variants", () => {
   });
 });
 
+describe("code_* AgentEvent variants", () => {
+  it("code_node_started carries scheduler metadata", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "code_node_started",
+      nodeId: "C-001",
+      title: "Add helper",
+      phaseName: "Foundation",
+      lane: "shared",
+      safety: "parallel-safe",
+      sessionId: "s-1",
+    };
+    if (e.kind === "code_node_started") {
+      expect(e.nodeId).toBe("C-001");
+      expect(e.safety).toBe("parallel-safe");
+    } else {
+      expect.fail("expected code_node_started");
+    }
+  });
+
+  it("code_node_ended carries status, usage, and commit", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "code_node_ended",
+      nodeId: "C-002",
+      ok: true,
+      status: "succeeded",
+      durationMs: 50,
+      costUsd: 0.01,
+      inputTokens: 10,
+      outputTokens: 20,
+      commitSha: "abc123",
+    };
+    if (e.kind === "code_node_ended") {
+      expect(e.commitSha).toBe("abc123");
+      expect(e.status).toBe("succeeded");
+    } else {
+      expect.fail("expected code_node_ended");
+    }
+  });
+
+  it("code_usage carries cumulative phase usage", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "code_usage",
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsd: 0.01,
+    };
+    if (e.kind === "code_usage") {
+      expect(e.outputTokens).toBe(20);
+    } else {
+      expect.fail("expected code_usage");
+    }
+  });
+});
+
 describe("brainstorm mock AgentEvent variants", () => {
   it("brainstorm_mock_proposed carries the mock card fields", () => {
     const e: AgentEvent = {

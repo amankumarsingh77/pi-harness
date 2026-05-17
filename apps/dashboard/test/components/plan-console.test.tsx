@@ -32,6 +32,7 @@ describe("PlanConsole", () => {
     expect(screen.getAllByText("plan.md").length).toBeGreaterThan(0);
     expect(screen.getAllByText("blast-radius.yaml").length).toBeGreaterThan(0);
     expect(screen.getAllByText("scenarios.yaml").length).toBeGreaterThan(0);
+    expect(screen.getByText("execution phases")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve plan" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
   });
@@ -95,7 +96,7 @@ describe("PlanConsole", () => {
     expect(screen.getByText(/"ts": "2026-05-15T10:02:15.000Z"/)).toBeInTheDocument();
   });
 
-  it("opens expanded artifact modals for plan, blast radius, and scenarios", () => {
+  it("opens expanded artifact modals for plan, blast radius, scenarios, and execution DAG", () => {
     renderConsole();
 
     const mainArtifacts = screen.getByRole("region", { name: "Main artifacts" });
@@ -116,6 +117,27 @@ describe("PlanConsole", () => {
     fireEvent.click(expandButtons[2]!);
     expect(screen.getByRole("dialog", { name: "scenarios.yaml expanded artifact" })).toBeInTheDocument();
     expect(screen.getAllByText(/task-detail-inspectors/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Close artifact modal" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Raw" }));
+    expect(screen.getByRole("dialog", { name: "execution-dag.yaml expanded artifact" })).toBeInTheDocument();
+    expect(screen.getAllByText(/C-001/).length).toBeGreaterThan(0);
+  });
+
+  it("renders compact execution phase rows from execution-dag.yaml", () => {
+    renderConsole();
+
+    expect(screen.getByText("Foundation")).toBeInTheDocument();
+    expect(screen.getByText("Parallel Work")).toBeInTheDocument();
+    expect(screen.getByText("can run together")).toBeInTheDocument();
+    expect(screen.getByText("C-001")).toBeInTheDocument();
+    expect(screen.getByText("C-002")).toBeInTheDocument();
+  });
+
+  it("shows a stable empty state when execution-dag.yaml is missing", () => {
+    renderConsole({ executionDag: null });
+
+    expect(screen.getByText("execution phases not authored yet")).toBeInTheDocument();
   });
 
   it("collapses and expands the planner log", () => {
@@ -178,7 +200,12 @@ describe("PlanApprovalGate", () => {
   });
 });
 
-function renderConsole(opts: { readonly liveEvents?: readonly AgentEvent[] } = {}) {
+function renderConsole(
+  opts: {
+    readonly liveEvents?: readonly AgentEvent[];
+    readonly executionDag?: Artifact | null;
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -195,6 +222,11 @@ function renderConsole(opts: { readonly liveEvents?: readonly AgentEvent[] } = {
           plan={artifact("plan", planBody)}
           blastRadius={artifact("blast-radius", blastRadiusBody)}
           scenarios={artifact("scenarios", scenariosBody)}
+          executionDag={
+            opts.executionDag === undefined
+              ? artifact("execution-dag", executionDagBody)
+              : opts.executionDag
+          }
           research={{
             "codebase-scout": "# Scout\n\nNo backend change needed.",
             "integration-scanner": null,
@@ -248,6 +280,49 @@ const blastRadiusBody = `items:
     summary: Plan page shell and artifacts change together
 `;
 
+const executionDagBody = `version: 1
+nodes:
+  - id: C-001
+    title: Add DAG schema
+    phase: Foundation
+    kind: schema
+    lane: shared-types
+    safety: exclusive
+    dependsOn: []
+    writes: [packages/shared/src/schemas/execution-dag.ts]
+    reads: [packages/shared/src/schemas/artifacts.ts]
+    verifies: [pnpm test]
+    covers: [REQ-001]
+    blastRadius: [BR-001]
+    assertion: schema parses
+  - id: C-002
+    title: Render compact phases
+    phase: Parallel Work
+    kind: ui
+    lane: dashboard
+    safety: parallel-safe
+    dependsOn: [C-001]
+    writes: [apps/dashboard/components/plan/execution-phases-preview.tsx]
+    reads: [apps/dashboard/components/plan/plan-artifact-console.tsx]
+    verifies: [pnpm test]
+    covers: [REQ-002]
+    blastRadius: [BR-001]
+    assertion: phases render
+  - id: C-003
+    title: Update dashboard tests
+    phase: Parallel Work
+    kind: test
+    lane: dashboard-tests
+    safety: parallel-safe
+    dependsOn: [C-001]
+    writes: [apps/dashboard/test/components/plan-console.test.tsx]
+    reads: [apps/dashboard/components/plan/execution-phases-preview.tsx]
+    verifies: [pnpm test]
+    covers: [REQ-002]
+    blastRadius: [BR-001]
+    assertion: tests cover compact phases
+`;
+
 function task(): Task {
   return {
     id: "T-1",
@@ -282,12 +357,12 @@ function run(): Run {
   };
 }
 
-function artifact(kind: "plan" | "blast-radius" | "scenarios", body: string): Artifact {
+function artifact(kind: "plan" | "blast-radius" | "scenarios" | "execution-dag", body: string): Artifact {
   return {
     fm: {
       task: "T-1",
       kind,
-      parent: kind === "scenarios" || kind === "blast-radius" ? "plan.md" : null,
+      parent: kind === "plan" ? null : "plan.md",
       status: "ready",
       branch: "codex/task-detail-redesign",
       last_updated: "2026-05-15T10:04:00Z",

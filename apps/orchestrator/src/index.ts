@@ -58,8 +58,8 @@ async function main(): Promise<void> {
     "janitor reconcile complete",
   );
 
-  // Brainstorm-sufficient phaseDeps. plan/code/verify/pr return a structured
-  // `not_implemented` from runPhase until each migrates to createAgentSession.
+  // Shared phase deps. Brainstorm, plan, and code use real pi sessions;
+  // verify/pr still return a structured `not_implemented` until migrated.
   const phaseDeps: PhaseDeps = {
     cwd: config.repoRoot, // overridden per-task by run-loop
     onEvent: () => {},
