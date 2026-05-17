@@ -174,7 +174,7 @@ function AgentPane({
           )}
           <button
             type="button"
-            className="min-h-[26px] rounded-[7px] border border-line bg-white/[0.02] px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
+            className="min-h-6.5 rounded-[7px] border border-line bg-white/2 px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
             onClick={() => onOpen(summary.name)}
           >
             {summary.kind === "progress" ? "Follow live" : "Full log"}
@@ -182,7 +182,7 @@ function AgentPane({
         </div>
       </header>
 
-      <div className="scroll-hide h-[174px] overflow-y-auto px-3 py-2.5">
+      <div className="scroll-hide h-43.5 overflow-y-auto px-3 py-2.5">
         <LogRows rows={rows} limit={8} emptyText={emptyTextFor(summary.kind)} />
       </div>
 
@@ -190,7 +190,7 @@ function AgentPane({
         <span className="truncate">{findingsPreview(summary)}</span>
         <button
           type="button"
-          className="rounded-[7px] border border-line bg-white/[0.02] px-2 py-1 text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
+          className="rounded-[7px] border border-line bg-white/2 px-2 py-1 text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/4.5"
           onClick={() => onOpen(summary.name)}
         >
           Findings
@@ -222,7 +222,7 @@ function AgentDrawer({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[4px]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs" onClick={onClose}>
       <aside
         className="absolute right-0 top-0 flex h-full w-[min(560px,calc(100vw-20px))] flex-col border-l border-line-strong bg-card shadow-[-24px_0_90px_rgba(0,0,0,0.54)]"
         role="dialog"
