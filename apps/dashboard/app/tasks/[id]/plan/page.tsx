@@ -7,6 +7,8 @@ import { ApiError } from "@/lib/api";
 import { PlanEventsProvider } from "@/lib/plan-events-context";
 import { orchestrator } from "@/lib/server/api";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {
