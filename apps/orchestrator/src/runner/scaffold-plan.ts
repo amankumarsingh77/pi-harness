@@ -4,6 +4,7 @@ import { join } from "node:path";
 import simpleGit from "simple-git";
 import type { Artifact } from "@pi-harness/shared";
 import { ArtifactsStore } from "../agents/artifacts-store.js";
+import { withGitLockDiagnostic } from "./git-diagnostics.js";
 
 export type ScaffoldPlanOpts = {
   cwd: string;          // worktree root
@@ -88,12 +89,16 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
   }
 
   const git = simpleGit(opts.cwd);
-  await git.raw(["add", "-f", ".harness"]);
-  const status = await git.status();
-  if (status.staged.length > 0) {
-    await git.commit(`chore(${opts.taskId}): plan scaffolding`);
-    return { created: true, planPath, scenariosPath, blastRadiusPath };
-  }
+  const created = await withGitLockDiagnostic(
+    { taskId: opts.taskId, operation: "plan scaffolding" },
+    async () => {
+      await git.raw(["add", "-f", ".harness"]);
+      const status = await git.status();
+      if (status.staged.length === 0) return false;
+      await git.commit(`chore(${opts.taskId}): plan scaffolding`);
+      return true;
+    },
+  );
 
-  return { created: false, planPath, scenariosPath, blastRadiusPath };
+  return { created, planPath, scenariosPath, blastRadiusPath };
 }

@@ -6,6 +6,7 @@ import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
+import { TaskMutationLock } from "../runner/task-mutation-lock.js";
 import { isHarnessError } from "../domain/errors.js";
 import { registerHealth } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
@@ -28,6 +29,7 @@ export type ServerDeps = {
   // Optional in tests. user_cancel uses this to abort an in-flight phase
   // driver before settling its run rows.
   cancellation?: CancellationRegistry;
+  mutationLock?: TaskMutationLock;
   // pino instance shared with the rest of the orchestrator. Fastify uses it
   // for HTTP request logging and per-request `req.log` children. When omitted
   // (tests), Fastify falls back to a quiet warn-level logger.
@@ -64,11 +66,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
+  const mutationLock = deps.mutationLock ?? new TaskMutationLock();
   registerHealth(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,
     artifacts,
+    mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
@@ -80,6 +84,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     runs: deps.runs,
     artifacts,
     events: deps.events,
+    mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
@@ -87,6 +92,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     runs: deps.runs,
     artifacts,
     events: deps.events,
+    mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });

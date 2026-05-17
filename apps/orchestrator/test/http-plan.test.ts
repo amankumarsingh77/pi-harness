@@ -5,12 +5,13 @@ import { createDb } from "@pi-harness/db";
 import { RunStore } from "../src/adapters/run-store.js";
 import { EventStore } from "../src/adapters/event-store.js";
 import { ArtifactsStore } from "../src/agents/artifacts-store.js";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
-import type { ArtifactStatus } from "@pi-harness/shared";
+import type { Artifact, ArtifactKind, ArtifactStatus } from "@pi-harness/shared";
 
 const validScenariosBody = `scenarios:
   - id: s1
@@ -57,6 +58,30 @@ async function makePlanWorktree(
   await git.checkoutLocalBranch(`pi/${taskId}`);
   await mkdir(join(wt, ".harness", taskId), { recursive: true });
   const store = new ArtifactsStore();
+  await store.writeArtifact(wt, taskId, {
+    fm: {
+      task: taskId,
+      kind: "design",
+      parent: null,
+      branch: `pi/${taskId}`,
+      status: "approved",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "test",
+    },
+    body: "# Design\n",
+  });
+  await store.writeArtifact(wt, taskId, {
+    fm: {
+      task: taskId,
+      kind: "spec",
+      parent: "design.md",
+      branch: `pi/${taskId}`,
+      status: "approved",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "test",
+    },
+    body: "# Spec\n",
+  });
   await store.writeArtifact(wt, taskId, {
     fm: {
       task: taskId,
@@ -111,6 +136,45 @@ async function makePlanWorktree(
   await git.raw(["add", "-f", ".harness"]);
   await git.commit("seed plan");
   return wt;
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+class ObservedArtifactsStore extends ArtifactsStore {
+  private activeMutations = 0;
+  maxConcurrentMutations = 0;
+
+  override async archiveCurrentRun(
+    cwd: string,
+    taskId: string,
+    runId: string,
+    phase: "brainstorm" | "plan",
+  ): Promise<void> {
+    return this.observeMutation(() => super.archiveCurrentRun(cwd, taskId, runId, phase));
+  }
+
+  override async applyHumanEdit(
+    cwd: string,
+    taskId: string,
+    kind: ArtifactKind,
+    body: string,
+  ): Promise<{ artifact: Artifact; commitSha: string }> {
+    return this.observeMutation(() => super.applyHumanEdit(cwd, taskId, kind, body));
+  }
+
+  private async observeMutation<T>(fn: () => Promise<T>): Promise<T> {
+    this.activeMutations += 1;
+    this.maxConcurrentMutations = Math.max(this.maxConcurrentMutations, this.activeMutations);
+    await sleep(25);
+    try {
+      return await fn();
+    } finally {
+      this.activeMutations -= 1;
+    }
+  }
 }
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
@@ -243,5 +307,133 @@ describe("http /api/tasks/:id/plan routes", () => {
     const plan = await store.readArtifact(wt, t.id, "plan");
     expect(plan?.fm.status).toBe("human_edited");
     expect(plan?.body.trim()).toBe("# edited\n\nbody".trim());
+  });
+
+  it("plan restart archives only plan-owned artifacts and preserves brainstorm inputs", async () => {
+    const t = await runs.createTask({ title: "restart-plan" });
+    const wt = await makePlanWorktree(t.id, "ready", "ready");
+    await runs.updateTask(t.id, { status: "planning", worktreePath: wt, branchName: `pi/${t.id}` });
+    const activeRun = await runs.createRun({ taskId: t.id, phase: "plan" });
+    const dir = join(wt, ".harness", t.id);
+    await writeFile(join(dir, "plan.jsonl"), "{\"kind\":\"old\"}\n");
+    await writeFile(join(dir, "pi-session-plan.jsonl"), "session\n");
+    await mkdir(join(dir, "research"), { recursive: true });
+    await writeFile(join(dir, "research", "codebase-scout.md"), "# findings\n");
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/plan/restart`,
+      payload: { note: "Keep the plan narrower this time." },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, archivedRunId: activeRun.id });
+    expect(existsSync(join(dir, "design.md"))).toBe(true);
+    expect(existsSync(join(dir, "spec.md"))).toBe(true);
+    expect(existsSync(join(dir, "plan.md"))).toBe(true);
+    expect(existsSync(join(dir, "scenarios.yaml"))).toBe(true);
+    expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(true);
+
+    const archive = join(dir, "runs", activeRun.id);
+    expect(existsSync(join(archive, "design.md"))).toBe(false);
+    expect(existsSync(join(archive, "spec.md"))).toBe(false);
+    expect(existsSync(join(archive, "plan.md"))).toBe(true);
+    expect(existsSync(join(archive, "scenarios.yaml"))).toBe(true);
+    expect(existsSync(join(archive, "blast-radius.yaml"))).toBe(true);
+    expect(existsSync(join(archive, "plan.jsonl"))).toBe(true);
+    expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
+    expect(existsSync(join(archive, "research", "codebase-scout.md"))).toBe(true);
+
+    const store = new ArtifactsStore();
+    const plan = await store.readArtifact(wt, t.id, "plan");
+    const scenarios = await store.readArtifact(wt, t.id, "scenarios");
+    const blastRadius = await store.readArtifact(wt, t.id, "blast-radius");
+    expect(plan?.fm.status).toBe("draft");
+    expect(scenarios?.fm.status).toBe("draft");
+    expect(blastRadius?.fm.status).toBe("draft");
+
+    const newJsonl = await readFile(join(dir, "plan.jsonl"), "utf8");
+    expect(newJsonl).toContain("session_reset");
+    expect(newJsonl).toContain("Keep the plan narrower this time.");
+  });
+
+  it("plan restart without note records no note", async () => {
+    const t = await runs.createTask({ title: "restart-plan-no-note" });
+    const wt = await makePlanWorktree(t.id, "draft", "draft");
+    await runs.updateTask(t.id, { status: "planning", worktreePath: wt, branchName: `pi/${t.id}` });
+    await runs.createRun({ taskId: t.id, phase: "plan" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/plan/restart`,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    const newJsonl = await readFile(join(wt, ".harness", t.id, "plan.jsonl"), "utf8");
+    expect(newJsonl).toContain("session_reset");
+    expect(newJsonl).not.toContain("\"note\"");
+  });
+
+  it("serializes concurrent plan restart requests for the same task", async () => {
+    const observedStore = new ObservedArtifactsStore();
+    const testApp = buildServer({
+      runs,
+      events,
+      runsDir: tmpdir(),
+      cancellation,
+      artifacts: observedStore,
+    });
+    await testApp.ready();
+    try {
+      const t = await runs.createTask({ title: "concurrent-restart" });
+      const wt = await makePlanWorktree(t.id, "draft", "draft");
+      await runs.updateTask(t.id, { status: "planning", worktreePath: wt, branchName: `pi/${t.id}` });
+      await runs.createRun({ taskId: t.id, phase: "plan" });
+
+      const [first, second] = await Promise.all([
+        testApp.inject({ method: "POST", url: `/api/tasks/${t.id}/plan/restart`, payload: {} }),
+        testApp.inject({ method: "POST", url: `/api/tasks/${t.id}/plan/restart`, payload: {} }),
+      ]);
+
+      expect([first.statusCode, second.statusCode].sort()).toEqual([200, 200]);
+      expect(observedStore.maxConcurrentMutations).toBe(1);
+      expect(existsSync(join(wt, ".git", "index.lock"))).toBe(false);
+    } finally {
+      await testApp.close();
+    }
+  });
+
+  it("serializes a plan restart racing with a plan artifact edit", async () => {
+    const observedStore = new ObservedArtifactsStore();
+    const testApp = buildServer({
+      runs,
+      events,
+      runsDir: tmpdir(),
+      cancellation,
+      artifacts: observedStore,
+    });
+    await testApp.ready();
+    try {
+      const t = await runs.createTask({ title: "restart-edit-race" });
+      const wt = await makePlanWorktree(t.id, "draft", "draft");
+      await runs.updateTask(t.id, { status: "planning", worktreePath: wt, branchName: `pi/${t.id}` });
+      await runs.createRun({ taskId: t.id, phase: "plan" });
+
+      const [restart, edit] = await Promise.all([
+        testApp.inject({ method: "POST", url: `/api/tasks/${t.id}/plan/restart`, payload: {} }),
+        testApp.inject({
+          method: "POST",
+          url: `/api/tasks/${t.id}/plan/artifact`,
+          payload: { kind: "plan", body: "# edited during restart\n" },
+        }),
+      ]);
+
+      expect([restart.statusCode, edit.statusCode].sort()).toEqual([200, 200]);
+      expect(observedStore.maxConcurrentMutations).toBe(1);
+      expect(existsSync(join(wt, ".git", "index.lock"))).toBe(false);
+    } finally {
+      await testApp.close();
+    }
   });
 });
