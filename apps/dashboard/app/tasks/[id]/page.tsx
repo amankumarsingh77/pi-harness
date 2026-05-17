@@ -31,6 +31,8 @@ import { orchestrator } from "@/lib/server/api";
  * Workflow decisions remain on phase pages, never on this detail page.
  */
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {

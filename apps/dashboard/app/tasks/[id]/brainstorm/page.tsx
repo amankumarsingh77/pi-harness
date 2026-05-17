@@ -7,6 +7,8 @@ import { BrainstormEventsProvider } from "@/lib/brainstorm-events-context";
 import { orchestrator } from "@/lib/server/api";
 import "./brainstorm.css";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {

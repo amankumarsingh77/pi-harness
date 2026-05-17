@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
 import { Topbar } from "@/components/topbar";
+import { Pill } from "@/components/ui/pill";
+import { EvidenceColumn } from "@/components/verify/evidence-column";
+import { ScreenshotPair } from "@/components/verify/screenshot-pair";
+import { VerdictStrip } from "@/components/verify/verdict-strip";
+import { orchestrator } from "@/lib/server/api";
+import type { ProofReport, PlanArtifact } from "@pi-harness/shared";
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -9,12 +17,6 @@ export async function generateMetadata({
   const { id } = await params;
   return { title: `${id} · verify · pi-harness` };
 }
-import { Pill } from "@/components/ui/pill";
-import { EvidenceColumn } from "@/components/verify/evidence-column";
-import { ScreenshotPair } from "@/components/verify/screenshot-pair";
-import { VerdictStrip } from "@/components/verify/verdict-strip";
-import { orchestrator } from "@/lib/server/api";
-import type { ProofReport, PlanArtifact } from "@pi-harness/shared";
 
 export default async function VerifyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -1,7 +1,9 @@
 {
   "name": "@pi-harness/cli",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "CLI for bootstrapping and running the pi-harness local agent control tower.",
   "private": false,
+  "license": "MIT",
   "type": "module",
   "bin": {
     "pi-harness": "./dist/index.js"
@@ -12,6 +14,25 @@
     "package.json",
     "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "coding-agent",
+    "cli",
+    "orchestration"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
@@ -21,10 +42,10 @@
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
-    "@pi-harness/dashboard": "workspace:*",
-    "@pi-harness/db": "workspace:*",
-    "@pi-harness/orchestrator": "workspace:*",
-    "@pi-harness/shared": "workspace:*"
+    "@pi-harness/dashboard": "workspace:0.1.0-alpha.0",
+    "@pi-harness/db": "workspace:0.1.0-alpha.0",
+    "@pi-harness/orchestrator": "workspace:0.1.0-alpha.0",
+    "@pi-harness/shared": "workspace:0.1.0-alpha.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

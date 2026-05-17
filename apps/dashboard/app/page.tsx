@@ -4,6 +4,7 @@ import { KanbanBoard } from "@/components/kanban/board";
 import { orchestrator } from "@/lib/server/api";
 
 export const metadata: Metadata = { title: "Board · pi-harness" };
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const { tasks, counts, humanInterventionTaskIds, summary } = await orchestrator.listTasks();

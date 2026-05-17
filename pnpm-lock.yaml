@@ -57,7 +57,7 @@ importers:
         specifier: ^0.4.0
         version: 0.4.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@pi-harness/shared':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../packages/shared
       '@tailwindcss/postcss':
         specifier: ^4.0.0-beta.4
@@ -127,16 +127,16 @@ importers:
         specifier: ^10.0.0
         version: 10.1.0
       '@pi-harness/db':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../packages/db
       '@pi-harness/pi-bridge':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../packages/pi-bridge
       '@pi-harness/shared':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../packages/shared
       '@pi-harness/subagents':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../subagents
       '@types/js-yaml':
         specifier: ^4.0.9
@@ -188,16 +188,16 @@ importers:
   packages/cli:
     dependencies:
       '@pi-harness/dashboard':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../apps/dashboard
       '@pi-harness/db':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../db
       '@pi-harness/orchestrator':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../../apps/orchestrator
       '@pi-harness/shared':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../shared
     devDependencies:
       '@types/node':
@@ -276,7 +276,7 @@ importers:
   subagents:
     dependencies:
       '@pi-harness/shared':
-        specifier: workspace:*
+        specifier: workspace:0.1.0-alpha.0
         version: link:../packages/shared
     devDependencies:
       typescript:
