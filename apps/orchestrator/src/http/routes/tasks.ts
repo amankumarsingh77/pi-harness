@@ -7,6 +7,7 @@ import type { EventStore } from "../../adapters/event-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
+import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import { transition } from "../../domain/state-machine.js";
 import { CreateTaskSchema, TransitionSchema, UpdateTaskSchema } from "../schemas.js";
 import { ValidationError } from "../../domain/errors.js";
@@ -22,9 +23,10 @@ export function registerTaskRoutes(
     artifacts: ArtifactsStore;
     scheduler?: TaskScheduler;
     cancellation?: CancellationRegistry;
+    mutationLock: TaskMutationLock;
   },
 ): void {
-  const { runs, events: eventStore, artifacts, scheduler, cancellation } = deps;
+  const { runs, events: eventStore, artifacts, scheduler, cancellation, mutationLock } = deps;
 
   app.get("/api/tasks", async () => {
     const [tasks, counts, activeRunIds, costUsd, lastEventAt] = await Promise.all([
@@ -129,6 +131,7 @@ export function registerTaskRoutes(
         throw e;
       }
 
+      return mutationLock.runExclusive(req.params.id, async () => {
       const task = await runs.getTask(req.params.id);
 
       // Brainstorm gate enforcement: approve / request-changes are only
@@ -366,6 +369,7 @@ export function registerTaskRoutes(
       // Tests that build the server without a scheduler skip this.
       if (shouldEnqueue) scheduler?.enqueue(task.id);
       return { task: updated };
+      });
     },
   );
 }

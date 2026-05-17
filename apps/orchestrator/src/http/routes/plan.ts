@@ -5,6 +5,7 @@ import type { RunStore } from "../../adapters/run-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
+import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import { JsonlWriter, readJsonl } from "../../adapters/jsonl-writer.js";
 import { PlanEventBus } from "../../agents/plan-event-bus.js";
@@ -38,6 +39,7 @@ export function registerPlanRoutes(
     events?: EventStore;
     scheduler?: TaskScheduler;
     cancellation?: CancellationRegistry;
+    mutationLock: TaskMutationLock;
   },
 ): void {
   app.get<{ Params: { id: string } }>("/api/tasks/:id/plan", async (req) => {
@@ -145,63 +147,65 @@ export function registerPlanRoutes(
       }
       throw e;
     }
-    const task = await deps.runs.getTask(req.params.id);
-    if (task.status !== "planning") {
-      reply.code(409);
-      return {
-        error: "not_planning",
-        message: `task is in ${task.status}; edits only apply during planning`,
-      };
-    }
-    if (!task.worktreePath) {
-      reply.code(409);
-      return { error: "no_worktree", message: "task has no worktree yet" };
-    }
+    return deps.mutationLock.runExclusive(req.params.id, async () => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (task.status !== "planning") {
+        reply.code(409);
+        return {
+          error: "not_planning",
+          message: `task is in ${task.status}; edits only apply during planning`,
+        };
+      }
+      if (!task.worktreePath) {
+        reply.code(409);
+        return { error: "no_worktree", message: "task has no worktree yet" };
+      }
 
-    const prior = await deps.artifacts.readArtifact(task.worktreePath, task.id, parsed.kind);
-    const sizeDelta = parsed.body.length - (prior?.body.length ?? 0);
+      const prior = await deps.artifacts.readArtifact(task.worktreePath, task.id, parsed.kind);
+      const sizeDelta = parsed.body.length - (prior?.body.length ?? 0);
 
-    const { commitSha } = await deps.artifacts.applyHumanEdit(
-      task.worktreePath,
-      task.id,
-      parsed.kind,
-      parsed.body,
-    );
-
-    const activeRun = deps.events
-      ? await deps.runs.findActiveRun(task.id, "plan")
-      : null;
-    if (activeRun && deps.events) {
-      const jsonl = new JsonlWriter(
-        join(task.worktreePath, ".harness", task.id, "plan.jsonl"),
+      const { commitSha } = await deps.artifacts.applyHumanEdit(
+        task.worktreePath,
+        task.id,
+        parsed.kind,
+        parsed.body,
       );
-      const bus = new PlanEventBus({
-        eventStore: deps.events,
-        jsonl,
-        runId: activeRun.id,
-        taskId: task.id,
-      });
-      await bus.publish({
-        kind: "plan_artifact_edited",
-        artifact: parsed.kind,
-        commitSha,
-        sizeDelta,
-      });
-    } else {
-      const jsonl = new JsonlWriter(
-        join(task.worktreePath, ".harness", task.id, "plan.jsonl"),
-      );
-      await jsonl.append({
-        ts: new Date().toISOString(),
-        kind: "plan_artifact_edited",
-        artifact: parsed.kind,
-        commitSha,
-        sizeDelta,
-      });
-    }
 
-    deps.scheduler?.enqueue(task.id);
-    return { ok: true, commitSha };
+      const activeRun = deps.events
+        ? await deps.runs.findActiveRun(task.id, "plan")
+        : null;
+      if (activeRun && deps.events) {
+        const jsonl = new JsonlWriter(
+          join(task.worktreePath, ".harness", task.id, "plan.jsonl"),
+        );
+        const bus = new PlanEventBus({
+          eventStore: deps.events,
+          jsonl,
+          runId: activeRun.id,
+          taskId: task.id,
+        });
+        await bus.publish({
+          kind: "plan_artifact_edited",
+          artifact: parsed.kind,
+          commitSha,
+          sizeDelta,
+        });
+      } else {
+        const jsonl = new JsonlWriter(
+          join(task.worktreePath, ".harness", task.id, "plan.jsonl"),
+        );
+        await jsonl.append({
+          ts: new Date().toISOString(),
+          kind: "plan_artifact_edited",
+          artifact: parsed.kind,
+          commitSha,
+          sizeDelta,
+        });
+      }
+
+      deps.scheduler?.enqueue(task.id);
+      return { ok: true, commitSha };
+    });
   });
 
   // POST /api/tasks/:id/plan/restart
@@ -221,71 +225,73 @@ export function registerPlanRoutes(
       }
       throw e;
     }
-    const task = await deps.runs.getTask(req.params.id);
-    if (task.status !== "planning") {
-      reply.code(409);
-      return {
-        error: "not_planning",
-        message: `task is in ${task.status}; restart only applies during planning`,
-      };
-    }
-    if (!task.worktreePath) {
-      reply.code(409);
-      return { error: "no_worktree", message: "task has no worktree yet" };
-    }
+    return deps.mutationLock.runExclusive(req.params.id, async () => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (task.status !== "planning") {
+        reply.code(409);
+        return {
+          error: "not_planning",
+          message: `task is in ${task.status}; restart only applies during planning`,
+        };
+      }
+      if (!task.worktreePath) {
+        reply.code(409);
+        return { error: "no_worktree", message: "task has no worktree yet" };
+      }
 
-    deps.cancellation?.abort(task.id);
-    if (deps.scheduler) {
-      await deps.scheduler.cancelAndDrain(task.id);
-    }
+      deps.cancellation?.abort(task.id);
+      if (deps.scheduler) {
+        await deps.scheduler.cancelAndDrain(task.id);
+      }
 
-    const restartRun =
-      (await deps.runs.findActiveRun(task.id, "plan")) ??
-      (await deps.runs.findLatestRun(task.id, "plan", "cancelled"));
-    if (!restartRun) {
-      reply.code(409);
-      return {
-        error: "no_active_run",
-        message: "no active or cancelled plan run to restart",
-      };
-    }
-    if (restartRun.status !== "cancelled") {
-      await deps.runs.updateRun(restartRun.id, {
-        status: "cancelled",
-        endedAt: new Date(),
+      const restartRun =
+        (await deps.runs.findActiveRun(task.id, "plan")) ??
+        (await deps.runs.findLatestRun(task.id, "plan", "cancelled"));
+      if (!restartRun) {
+        reply.code(409);
+        return {
+          error: "no_active_run",
+          message: "no active or cancelled plan run to restart",
+        };
+      }
+      if (restartRun.status !== "cancelled") {
+        await deps.runs.updateRun(restartRun.id, {
+          status: "cancelled",
+          endedAt: new Date(),
+        });
+      }
+
+      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id, "plan");
+
+      const branch = task.branchName ?? `pi/${task.id}`;
+      await scaffoldPlan({
+        cwd: task.worktreePath,
+        taskId: task.id,
+        branch,
       });
-    }
 
-    await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id);
+      const newJsonlPath = join(task.worktreePath, ".harness", task.id, "plan.jsonl");
+      const w = new JsonlWriter(newJsonlPath);
+      const note = parsed.note?.trim();
+      await w.append({
+        ts: new Date().toISOString(),
+        kind: "plan_system",
+        systemKind: "session_reset",
+        data: {
+          archivedRunId: restartRun.id,
+          ...(note ? { note } : {}),
+        },
+      });
 
-    const branch = task.branchName ?? `pi/${task.id}`;
-    await scaffoldPlan({
-      cwd: task.worktreePath,
-      taskId: task.id,
-      branch,
-    });
+      const newRun = await deps.runs.createRun({ taskId: task.id, phase: "plan" });
+      deps.scheduler?.enqueue(task.id);
 
-    const newJsonlPath = join(task.worktreePath, ".harness", task.id, "plan.jsonl");
-    const w = new JsonlWriter(newJsonlPath);
-    const note = parsed.note?.trim();
-    await w.append({
-      ts: new Date().toISOString(),
-      kind: "plan_system",
-      systemKind: "session_reset",
-      data: {
+      return {
+        ok: true,
         archivedRunId: restartRun.id,
-        ...(note ? { note } : {}),
-      },
+        newRunId: newRun.id,
+      };
     });
-
-    const newRun = await deps.runs.createRun({ taskId: task.id, phase: "plan" });
-    deps.scheduler?.enqueue(task.id);
-
-    return {
-      ok: true,
-      archivedRunId: restartRun.id,
-      newRunId: newRun.id,
-    };
   });
 }
 
