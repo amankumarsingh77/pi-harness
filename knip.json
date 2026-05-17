@@ -1,0 +1,55 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "apps/dashboard/app/**/{page,layout,loading,error,not-found,route}.{ts,tsx}",
+    "apps/dashboard/next.config.mjs",
+    "apps/dashboard/playwright.config.ts",
+    "apps/dashboard/vitest.config.ts",
+    "apps/dashboard/test/setup.ts",
+    "apps/dashboard/e2e/**/*.ts",
+    "apps/orchestrator/src/index.ts",
+    "apps/orchestrator/vitest.config.ts",
+    "apps/orchestrator/vitest.live.config.ts",
+    "packages/db/drizzle.config.ts",
+    "packages/db/vitest.config.ts",
+    "packages/db/src/index.ts",
+    "packages/pi-bridge/src/index.ts",
+    "packages/shared/src/index.ts",
+    "subagents/index.ts",
+    "subagents/registry.ts"
+  ],
+  "project": [
+    "apps/**/*.{ts,tsx}",
+    "packages/**/*.{ts,tsx}",
+    "subagents/**/*.ts"
+  ],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.turbo/**",
+    "**/.worktrees/**",
+    "**/.harness/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/.reports/**",
+    "**/test-results/**",
+    "**/*.d.ts",
+    "**/*.tsbuildinfo",
+    "subagents/_vendored/**",
+    "packages/db/migrations/**"
+  ],
+  "ignoreBinaries": ["podman"],
+  "ignoreDependencies": [
+    "@pi-harness/dashboard",
+    "@pi-harness/orchestrator",
+    "eslint-plugin-react",
+    "eslint-plugin-react-hooks",
+    "pino-pretty"
+  ],
+  "ignoreIssues": {
+    "apps/dashboard/components/kanban/drag-types.ts": ["exports"],
+    "apps/orchestrator/src/agents/subagent-footer.ts": ["exports"]
+  },
+  "treatConfigHintsAsErrors": false,
+  "ignoreExportsUsedInFile": true
+}

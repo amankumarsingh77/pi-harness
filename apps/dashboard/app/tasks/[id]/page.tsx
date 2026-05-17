@@ -1,20 +1,28 @@
 import type { Metadata } from "next";
+import {
+  deriveTaskIntervention,
+} from "@/components/task-detail/task-intervention";
+import type { Task } from "@pi-harness/shared";
 import { notFound } from "next/navigation";
 import { ApiError } from "@/lib/api";
 import { orchestrator } from "@/lib/server/api";
 import { TaskDetailLive } from "@/components/task-detail/task-detail-live";
 
 /**
- * Task detail page. Layout (top → bottom):
+ * Task detail page. Layout (top → bottom), aligned to:
+ * docs/mocks/task-detail-focused-command-2026-05-16.html
  *
  *   topbar           shared with kanban
- *   head             breadcrumb + title + action row
- *   phase-rail       7-step rail (steps are clickable into sub-pages)
- *   body grid        live agent log | run-context sidebar
+ *   focused shell    breadcrumb + title + metadata + read-only inspector controls
+ *   intervention     optional thin link to the phase page that needs input
+ *   phase strip      compact 7-step phase surface
+ *   panels           latest activity | task facts
  *
- * `?run=<id>` selects which run's events to display in the agent log.
- * Without it, the latest run is shown.
+ * `?run=<id>` selects which run is inspected in read-only drawers/modals.
+ * Workflow decisions remain on phase pages, never on this detail page.
  */
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -45,18 +53,22 @@ export default async function TaskDetailPage({
     (requestedRunId ? runs.find((r) => r.id === requestedRunId) : undefined) ??
     runs.at(-1);
 
-  // Parallel fetch: events + files for the selected run. Both depend on the
-  // selectedRun id resolved above, so they share the waterfall but run
-  // concurrently against each other.
-  const [events, files] = selectedRun
-    ? await Promise.all([
-        orchestrator.listEvents(selectedRun.id).then((r) => r.events),
-        orchestrator
-          .listRunFiles(selectedRun.id)
-          .then((r) => r.files)
-          .catch(() => []),
-      ])
-    : [[], []];
+  const eventsPromise = selectedRun
+    ? orchestrator.listEvents(selectedRun.id).then((r) => r.events)
+    : Promise.resolve([]);
+  const filesPromise = selectedRun
+    ? orchestrator
+        .listRunFiles(selectedRun.id)
+        .then((r) => r.files)
+        .catch(() => [])
+    : Promise.resolve([]);
+  const interventionPromise = getTaskIntervention(task);
+
+  const [events, files, intervention] = await Promise.all([
+    eventsPromise,
+    filesPromise,
+    interventionPromise,
+  ]);
 
   return (
     <TaskDetailLive
@@ -65,6 +77,36 @@ export default async function TaskDetailPage({
       initialTask={taskResult}
       initialEvents={events}
       initialFiles={files}
+      initialIntervention={intervention}
     />
   );
+}
+
+async function getTaskIntervention(task: Task) {
+  if (task.status === "brainstorming") {
+    const bundle = await optionalNotFound(orchestrator.getBrainstormBundle(task.id));
+    return deriveTaskIntervention({
+      task,
+      ...(bundle ? { brainstorm: { gate: bundle.gate, events: bundle.events } } : {}),
+    });
+  }
+
+  if (task.status === "planning") {
+    const bundle = await optionalNotFound(orchestrator.getPlanBundle(task.id));
+    return deriveTaskIntervention({
+      task,
+      ...(bundle ? { plan: { gate: bundle.gate } } : {}),
+    });
+  }
+
+  return deriveTaskIntervention({ task });
+}
+
+async function optionalNotFound<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }

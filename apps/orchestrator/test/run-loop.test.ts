@@ -14,12 +14,13 @@ vi.mock("../src/runner/phase-prompts.js", () => ({
 }));
 
 import { runLoop } from "../src/runner/run-loop.js";
-import { runPhase } from "../src/runner/phase-prompts.js";
+import { runPhase, type PhaseDeps } from "../src/runner/phase-prompts.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
+import type { ArtifactsStore } from "../src/agents/artifacts-store.js";
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
-const phaseDepsBase: any = {
+const phaseDepsBase: PhaseDeps = {
   cwd: "/tmp",
   onEvent: () => {},
   createAgentSession: vi.fn(),
@@ -27,8 +28,8 @@ const phaseDepsBase: any = {
   // post-phase to compute the brainstorm gate. Stub the methods it touches.
   store: {
     readArtifact: vi.fn(async () => null),
-  } as any,
-  eventStore: { append: vi.fn(async () => {}) } as any,
+  } as ArtifactsStore,
+  eventStore: { append: vi.fn(async () => {}) } as EventStore,
   exec: vi.fn(),
 };
 
@@ -97,15 +98,15 @@ describe("runLoop", () => {
     const t = await runs.createTask({ title: "ready" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
 
-    const readyDeps = {
+    const readyDeps: PhaseDeps = {
       ...phaseDepsBase,
       store: {
         readArtifact: vi.fn(async () => ({
           fm: { status: "ready" },
           body: "",
         })),
-      },
-    } as any;
+      } as ArtifactsStore,
+    };
 
     vi.mocked(runPhase).mockResolvedValue({
       ok: true,

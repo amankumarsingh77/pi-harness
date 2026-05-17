@@ -1,10 +1,36 @@
 {
   "name": "@pi-harness/pi-bridge",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
+  "description": "Provider and session bridge between pi-harness and the pi coding-agent SDK.",
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "packages/pi-bridge"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "coding-agent",
+    "llm",
+    "orchestration"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,9 +43,10 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'no lint configured'"
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.74.0",

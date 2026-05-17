@@ -3,6 +3,7 @@ import { BoardLive } from "@/components/kanban/board-live";
 import { orchestrator } from "@/lib/server/api";
 
 export const metadata: Metadata = { title: "Board · pi-harness" };
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const initialData = await orchestrator.listTasks();

@@ -15,14 +15,25 @@ describe("schema round-trip", () => {
   it("inserts and reads a task", async () => {
     const [t] = await db
       .insert(tasks)
-      .values({ title: "test", description: "desc" })
+      .values({ title: "test", description: "desc", priority: "urgent", tags: ["bug-fix"] })
       .returning();
     expect(t).toBeDefined();
     expect(t!.status).toBe("backlog");
+    expect(t!.priority).toBe("urgent");
+    expect(t!.tags).toEqual(["bug-fix"]);
 
     const [fetched] = await db.select().from(tasks).where(eq(tasks.id, t!.id));
     expect(fetched!.title).toBe("test");
+    expect(fetched!.priority).toBe("urgent");
+    expect(fetched!.tags).toEqual(["bug-fix"]);
 
+    await db.delete(tasks).where(eq(tasks.id, t!.id));
+  });
+
+  it("defaults board metadata", async () => {
+    const [t] = await db.insert(tasks).values({ title: "default-meta" }).returning();
+    expect(t!.priority).toBe("none");
+    expect(t!.tags).toEqual([]);
     await db.delete(tasks).where(eq(tasks.id, t!.id));
   });
 
@@ -33,7 +44,7 @@ describe("schema round-trip", () => {
   });
 
   it("round-trips phase_models with a partial brainstorm override", async () => {
-    const overrides = { brainstorm: { thinkingLevel: "high", maxTurns: 50 } };
+    const overrides = { brainstorm: { thinkingLevel: "high" } };
     const [t] = await db
       .insert(tasks)
       .values({ title: "pm-override", phaseModels: overrides })

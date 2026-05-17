@@ -8,28 +8,23 @@ import {
   type SubagentMeta,
   type SubagentRole,
   type BuiltinTool,
+  type CustomTool,
 } from "./metadata.js";
 
 export { PREFLIGHT_SUBAGENTS, RETIRED_PROMPTS };
-export type { SubagentRole, BuiltinTool };
+export type { SubagentRole, BuiltinTool, CustomTool };
 
 // Anchor relative to this module's location, but tolerate dist mode. The
-// package compiles index.ts + registry.ts into subagents/dist/ — the .md
-// prompt files stay in subagents/_vendored/ and subagents/ours/ (not copied).
-// So we walk up from import.meta.url until we find a directory that has
-// _vendored/ and ours/ as siblings of the current location.
-// Walk up from this module to find the subagents root (where _vendored/ and
-// ours/ live as siblings). Returns null if not found — that's the case when
-// the package is consumed by a deployed dashboard build that doesn't ship
-// the .md prompt files. Consumers that need the paths (orchestrator) check
-// promptPath; consumers that need only metadata (dashboard) don't.
+// package compiles index.ts + registry.ts into subagents/dist/; prompt
+// markdown stays under subagents/prompts/ and is read directly by the
+// orchestrator in source/worktree deployments.
+// Returns null if the source prompt tree is not on disk. Consumers that need
+// promptPath validate it; metadata-only consumers can still import registry
+// data in deployed builds that do not ship prompt markdown.
 function findSubagentsRoot(): string | null {
   let here = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 6; i += 1) {
-    if (
-      existsSync(resolve(here, "_vendored")) &&
-      existsSync(resolve(here, "ours"))
-    ) {
+    if (existsSync(resolve(here, "prompts"))) {
       return here;
     }
     const parent = dirname(here);
@@ -40,24 +35,38 @@ function findSubagentsRoot(): string | null {
 }
 
 const SUBAGENTS_ROOT = findSubagentsRoot();
-export const VENDORED_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "_vendored") : "";
-export const OURS_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "ours") : "";
+export const PROMPTS_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "prompts") : "";
+export const PHASE_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "phase") : "";
+export const RESEARCH_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "research") : "";
+export const AUDIT_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "audit") : "";
+export const RETIRED_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "retired") : "";
 
 export type SubagentDef = Omit<SubagentMeta, "promptDir" | "promptFile"> & {
   promptPath: string;
 };
 
 function withPromptPath(meta: SubagentMeta): SubagentDef {
-  const dir = meta.promptDir === "ours" ? OURS_DIR : VENDORED_DIR;
-  const { promptDir: _d, promptFile, ...rest } = meta;
+  const dir = promptDir(meta.promptDir);
+  const { promptDir: _promptDir, promptFile, ...rest } = meta;
   return { ...rest, promptPath: resolve(dir, promptFile) };
+}
+
+function promptDir(dir: SubagentMeta["promptDir"]): string {
+  switch (dir) {
+    case "phase":
+      return PHASE_PROMPTS_DIR;
+    case "research":
+      return RESEARCH_PROMPTS_DIR;
+    case "audit":
+      return AUDIT_PROMPTS_DIR;
+  }
 }
 
 // Single source of truth for prompt-path-resolved registry. The metadata
 // itself lives in `metadata.ts` so browser bundles can import names/roles
 // without dragging in node:fs.
 export const SUBAGENTS: Record<string, SubagentDef> = Object.fromEntries(
-  Object.entries(SUBAGENT_META).map(([k, m]) => [k, withPromptPath(m)]),
+  Object.entries(SUBAGENT_META).map(([key, meta]) => [key, withPromptPath(meta)]),
 );
 
 export function getSubagent(name: string): SubagentDef {

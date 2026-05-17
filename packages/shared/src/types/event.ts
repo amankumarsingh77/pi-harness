@@ -15,6 +15,47 @@ export type BrainstormOption = {
   description?: string;
 };
 
+export type BrainstormMockPage = {
+  pageId: string;
+  title: string;
+  summary?: string;
+  htmlPath: string;
+};
+
+export type BrainstormMockMiniature =
+  | {
+      kind: "rows";
+      rows: ReadonlyArray<{
+        status: "pass" | "fail" | "muted";
+        label: string;
+        sub?: string;
+        action?: string;
+      }>;
+    }
+  | {
+      kind: "grid+drawer";
+      cells: ReadonlyArray<{ status: "pass" | "fail" }>;
+      drawerTitle: string;
+      diffLines: ReadonlyArray<{ kind: "plus" | "minus" }>;
+      confirm: string;
+    };
+
+export type BrainstormMock = {
+  mockId: string;
+  title: string;
+  summary: string;
+  recommended: boolean;
+  createdAt: string;
+  derivedFrom?: string;
+  miniature?: BrainstormMockMiniature;
+  pages: BrainstormMockPage[];
+};
+
+export type BrainstormMockManifest = {
+  mocks: BrainstormMock[];
+  selectedMockId: string | null;
+};
+
 export type AgentEvent =
   | (AgentEventBase & { kind: "phase_started"; phase: string })
   | (AgentEventBase & { kind: "phase_ended"; phase: string; status: "succeeded" | "failed" | "cancelled" })
@@ -113,6 +154,27 @@ export type AgentEvent =
       message: string;
       inReplyToNudgeId?: string;
     })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_proposed";
+      mockSetId?: string;
+      mock: BrainstormMock;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_revised";
+      mockSetId?: string;
+      mock: BrainstormMock;
+      editRequestId: string;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_selected";
+      mockId: string;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_mock_edit_requested";
+      requestId: string;
+      mockId: string;
+      comment: string;
+    })
   // Plan-phase events. Mirrored to <worktree>/.harness/<taskId>/plan.jsonl.
   // The plan phase has two stages — a parallel preflight of 8 research
   // subagents, then a single planner pi session — and these variants capture
@@ -123,6 +185,7 @@ export type AgentEvent =
         | "preflight_started"
         | "preflight_complete"
         | "planner_started"
+        | "planner_turn_completed"
         | "status_changed"
         | "blocked"
         | "session_reset";
@@ -136,11 +199,13 @@ export type AgentEvent =
       kind: "plan_subagent_started";
       subagent: string;
       sessionId: string;
+      attemptId?: string;
     })
   | (AgentEventBase & {
       kind: "plan_subagent_ended";
       subagent: string;
       sessionId: string;
+      attemptId?: string;
       ok: boolean;
       durationMs: number;
       costUsd: number;

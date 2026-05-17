@@ -1,4 +1,13 @@
-import type { Task, Run, AgentEvent, Workflow, Artifact } from "@pi-harness/shared";
+import type {
+  DashboardSummary,
+  Task,
+  Run,
+  AgentEvent,
+  Workflow,
+  Artifact,
+  BrainstormMock,
+  BrainstormMockManifest,
+} from "@pi-harness/shared";
 
 // "awaiting_user" exactly when the artifacts on disk are status: ready AND
 // no brainstorm_revision_requested event has been filed since the last
@@ -14,6 +23,8 @@ export type BrainstormBundle = {
   events: BrainstormJsonlEvent[];
 };
 
+export type BrainstormMockBundle = BrainstormMockManifest;
+
 // Plan-phase counterpart to BrainstormBundle. Same gate semantics; research
 // is keyed by subagent name (one of the 5 preflight + claim-verifier).
 export type PlanGate = "running" | "awaiting_user";
@@ -23,6 +34,7 @@ export type PlanBundle = {
   status: Task["status"];
   plan: Artifact | null;
   scenarios: Artifact | null;
+  blastRadius: Artifact | null;
   research: Record<string, string | null>;
   events: PlanJsonlEvent[];
 };
@@ -35,17 +47,25 @@ export type PlanJsonlEvent =
         | "preflight_started"
         | "preflight_complete"
         | "planner_started"
+        | "planner_turn_completed"
         | "status_changed"
         | "blocked"
         | "session_reset";
       data?: Record<string, unknown>;
     }
-  | { kind: "plan_subagent_started"; ts: string; subagent: string; sessionId: string }
+  | {
+      kind: "plan_subagent_started";
+      ts: string;
+      subagent: string;
+      sessionId: string;
+      attemptId?: string;
+    }
   | {
       kind: "plan_subagent_ended";
       ts: string;
       subagent: string;
       sessionId: string;
+      attemptId?: string;
       ok: boolean;
       durationMs: number;
       costUsd: number;
@@ -144,6 +164,31 @@ export type BrainstormJsonlEvent =
       replyId: string;
       message: string;
       inReplyToNudgeId?: string;
+    }
+  | {
+      kind: "brainstorm_mock_proposed";
+      ts: string;
+      mockSetId?: string;
+      mock: BrainstormMock;
+    }
+  | {
+      kind: "brainstorm_mock_revised";
+      ts: string;
+      mockSetId?: string;
+      mock: BrainstormMock;
+      editRequestId: string;
+    }
+  | {
+      kind: "brainstorm_mock_selected";
+      ts: string;
+      mockId: string;
+    }
+  | {
+      kind: "brainstorm_mock_edit_requested";
+      ts: string;
+      requestId: string;
+      mockId: string;
+      comment: string;
     };
 
 export class ApiError extends Error {
@@ -166,10 +211,13 @@ export type RunFile = {
 };
 
 export type Api = {
-  listTasks: () => Promise<{ tasks: Task[]; counts: Record<string, number> }>;
+  listTasks: () => Promise<TaskListResult>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
-  createTask: (input: { title: string; description?: string }) => Promise<Task>;
+  createTask: (
+    input: Pick<Task, "title"> &
+      Partial<Pick<Task, "description" | "priority" | "tags">>,
+  ) => Promise<Task>;
   transitionTask: (
     id: string,
     action:
@@ -178,6 +226,7 @@ export type Api = {
       | { type: "user_request_brainstorm_changes"; comment: string }
       | { type: "user_approve_plan" }
       | { type: "user_request_plan_changes"; comment: string }
+      | { type: "user_cancel_current_phase" }
       | { type: "user_cancel" }
       | { type: "user_retry_failed" },
   ) => Promise<{ task: Task }>;
@@ -211,6 +260,21 @@ export type Api = {
     taskId: string,
     payload: { kind: "design" | "spec"; body: string },
   ) => Promise<{ ok: true; commitSha: string }>;
+  getBrainstormMocks: (taskId: string) => Promise<BrainstormMockBundle>;
+  getBrainstormMockPageHtml: (
+    taskId: string,
+    mockId: string,
+    pageId: string,
+  ) => Promise<string>;
+  submitBrainstormMockEdit: (
+    taskId: string,
+    mockId: string,
+    payload: { comment: string },
+  ) => Promise<{ ok: true; requestId: string }>;
+  selectBrainstormMock: (
+    taskId: string,
+    mockId: string,
+  ) => Promise<{ ok: true; mockId: string }>;
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
   getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
   submitPlanArtifactEdit: (
@@ -221,6 +285,13 @@ export type Api = {
     taskId: string,
     payload: { note?: string },
   ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
+};
+
+export type TaskListResult = {
+  readonly tasks: Task[];
+  readonly counts: Record<string, number>;
+  readonly humanInterventionTaskIds: readonly string[];
+  readonly summary: DashboardSummary;
 };
 
 export type BrainstormDiff = {
@@ -247,8 +318,13 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
 
   return {
     listTasks: async () => {
-      const r = await send<{ tasks: Task[]; counts: Record<string, number> }>("/api/tasks");
-      return { tasks: r.tasks.map(hydrateTask), counts: r.counts };
+      const r = await send<TaskListResult>("/api/tasks");
+      return {
+        tasks: r.tasks.map(hydrateTask),
+        counts: r.counts,
+        humanInterventionTaskIds: r.humanInterventionTaskIds,
+        summary: hydrateDashboardSummary(r.summary),
+      };
     },
     getTask: async (id) => {
       const r = await send<{ task: Task; runs: Run[] }>(`/api/tasks/${id}`);
@@ -300,6 +376,34 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
           body: JSON.stringify(payload),
         },
       ),
+    getBrainstormMocks: (taskId) =>
+      send<BrainstormMockBundle>(`/api/tasks/${taskId}/brainstorm/mocks`),
+    getBrainstormMockPageHtml: async (taskId, mockId, pageId) => {
+      const res = await f(
+        url(`/api/tasks/${taskId}/brainstorm/mocks/${mockId}/pages/${pageId}/html`),
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        throw new ApiError(res.status, body.message ?? res.statusText, body.error);
+      }
+      return res.text();
+    },
+    submitBrainstormMockEdit: (taskId, mockId, payload) =>
+      send<{ ok: true; requestId: string }>(
+        `/api/tasks/${taskId}/brainstorm/mocks/${mockId}/edit`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+    selectBrainstormMock: (taskId, mockId) =>
+      send<{ ok: true; mockId: string }>(
+        `/api/tasks/${taskId}/brainstorm/mocks/${mockId}/select`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+      ),
     getPlanBundle: (taskId) => send<PlanBundle>(`/api/tasks/${taskId}/plan`),
     getPlanDiff: (taskId, kind) =>
       send<PlanDiff>(`/api/tasks/${taskId}/plan/diff?kind=${kind}`),
@@ -329,7 +433,13 @@ function toDate(v: unknown): Date {
 }
 
 function hydrateTask(t: Task): Task {
-  return { ...t, createdAt: toDate(t.createdAt), updatedAt: toDate(t.updatedAt) };
+  return {
+    ...t,
+    priority: t.priority ?? "none",
+    tags: t.tags ?? [],
+    createdAt: toDate(t.createdAt),
+    updatedAt: toDate(t.updatedAt),
+  };
 }
 
 function hydrateRun(r: Run): Run {
@@ -342,4 +452,11 @@ function hydrateRun(r: Run): Run {
 
 function hydrateEvent(e: AgentEvent): AgentEvent {
   return { ...e, ts: toDate(e.ts) };
+}
+
+function hydrateDashboardSummary(summary: DashboardSummary): DashboardSummary {
+  return {
+    ...summary,
+    lastEventAt: summary.lastEventAt ? toDate(summary.lastEventAt) : null,
+  };
 }

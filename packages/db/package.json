@@ -1,23 +1,52 @@
 {
   "name": "@pi-harness/db",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
+  "description": "Drizzle schema and migrations for the pi-harness Postgres database.",
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "packages/db"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "drizzle",
+    "postgres",
+    "orchestration"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'no lint configured'",
+    "lint": "eslint . --max-warnings=0",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@pi-harness/shared": "workspace:*",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.36.0",
     "postgres": "^3.4.0"

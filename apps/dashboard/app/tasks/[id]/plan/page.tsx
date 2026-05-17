@@ -5,6 +5,8 @@ import { orchestrator } from "@/lib/server/api";
 import { PlanEventsProvider } from "@/lib/plan-events-context";
 import { PlanPageLive } from "@/components/plan/plan-page-live";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {

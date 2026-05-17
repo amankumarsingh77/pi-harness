@@ -11,17 +11,17 @@ let scratch: string;
 let cwd: string;
 let store: ArtifactsStore;
 
-const seedArtifact = (kind: "plan" | "scenarios", status: string): Artifact => ({
+const seedArtifact = (kind: "plan" | "scenarios" | "blast-radius", status: string): Artifact => ({
   fm: {
     task: "T-1",
     kind,
-    parent: kind === "plan" ? "design.md" : "plan.md",
+    parent: kind === "plan" ? "design.md" : kind === "scenarios" ? "plan.md" : "spec.md",
     status: status as never,
     branch: "pi/T-1",
     last_updated: new Date().toISOString(),
     last_updated_by: "test",
   },
-  body: kind === "plan" ? "# Plan\n" : "scenarios: []\n",
+  body: kind === "plan" ? "# Plan\n" : kind === "scenarios" ? "scenarios: []\n" : "items: []\n",
 });
 
 async function appendJsonl(line: object) {
@@ -56,18 +56,21 @@ describe("derivePlanGate", () => {
   it("returns running when both artifacts are draft", async () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "draft"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "draft"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "draft"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("running");
   });
 
-  it("returns running when only one artifact is ready", async () => {
-    await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
-    await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "draft"));
-    expect(await derivePlanGate(cwd, "T-1", store)).toBe("running");
-  });
-
-  it("returns awaiting_user when both ready and no revision filed", async () => {
+  it("returns running when any artifact is not ready", async () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "draft"));
+    expect(await derivePlanGate(cwd, "T-1", store)).toBe("running");
+  });
+
+  it("returns awaiting_user when all plan artifacts are ready and no revision filed", async () => {
+    await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
     await appendJsonl({
       ts: new Date().toISOString(),
       kind: "plan_system",
@@ -80,6 +83,7 @@ describe("derivePlanGate", () => {
   it("returns running when revision postdates last ready event", async () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
     await appendJsonl({
       ts: "2026-05-10T10:00:00.000Z",
       kind: "plan_system",
@@ -97,12 +101,14 @@ describe("derivePlanGate", () => {
   it("returns awaiting_user when artifacts ready but no JSONL events (test fixtures)", async () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "ready"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "ready"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("awaiting_user");
   });
 
   it("returns awaiting_user with human_edited and approved statuses too", async () => {
     await store.writeArtifact(cwd, "T-1", seedArtifact("plan", "human_edited"));
     await store.writeArtifact(cwd, "T-1", seedArtifact("scenarios", "approved"));
+    await store.writeArtifact(cwd, "T-1", seedArtifact("blast-radius", "ready"));
     expect(await derivePlanGate(cwd, "T-1", store)).toBe("awaiting_user");
   });
 });

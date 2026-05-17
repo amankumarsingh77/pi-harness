@@ -1,6 +1,5 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
-import type { Logger as PinoLogger } from "pino";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
@@ -9,6 +8,7 @@ import { DashboardEventBus } from "../adapters/dashboard-event-bus.js";
 import type { DashboardEventBus as DashboardEventBusType } from "../adapters/dashboard-event-bus.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
+import { TaskMutationLock } from "../runner/task-mutation-lock.js";
 import { isHarnessError } from "../domain/errors.js";
 import { registerHealth } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
@@ -32,10 +32,11 @@ export type ServerDeps = {
   // Optional in tests. user_cancel uses this to abort an in-flight phase
   // driver before settling its run rows.
   cancellation?: CancellationRegistry;
+  mutationLock?: TaskMutationLock;
   // pino instance shared with the rest of the orchestrator. Fastify uses it
   // for HTTP request logging and per-request `req.log` children. When omitted
   // (tests), Fastify falls back to a quiet warn-level logger.
-  pinoLogger?: PinoLogger;
+  pinoLogger?: FastifyBaseLogger;
   dashboardEvents?: DashboardEventBusType;
 };
 
@@ -45,15 +46,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // child-on-request feature gives every route a `req.log` with a reqId
   // attached automatically.
   //
-  // The `as FastifyInstance` widens away the logger generic Fastify infers
-  // from `loggerInstance`. Without it the route-register helpers refuse the
-  // narrower type under `exactOptionalPropertyTypes`. We don't use that
-  // narrower view anywhere, so the cast is purely cosmetic.
-  const app = Fastify(
+  const app: FastifyInstance = Fastify(
     deps.pinoLogger
       ? { loggerInstance: deps.pinoLogger, disableRequestLogging: false }
       : { logger: { level: "warn" }, disableRequestLogging: false },
-  ) as unknown as FastifyInstance;
+  );
 
   // CORS so the Next.js dashboard (Plan 4) can call us in dev.
   void app.register(cors, { origin: true });
@@ -74,11 +71,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
   const dashboardEvents = deps.dashboardEvents ?? new DashboardEventBus();
+  const mutationLock = deps.mutationLock ?? new TaskMutationLock();
   registerHealth(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,
     artifacts,
+    mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
@@ -91,6 +90,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     runs: deps.runs,
     artifacts,
     events: deps.events,
+    mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
@@ -98,6 +98,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     runs: deps.runs,
     artifacts,
     events: deps.events,
+    mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });

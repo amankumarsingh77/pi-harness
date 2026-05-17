@@ -161,7 +161,7 @@ describe("brainstorm integration flow", () => {
   }
 
   it("happy path: ask questions → answer → mark_ready → approve → planning", async () => {
-    const t = await runs.createTask({ title: "integration" });
+    const t = await runs.createTask({ title: "brainstorm happy path" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
 
     // Turn 1: agent submits two questions, then halts.

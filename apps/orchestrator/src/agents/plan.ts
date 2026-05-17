@@ -1,17 +1,28 @@
-import { existsSync, readFileSync } from "node:fs";
-import { unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { join } from "node:path";
+import yaml from "js-yaml";
 import type {
   AgentSession,
   AgentSessionOptions,
   PiBridgeEvent,
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
-import type { AgentEvent, PhaseModelConfig } from "@pi-harness/shared";
+import {
+  BlastRadiusFileSchema,
+  type AgentEvent,
+  type PhaseModelConfig,
+} from "@pi-harness/shared";
 import { getSubagent, PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
+import { makeGitHistoryTool } from "./git-history-tool.js";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
-import { SUBAGENT_FOOTER } from "./subagent-footer.js";
+import { makeSubagentFooter } from "./subagent-footer.js";
+import {
+  derivePlanExecutionState,
+  type PlanArtifactsSnapshot,
+  type PlannerDecision,
+} from "./plan-state.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
@@ -57,6 +68,7 @@ export type PlanOpts = {
   // driver wires its own forwarder that tags events with the subagent name
   // and pushes them to EventStore.
   onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
+  plannerTimeoutMs?: number;
 };
 
 export type PlanResult = {
@@ -70,6 +82,9 @@ export type PlanResult = {
 };
 
 type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
+
+export const PLANNER_TIMEOUT_MS = 5 * 60 * 1000;
+const PLANNER_RECOVERY_CAP = 2;
 
 // Drives one plan tick. Two-stage shape:
 //
@@ -88,86 +103,129 @@ export async function runPlan(opts: PlanOpts): Promise<PlanResult> {
     join(opts.cwd, ".harness", opts.taskId, "plan.jsonl"),
   );
 
-  // Already-ready short-circuit only applies when no revision has been
-  // requested *after* the most-recent ready event. Without this guard,
-  // user_request_plan_changes resets artifacts to draft and writes a
-  // plan_revision_requested event but the run-loop keeps short-circuiting
-  // here on every tick — the planner never re-runs.
-  if (hasReadyEvent(events) && !hasRevisionAfterReady(events)) {
-    return zeroUsage({ ok: true, ready: true });
-  }
-
   // Stage 1: preflight. We're done with stage 1 once every subagent's findings
   // file exists. The "preflight_complete" event is published once when the
   // last missing findings file lands, so any tick after that goes straight to
   // the planner.
-  if (!isPreflightComplete(opts.cwd, opts.taskId)) {
+  if (!(await isPreflightComplete(opts))) {
     return runPreflightStage(opts);
   }
 
-  // Stage 2: planner. Decide between initial prompt and revision prompt based
-  // on the JSONL ordering — the same revision-after-ready logic the gate uses,
-  // but here the planner needs the comment to fold into its next prompt.
-  const decision = decidePlannerPrompt(events);
-  if (decision.kind === "noop") {
-    return zeroUsage({ ok: true, ready: false });
+  // Stage 2: planner. Derive state from durable JSONL + artifact frontmatter
+  // instead of trusting an in-memory run tick. A prior planner_started without
+  // ready artifacts is recoverable, not a permanent no-op.
+  const artifacts = await readPlanArtifacts(opts);
+  const state = derivePlanExecutionState({
+    events,
+    artifacts,
+    recoveryCap: PLANNER_RECOVERY_CAP,
+  });
+  const decision = state.plannerDecision;
+  if (decision.kind === "ready") {
+    return zeroUsage({ ok: true, ready: true });
+  }
+  if (decision.kind === "blocked") {
+    await opts.bus.publish({
+      kind: "plan_system",
+      systemKind: "blocked",
+      data: { reason: decision.reason, recoveryAttempts: state.recoveryAttempts },
+    });
+    return zeroUsage({ ok: false, ready: false, error: `plan: ${decision.reason}` });
   }
 
-  return runPlannerStage(opts, decision.prompt);
+  return runPlannerStage(opts, {
+    decision,
+    prompt: buildPlannerPrompt(opts.cwd, opts.taskId, decision),
+  });
 }
 
-type PlannerDecision =
-  | { kind: "noop" }
-  | { kind: "initial"; prompt: string }
-  | { kind: "revision"; prompt: string };
-
-function decidePlannerPrompt(events: JsonlEvent[]): PlannerDecision {
-  // First-ever planner tick: no plan_system{planner_started} yet.
-  const hasPlannerStarted = events.some(
-    (e) => e.kind === "plan_system" && e["systemKind"] === "planner_started",
-  );
-
-  // The most-recent revision request that postdates the most-recent ready
-  // event is the trigger for a revision turn.
-  const lastReadyIdx = lastIndexWhere(events, isReadyEvent);
-  const lastRevisionIdx = lastIndexWhere(events, isRevisionEvent);
-  const hasNewRevision = lastRevisionIdx !== -1 && lastRevisionIdx > lastReadyIdx;
-
-  if (hasNewRevision) {
-    const e = events[lastRevisionIdx]!;
-    const comment = typeof e["comment"] === "string" ? (e["comment"] as string) : "";
-    return { kind: "revision", prompt: buildRevisionPrompt(comment) };
+function buildPlannerPrompt(cwd: string, taskId: string, decision: PlannerDecision): string {
+  switch (decision.kind) {
+    case "initial":
+      return buildInitialPrompt(cwd, taskId);
+    case "revision":
+      return buildRevisionPrompt(cwd, taskId, decision.comment);
+    case "recovery":
+      return buildRecoveryPrompt(cwd, taskId, decision);
+    case "blocked":
+    case "ready":
+      return "";
   }
-
-  if (!hasPlannerStarted) {
-    return { kind: "initial", prompt: buildInitialPrompt() };
-  }
-
-  return { kind: "noop" };
 }
 
-function buildInitialPrompt(): string {
+function buildInitialPrompt(cwd: string, taskId: string): string {
+  const paths = artifactPaths(cwd, taskId);
   return [
     "Begin the plan phase.",
     "",
-    "1. Read design.md and spec.md from .harness/<this task>/.",
-    `2. Read every file under .harness/<this task>/research/ — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
-    "3. Author plan.md and scenarios.yaml per the protocol in your system prompt.",
-    "4. Call mark_ready when both artifacts are complete and you have cross-checked your citations.",
+    `1. Read design.md: ${paths.design}.`,
+    `2. Read spec.md: ${paths.spec}.`,
+    `3. Read blast-radius.yaml: ${paths.blastRadius}.`,
+    `4. Read every file under ${paths.researchDir} — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
+    `5. Author plan.md at ${paths.plan} and scenarios.yaml at ${paths.scenarios} per the protocol in your system prompt.`,
+    "6. Call mark_ready when both authored artifacts are complete and you have cross-checked your citations.",
   ].join("\n");
 }
 
-function buildRevisionPrompt(comment: string): string {
+function buildRevisionPrompt(cwd: string, taskId: string, comment: string): string {
+  const paths = artifactPaths(cwd, taskId);
   return [
     "The user has requested revisions to your plan:",
     "",
     `> ${comment}`,
     "",
-    "Read your existing plan.md and scenarios.yaml, revise them in place to address the comment, then call mark_ready again.",
+    `Read your existing plan.md (${paths.plan}), scenarios.yaml (${paths.scenarios}), and blast-radius.yaml (${paths.blastRadius}).`,
+    "Revise plan.md/scenarios.yaml in place to address the comment, then call mark_ready again.",
     "",
-    "The research findings under .harness/<task>/research/ have not changed — use them as-is.",
+    `The research findings under ${paths.researchDir} and blast-radius.yaml have not changed — use them as-is.`,
   ].join("\n");
 }
+
+function buildRecoveryPrompt(
+  cwd: string,
+  taskId: string,
+  decision: Extract<PlannerDecision, { kind: "recovery" }>,
+): string {
+  const paths = artifactPaths(cwd, taskId);
+  return [
+    "Recover the plan phase.",
+    "",
+    `Recovery attempt: ${decision.attempt}/${PLANNER_RECOVERY_CAP}.`,
+    `Reason: ${decision.reason}.`,
+    "",
+    "The previous planner turn did not leave ready artifacts. Continue from persisted files and finish the plan phase now.",
+    "",
+    `- design.md: ${paths.design}`,
+    `- spec.md: ${paths.spec}`,
+    `- blast-radius.yaml: ${paths.blastRadius}`,
+    `- research directory: ${paths.researchDir}`,
+    `- plan.md output: ${paths.plan}`,
+    `- scenarios.yaml output: ${paths.scenarios}`,
+    "",
+    "Repair or complete plan.md and scenarios.yaml in place. Then call mark_ready. Do not stop after exploratory tool calls.",
+  ].join("\n");
+}
+
+function artifactPaths(cwd: string, taskId: string): Record<string, string> {
+  const root = join(cwd, ".harness", taskId);
+  return {
+    design: join(root, "design.md"),
+    spec: join(root, "spec.md"),
+    blastRadius: join(root, "blast-radius.yaml"),
+    researchDir: join(root, "research"),
+    plan: join(root, "plan.md"),
+    scenarios: join(root, "scenarios.yaml"),
+  };
+}
+
+// Test surface for the regression where a revision after ready must dispatch
+// planner work again. Runtime uses derivePlanExecutionState; these helpers keep
+// the small decision-matrix test independent from pi session setup.
+export const __testing = {
+  hasReadyEvent,
+  hasRevisionAfterReady,
+  decidePlannerPrompt,
+};
 
 function hasReadyEvent(events: JsonlEvent[]): boolean {
   return events.some(isReadyEvent);
@@ -179,13 +237,14 @@ function hasRevisionAfterReady(events: JsonlEvent[]): boolean {
   return lastRevision !== -1 && lastRevision > lastReady;
 }
 
-// Test surface: tests assert the dispatch-decision matrix without spinning up
-// a fake pi session. Production code stays internal.
-export const __testing = {
-  hasReadyEvent,
-  hasRevisionAfterReady,
-  decidePlannerPrompt,
-};
+function decidePlannerPrompt(
+  events: JsonlEvent[],
+): { kind: "noop" } | { kind: "revision"; prompt: string } {
+  if (!hasRevisionAfterReady(events)) return { kind: "noop" };
+  const revision = [...events].reverse().find(isRevisionEvent);
+  const comment = typeof revision?.comment === "string" ? revision.comment : "";
+  return { kind: "revision", prompt: buildRevisionPrompt("", "", comment) };
+}
 
 function isReadyEvent(e: JsonlEvent): boolean {
   if (e.kind !== "plan_system") return false;
@@ -198,24 +257,56 @@ function isRevisionEvent(e: JsonlEvent): boolean {
   return e.kind === "plan_revision_requested";
 }
 
-function lastIndexWhere<T>(arr: T[], pred: (e: T) => boolean): number {
-  for (let i = arr.length - 1; i >= 0; i -= 1) {
-    if (pred(arr[i]!)) return i;
+function lastIndexWhere(
+  events: readonly JsonlEvent[],
+  predicate: (event: JsonlEvent) => boolean,
+): number {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (predicate(events[i]!)) return i;
   }
   return -1;
 }
 
-function isPreflightComplete(cwd: string, taskId: string): boolean {
-  const researchDir = join(cwd, ".harness", taskId, "research");
-  return PREFLIGHT_SUBAGENTS.every((sa) =>
-    existsSync(join(researchDir, `${sa}.md`)),
+async function isPreflightComplete(opts: PlanOpts): Promise<boolean> {
+  const blastRadius = await opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius");
+  return (
+    missingPreflightFindings(opts.cwd, opts.taskId).length === 0 &&
+    Boolean(blastRadius && isValidBlastRadiusBody(blastRadius.body))
   );
 }
 
+function missingPreflightFindings(cwd: string, taskId: string): string[] {
+  const researchDir = join(cwd, ".harness", taskId, "research");
+  return PREFLIGHT_SUBAGENTS.filter((sa) => {
+    const path = join(researchDir, `${sa}.md`);
+    if (!existsSync(path)) return true;
+    return readFileSync(path, "utf8").trim().length === 0;
+  });
+}
+
+function isValidBlastRadiusBody(body: string): boolean {
+  try {
+    return BlastRadiusFileSchema.safeParse(yaml.load(body)).success;
+  } catch {
+    return false;
+  }
+}
+
+async function readPlanArtifacts(opts: PlanOpts): Promise<PlanArtifactsSnapshot> {
+  const [plan, scenarios, blastRadius] = await Promise.all([
+    opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "scenarios"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius"),
+  ]);
+  return { plan, scenarios, blastRadius };
+}
+
 async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
+  const attemptId = `preflight_${randomUUID()}`;
   await opts.bus.publish({
     kind: "plan_system",
     systemKind: "preflight_started",
+    data: { attemptId },
   });
 
   const [design, spec] = await Promise.all([
@@ -282,6 +373,7 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
             kind: "plan_subagent_started",
             subagent: e.subagent,
             sessionId: e.sessionId,
+            attemptId,
           });
         } else {
           await opts.bus.publish({
@@ -293,6 +385,7 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
             costUsd: e.costUsd,
             inputTokens: e.inputTokens,
             outputTokens: e.outputTokens,
+            attemptId,
             ...(e.error !== undefined ? { error: e.error } : {}),
           });
         }
@@ -325,16 +418,55 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     costUsd += r.costUsd;
   }
 
+  if (result.cancelled) {
+    return {
+      ok: false,
+      ready: false,
+      cancelled: true,
+      inputTokens,
+      outputTokens,
+      costUsd,
+    };
+  }
+
   if (result.failed) {
+    const failed = result.results.filter((r) => !r.ok).map((r) => r.subagent);
     await opts.bus.publish({
       kind: "plan_system",
       systemKind: "blocked",
-      data: { reason: "preflight: ≥3 subagents failed" },
+      data: {
+        reason: `preflight: required findings missing or failed (${failed.join(", ")})`,
+        subagents: failed,
+      },
     });
     return {
       ok: false,
       ready: false,
-      error: "plan preflight: too many subagent failures",
+      error: `plan preflight: required findings missing or failed (${failed.join(", ")})`,
+      inputTokens,
+      outputTokens,
+      costUsd,
+    };
+  }
+
+  const preflightComplete = await isPreflightComplete(opts);
+  const missing = [
+    ...missingPreflightFindings(opts.cwd, opts.taskId),
+    ...(preflightComplete ? [] : ["blast-radius.yaml"]),
+  ];
+  if (missing.length > 0) {
+    await opts.bus.publish({
+      kind: "plan_system",
+      systemKind: "blocked",
+      data: {
+        reason: `preflight: missing findings (${missing.join(", ")})`,
+        subagents: missing,
+      },
+    });
+    return {
+      ok: false,
+      ready: false,
+      error: `plan preflight: missing findings (${missing.join(", ")})`,
       inputTokens,
       outputTokens,
       costUsd,
@@ -344,16 +476,27 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
   await opts.bus.publish({
     kind: "plan_system",
     systemKind: "preflight_complete",
-    data: { count: result.results.length },
+    data: { count: result.results.length, attemptId },
   });
 
   return { ok: true, ready: false, inputTokens, outputTokens, costUsd };
 }
 
-async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<PlanResult> {
+async function runPlannerStage(
+  opts: PlanOpts,
+  input: { readonly decision: PlannerDecision; readonly prompt: string },
+): Promise<PlanResult> {
+  const attemptId = `planner_${randomUUID()}`;
   await opts.bus.publish({
     kind: "plan_system",
     systemKind: "planner_started",
+    data: {
+      attemptId,
+      mode: input.decision.kind,
+      ...(input.decision.kind === "recovery"
+        ? { recoveryAttempt: input.decision.attempt, reason: input.decision.reason }
+        : {}),
+    },
   });
 
   // Build claim-verifier dispatcher closure. It runs the vendored
@@ -367,7 +510,7 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
       await unlink(findingsPath).catch(() => {});
     }
     const cvDef = getSubagent("claim-verifier");
-    const systemPrompt = `${readFileSync(cvDef.promptPath, "utf8")}\n\n${SUBAGENT_FOOTER}\n`;
+    const systemPrompt = `${readFileSync(cvDef.promptPath, "utf8")}\n\n${makeSubagentFooter({ hasGitHistory: true })}\n`;
     const userPrompt = [
       `You are auditing the plan for task ${opts.taskId}. Read the plan below and tag every claim as Verified, Weakened, or Falsified per your system prompt.`,
       ``,
@@ -427,8 +570,9 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
         systemPrompt,
         // SDK `tools` is an absolute allowlist that filters custom tools too —
         // see plan-preflight.ts for the same fix.
-        tools: [...cvDef.allowedTools, "write_findings"],
+        tools: [...cvDef.allowedTools, "git_history", "write_findings"],
         customTools: [
+          makeGitHistoryTool({ cwd: opts.cwd }),
           makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
         ],
         onEvent: cvForward,
@@ -472,8 +616,10 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
   });
 
   let systemPrompt: string;
+  let planDef: ReturnType<typeof getSubagent>;
   try {
-    systemPrompt = readFileSync(getSubagent("plan").promptPath, "utf8");
+    planDef = getSubagent("plan");
+    systemPrompt = readFileSync(planDef.promptPath, "utf8");
   } catch (err) {
     return zeroUsage({
       ok: false,
@@ -493,6 +639,7 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
         : {}),
       systemPrompt,
       sessionPath,
+      tools: [...planDef.allowedTools, "mark_ready"],
       customTools: [markReadyTool],
       onEvent: (e: PiBridgeEvent) => {
         // Forward planner-session bridge events to EventStore (no subagent
@@ -559,7 +706,11 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
 
   let usage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
   try {
-    usage = await session.prompt(promptText);
+    usage = await promptWithTimeout({
+      session,
+      promptText: input.prompt,
+      timeoutMs: opts.plannerTimeoutMs ?? PLANNER_TIMEOUT_MS,
+    });
   } catch (err) {
     signal?.removeEventListener("abort", onAbort);
     await session.close().catch(() => {});
@@ -616,12 +767,21 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
   // succeeded inside the prompt without our switch logic seeing it (we
   // don't subscribe to bridge events in the planner stage; the bus does
   // the publishing internally).
-  const [plan, scenarios] = await Promise.all([
+  const [plan, scenarios, blastRadius] = await Promise.all([
     opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
     opts.store.readArtifact(opts.cwd, opts.taskId, "scenarios"),
+    opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius"),
   ]);
   const ready =
-    plan?.fm.status === "ready" && scenarios?.fm.status === "ready";
+    plan?.fm.status === "ready" &&
+    scenarios?.fm.status === "ready" &&
+    blastRadius?.fm.status === "ready";
+
+  await opts.bus.publish({
+    kind: "plan_system",
+    systemKind: "planner_turn_completed",
+    data: { attemptId, ready: Boolean(ready) },
+  });
 
   return {
     ok: true,
@@ -632,6 +792,27 @@ async function runPlannerStage(opts: PlanOpts, promptText: string): Promise<Plan
   };
 }
 
+async function promptWithTimeout(input: {
+  readonly session: AgentSession;
+  readonly promptText: string;
+  readonly timeoutMs: number;
+}): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      input.session.prompt(input.promptText),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          void input.session.abort().catch(() => {});
+          reject(new Error(`planner timed out after ${input.timeoutMs}ms`));
+        }, input.timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 function numField(e: JsonlEvent, k: string): number | null {
   const v = (e as Record<string, unknown>)[k];
   return typeof v === "number" ? v : null;
@@ -639,11 +820,4 @@ function numField(e: JsonlEvent, k: string): number | null {
 
 function zeroUsage(rest: Omit<PlanResult, "costUsd" | "inputTokens" | "outputTokens">): PlanResult {
   return { ...rest, costUsd: 0, inputTokens: 0, outputTokens: 0 };
-}
-
-// Helper: write a placeholder file to ensure parent directory exists when
-// callers want to seed an empty findings file (used in tests).
-export async function _ensureResearchFile(cwd: string, taskId: string, name: string): Promise<void> {
-  const path = join(cwd, ".harness", taskId, "research", name);
-  await writeFile(path, "# placeholder\n");
 }

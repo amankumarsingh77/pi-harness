@@ -1,6 +1,8 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { randomUUID } from "node:crypto";
-import type { Artifact, ArtifactKind } from "@pi-harness/shared";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import type { Artifact, ArtifactKind, BrainstormMock } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 
@@ -56,9 +58,103 @@ const ReplyToUserParams = Type.Object({
   inReplyToNudgeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 });
 
+const SafeSlug = Type.String({
+  minLength: 1,
+  maxLength: 80,
+  pattern: "^[a-z0-9][a-z0-9-]*$",
+});
+
+const MockPageChoice = Type.Object({
+  pageId: SafeSlug,
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+  html: Type.String({ minLength: 1, maxLength: 250_000 }),
+});
+
+const MockMiniature = Type.Union([
+  Type.Object({
+    kind: Type.Literal("rows"),
+    rows: Type.Array(
+      Type.Object({
+        status: Type.Union([
+          Type.Literal("pass"),
+          Type.Literal("fail"),
+          Type.Literal("muted"),
+        ]),
+        label: Type.String({ minLength: 1, maxLength: 80 }),
+        sub: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+        action: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })),
+      }),
+      { minItems: 1, maxItems: 8 },
+    ),
+  }),
+  Type.Object({
+    kind: Type.Literal("grid+drawer"),
+    cells: Type.Array(
+      Type.Object({
+        status: Type.Union([Type.Literal("pass"), Type.Literal("fail")]),
+      }),
+      { minItems: 1, maxItems: 8 },
+    ),
+    drawerTitle: Type.String({ minLength: 1, maxLength: 80 }),
+    diffLines: Type.Array(
+      Type.Object({
+        kind: Type.Union([Type.Literal("plus"), Type.Literal("minus")]),
+      }),
+      { minItems: 1, maxItems: 8 },
+    ),
+    confirm: Type.String({ minLength: 1, maxLength: 40 }),
+  }),
+]);
+
+const MockChoice = Type.Object({
+  mockId: SafeSlug,
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.String({ minLength: 1, maxLength: 500 }),
+  recommended: Type.Boolean(),
+  miniature: Type.Optional(MockMiniature),
+  pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
+});
+
+const SubmitMockChoicesParams = Type.Object({
+  mocks: Type.Array(MockChoice, { minItems: 1, maxItems: 6 }),
+});
+
+const WriteMockRevisionParams = Type.Object({
+  sourceMockId: SafeSlug,
+  mockId: SafeSlug,
+  editRequestId: Type.String({ minLength: 1, maxLength: 120 }),
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.String({ minLength: 1, maxLength: 500 }),
+  miniature: Type.Optional(MockMiniature),
+  pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
+});
+
 export type SubmitQuestionsDetails = { awaiting: string[] };
 export type MarkReadyDetails = { ok: boolean; missing?: string };
 export type ReplyToUserDetails = { replyId: string };
+export type SubmitMockChoicesDetails = { proposed: string[] };
+export type WriteMockRevisionDetails = { revised: string };
+
+function baseMockId(mockId: string): string {
+  return mockId.replace(/-rev\d+$/, "");
+}
+
+function nextRevisionMockId(sourceMockId: string, existingMockIds: ReadonlyArray<string>): string {
+  const base = baseMockId(sourceMockId);
+  const revisionPattern = new RegExp(`^${escapeRegExp(base)}-rev(\\d+)$`);
+  const latestRevision = existingMockIds.reduce((latest, mockId) => {
+    const match = revisionPattern.exec(mockId);
+    if (!match) return latest;
+    const revision = Number(match[1]);
+    return Number.isInteger(revision) ? Math.max(latest, revision) : latest;
+  }, 0);
+  return `${base}-rev${latestRevision + 1}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export function makeSubmitQuestionsTool(deps: {
   bus: BrainstormEventBus;
@@ -131,6 +227,14 @@ function findMissingSection(kind: BrainstormArtifactKind, body: string): string 
   return null;
 }
 
+function artifactMentionsSelectedMock(
+  artifact: Artifact,
+  mockId: string,
+  requiredHeading: string,
+): boolean {
+  return artifact.body.includes(requiredHeading) && artifact.body.includes(`Selected mock: ${mockId}`);
+}
+
 export function makeMarkReadyTool(deps: {
   store: ArtifactsStore;
   bus: BrainstormEventBus;
@@ -188,6 +292,22 @@ export function makeMarkReadyTool(deps: {
         if (missing) return reject(missing);
       }
 
+      if (hasWebResearch(cwd, taskId) && !loaded.design.body.includes("## External research")) {
+        return reject("design.md missing: ## External research");
+      }
+
+      const mockManifest = await store.readBrainstormMockManifest(cwd, taskId);
+      if (mockManifest.mocks.length > 0) {
+        const selected = mockManifest.selectedMockId;
+        const selectedReflected =
+          selected !== null &&
+          artifactMentionsSelectedMock(loaded.design, selected, "## Selected UI direction") &&
+          artifactMentionsSelectedMock(loaded.spec, selected, "## UI acceptance criteria");
+        if (!selectedReflected) {
+          return reject("selected mock missing from design.md and spec.md");
+        }
+      }
+
       const alreadyReady = kinds.every((k) => loaded[k].fm.status === "ready");
       if (alreadyReady) {
         return {
@@ -222,6 +342,118 @@ export function makeMarkReadyTool(deps: {
         content: [{ type: "text", text: "ready" }],
         details: { ok: true },
         terminate: true,
+      };
+    },
+  };
+}
+
+function hasWebResearch(cwd: string, taskId: string): boolean {
+  return existsSync(
+    join(cwd, ".harness", taskId, "brainstorm-research", "web-search-researcher.md"),
+  );
+}
+
+export function makeSubmitMockChoicesTool(deps: {
+  store: ArtifactsStore;
+  bus: BrainstormEventBus;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof SubmitMockChoicesParams, SubmitMockChoicesDetails> {
+  return {
+    name: "submit_mock_choices",
+    label: "Submit mock choices",
+    description:
+      "Write one or more static HTML brainstorm mock choices and publish them for the user to open, edit, or choose. After calling this, halt your turn.",
+    parameters: SubmitMockChoicesParams,
+    async execute(_id, params) {
+      const mockSetId = `mset_${randomUUID()}`;
+      const proposed: string[] = [];
+      for (const input of params.mocks) {
+        const mock: BrainstormMock = {
+          mockId: input.mockId,
+          title: input.title,
+          summary: input.summary,
+          recommended: input.recommended,
+          createdAt: new Date().toISOString(),
+          ...(input.miniature !== undefined ? { miniature: input.miniature } : {}),
+          pages: input.pages.map((page) => ({
+            pageId: page.pageId,
+            title: page.title,
+            ...(page.summary !== undefined ? { summary: page.summary } : {}),
+            htmlPath: `.harness/${deps.taskId}/mocks/${input.mockId}/${page.pageId}.html`,
+          })),
+        };
+        await deps.store.writeBrainstormMock(
+          deps.cwd,
+          deps.taskId,
+          mock,
+          input.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
+        );
+        await deps.bus.publish({
+          kind: "brainstorm_mock_proposed",
+          mockSetId,
+          mock,
+        });
+        proposed.push(input.mockId);
+      }
+      return {
+        content: [{ type: "text", text: "submitted mock choices" }],
+        details: { proposed },
+        terminate: true,
+      };
+    },
+  };
+}
+
+export function makeWriteMockRevisionTool(deps: {
+  store: ArtifactsStore;
+  bus: BrainstormEventBus;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof WriteMockRevisionParams, WriteMockRevisionDetails> {
+  return {
+    name: "write_mock_revision",
+    label: "Write mock revision",
+    description:
+      "Write a revised static HTML mock after the user requested edits to an existing mock.",
+    parameters: WriteMockRevisionParams,
+    async execute(_id, params) {
+      const manifest = await deps.store.readBrainstormMockManifest(deps.cwd, deps.taskId);
+      const mockSetId = `mset_${randomUUID()}`;
+      const mockId = nextRevisionMockId(
+        params.sourceMockId,
+        manifest.mocks.map((mock) => mock.mockId),
+      );
+      const mock: BrainstormMock = {
+        mockId,
+        title: params.title,
+        summary: params.summary,
+        recommended: false,
+        derivedFrom: params.sourceMockId,
+        createdAt: new Date().toISOString(),
+        ...(params.miniature !== undefined ? { miniature: params.miniature } : {}),
+        pages: params.pages.map((page) => ({
+          pageId: page.pageId,
+          title: page.title,
+          ...(page.summary !== undefined ? { summary: page.summary } : {}),
+          htmlPath: `.harness/${deps.taskId}/mocks/${mockId}/${page.pageId}.html`,
+        })),
+      };
+      await deps.store.writeBrainstormMock(
+        deps.cwd,
+        deps.taskId,
+        mock,
+        params.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
+      );
+      await deps.bus.publish({
+        kind: "brainstorm_mock_revised",
+        mockSetId,
+        mock,
+        editRequestId: params.editRequestId,
+      });
+      return {
+        content: [{ type: "text", text: "wrote mock revision" }],
+        details: { revised: mockId },
       };
     },
   };

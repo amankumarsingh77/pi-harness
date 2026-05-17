@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   SUBAGENTS,
   PREFLIGHT_SUBAGENTS,
   RETIRED_PROMPTS,
   getSubagent,
-  listVendoredAgents,
-  listOurAgents,
+  listPromptAgents,
+  listPromptFiles,
 } from "../index.js";
 
 describe("subagent registry", () => {
@@ -19,7 +19,7 @@ describe("subagent registry", () => {
   });
 
   it("every .md on disk is either registered or explicitly retired", () => {
-    const onDisk = new Set([...listVendoredAgents(), ...listOurAgents()]);
+    const onDisk = new Set(listPromptAgents());
     const accounted = new Set<string>([
       ...Object.keys(SUBAGENTS),
       ...RETIRED_PROMPTS,
@@ -44,4 +44,46 @@ describe("subagent registry", () => {
   it("getSubagent throws for unknown name", () => {
     expect(() => getSubagent("does-not-exist")).toThrow(/unknown subagent/i);
   });
+
+  it("registered prompt frontmatter tools match registry tools", () => {
+    for (const def of Object.values(SUBAGENTS)) {
+      const prompt = readFileSync(def.promptPath, "utf8");
+      const tools = parseFrontmatterTools(prompt);
+      expect(tools, def.name).toEqual([
+        ...def.allowedTools,
+        ...(def.customTools ?? []),
+      ]);
+    }
+  });
+
+  it("retired prompts are explicitly marked retired", () => {
+    for (const name of RETIRED_PROMPTS) {
+      const path = promptPathFor(name);
+      expect(path, name).not.toBeNull();
+      const prompt = readFileSync(path, "utf8");
+      expect(prompt, name).toMatch(/retired prompt/i);
+    }
+  });
 });
+
+function parseFrontmatterTools(prompt: string): string[] {
+  const match = prompt.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return [];
+  const toolsLine = match[1]!
+    .split("\n")
+    .find((line) => line.startsWith("tools:"));
+  if (!toolsLine) return [];
+  return toolsLine
+    .replace(/^tools:\s*/, "")
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter((tool) => tool.length > 0);
+}
+
+function promptPathFor(name: string): string {
+  const registered = SUBAGENTS[name];
+  if (registered) return registered.promptPath;
+  const prompt = listPromptFiles().find((file) => file.name === name);
+  if (!prompt) throw new Error(`prompt not found: ${name}`);
+  return prompt.path;
+}

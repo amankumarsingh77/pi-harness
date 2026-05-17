@@ -30,10 +30,14 @@ function applyDashboardEvent(
   event: DashboardEvent,
 ): void {
   if (event.kind === "tasks_snapshot") {
-    queryClient.setQueryData<TaskListData>(queryKeys.tasks, {
+    queryClient.setQueryData<TaskListData>(queryKeys.tasks, (curr) => ({
       tasks: event.tasks,
       counts: event.counts,
-    });
+      humanInterventionTaskIds: curr?.humanInterventionTaskIds ?? [],
+      summary: curr
+        ? summaryWithCounts(curr.summary, event.counts)
+        : emptySummary(event.counts),
+    }));
     for (const task of event.tasks) {
       const taskRuns = event.runs.filter((run) => run.taskId === task.id);
       queryClient.setQueryData<TaskDetailData>(queryKeys.task(task.id), (curr) =>
@@ -100,7 +104,13 @@ function upsertTaskList(curr: TaskListData, task: Task): TaskListData {
   const tasks = exists
     ? curr.tasks.map((t) => (t.id === task.id ? task : t))
     : [...curr.tasks, task];
-  return { tasks, counts: countTasks(tasks) };
+  const counts = countTasks(tasks);
+  return {
+    ...curr,
+    tasks,
+    counts,
+    summary: summaryWithCounts(curr.summary, counts),
+  };
 }
 
 function mergeRuns(existing: Run[], incoming: Run[]): Run[] {
@@ -125,6 +135,48 @@ function normalizeCounts(value: unknown): Record<TaskStatus, number> {
     if (typeof n === "number") counts[status] = n;
   }
   return counts;
+}
+
+function emptySummary(counts: Record<TaskStatus, number>): TaskListData["summary"] {
+  return {
+    runningCount: runningCount(counts),
+    reviewCount: 0,
+    blockedCount: blockedCount(counts),
+    costUsd: 0,
+    costCapUsd: 10,
+    lastEventAt: null,
+    activeRunIds: [],
+  };
+}
+
+function summaryWithCounts(
+  summary: TaskListData["summary"],
+  counts: Record<TaskStatus, number>,
+): TaskListData["summary"] {
+  return {
+    ...summary,
+    runningCount: runningCount(counts),
+    blockedCount: blockedCount(counts),
+  };
+}
+
+function runningCount(counts: Record<TaskStatus, number>): number {
+  return (
+    counts.brainstorming +
+    counts.planning +
+    counts.executing +
+    counts.verifying
+  );
+}
+
+function blockedCount(counts: Record<TaskStatus, number>): number {
+  return (
+    counts.brainstorm_failed +
+    counts.plan_failed +
+    counts.code_failed +
+    counts.verification_failed +
+    counts.pr_failed
+  );
 }
 
 function hydrateTaskLike(value: unknown): unknown {

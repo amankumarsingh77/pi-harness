@@ -1,14 +1,20 @@
 "use client";
-import Link from "next/link";
+
 import { useQuery } from "@tanstack/react-query";
 import type { AgentEvent, Run, Task } from "@pi-harness/shared";
 import { Topbar } from "@/components/topbar";
-import { PhaseRail } from "@/components/task-detail/phase-rail";
-import { AgentLog } from "@/components/task-detail/agent-log";
-import { RunContext } from "@/components/task-detail/run-context";
-import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
-import { TaskActions } from "@/components/task-detail/task-actions";
-import { TaskCostStrip } from "@/components/task-detail/task-cost-strip";
+import { TaskActivityPanel } from "@/components/task-detail/task-activity-panel";
+import {
+  type ArtifactSummary,
+  TaskDetailInspectors,
+} from "@/components/task-detail/task-detail-inspectors";
+import { TaskDetailShell } from "@/components/task-detail/task-detail-shell";
+import { TaskFactsPanel } from "@/components/task-detail/task-facts-panel";
+import { TaskPhaseStrip } from "@/components/task-detail/task-phase-strip";
+import {
+  type TaskIntervention,
+  TaskInterventionStrip,
+} from "@/components/task-detail/task-intervention";
 import { queries } from "@/lib/client/queries";
 import type { RunFile } from "@/lib/api";
 
@@ -23,12 +29,14 @@ export function TaskDetailLive({
   initialTask,
   initialEvents,
   initialFiles,
+  initialIntervention,
 }: {
   taskId: string;
   requestedRunId?: string;
   initialTask: TaskDetailData;
   initialEvents: AgentEvent[];
   initialFiles: RunFile[];
+  initialIntervention: TaskIntervention | null;
 }) {
   const { data } = useQuery({
     ...queries.getTask(taskId),
@@ -41,62 +49,108 @@ export function TaskDetailLive({
   const filesQuery = useQuery({
     ...queries.listRunFiles(selectedRun?.id ?? "none"),
     enabled: selectedRun !== undefined,
-    initialData: selectedRun?.id === initialTask.runs.at(-1)?.id ? { files: initialFiles } : undefined,
+    initialData:
+      selectedRun?.id === initialTask.runs.at(-1)?.id
+        ? { files: initialFiles }
+        : undefined,
   });
+  const files = filesQuery.data?.files ?? initialFiles;
+  const artifactSummaries = buildArtifactSummaries(data.task, data.runs);
 
   return (
     <>
       <Topbar runningCount={liveRun ? 1 : 0} blockedCount={0} doneTodayCount={0} branch="main" />
 
-      <Head task={data.task} runs={data.runs} liveRunId={liveRun?.id ?? null} />
-      <PhaseRail runs={data.runs} taskId={data.task.id} />
-
-      <main className="grid min-h-[calc(100vh-48px-64px-100px)] grid-cols-[1fr_320px] gap-0">
-        <section className="flex min-w-0 flex-col border-r border-line">
-          <AgentLog
+      <TaskDetailShell
+        task={data.task}
+        runs={data.runs}
+        liveRunId={liveRun?.id ?? null}
+        inspectorControls={
+          <TaskDetailInspectors
             events={initialEvents}
-            runId={selectedRun?.id ?? "—"}
+            files={files}
+            artifactSummaries={artifactSummaries}
+            runId={selectedRun?.id ?? "-"}
             live={liveRun !== null && liveRun.id === selectedRun?.id}
           />
+        }
+      >
+        {initialIntervention && <TaskInterventionStrip intervention={initialIntervention} />}
+        <TaskPhaseStrip task={data.task} runs={data.runs} intervention={initialIntervention} />
+
+        <section className="grid grid-cols-1 gap-[18px] md:grid-cols-[minmax(0,1fr)_310px]">
+          <TaskActivityPanel events={initialEvents} />
+          <TaskFactsPanel
+            task={data.task}
+            runs={data.runs}
+            files={files}
+            {...(selectedRun ? { selectedRunId: selectedRun.id } : {})}
+          />
         </section>
-        <RunContext
-          task={data.task}
-          runs={data.runs}
-          files={filesQuery.data?.files ?? initialFiles}
-          {...(selectedRun ? { selectedRunId: selectedRun.id } : {})}
-        />
-      </main>
+      </TaskDetailShell>
     </>
   );
 }
 
-function Head({
-  task,
-  runs,
-  liveRunId,
-}: {
-  task: Task;
-  runs: Run[];
-  liveRunId: string | null;
-}) {
-  const kind = statusKindFor(task.status);
-  return (
-    <section className="border-b border-line px-6 pt-[18px] pb-3.5">
-      <div className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-mute-2">
-        <Link href="/" className="text-fg-mute hover:text-fg-body">
-          ← Board
-        </Link>
-        <span className="text-fg-faint">/</span>
-        <span className="text-fg-body">{task.id}</span>
-      </div>
-      <div className="flex items-center gap-3.5">
-        <StatusIcon kind={kind} size={18} live={kind === "progress"} />
-        <h1 className="m-0 flex-1 text-[19px] font-semibold tracking-tight text-fg">
-          {task.title}
-        </h1>
-        <TaskCostStrip initialRuns={runs} liveRunId={liveRunId} />
-        <TaskActions task={task} />
-      </div>
-    </section>
-  );
+function buildArtifactSummaries(task: Task, runs: readonly Run[]): readonly ArtifactSummary[] {
+  return [
+    ...artifactSummariesForPhase(task.id, "brainstorm", runs),
+    ...artifactSummariesForPhase(task.id, "plan", runs),
+    ...artifactSummariesForPhase(task.id, "verify", runs),
+  ];
+}
+
+function artifactSummariesForPhase(
+  taskId: string,
+  phase: ArtifactSummary["phase"],
+  runs: readonly Run[],
+): readonly ArtifactSummary[] {
+  const run = runs.find((item) => item.phase === phase);
+  if (!run) return [];
+
+  return artifactNamesForPhase(phase).map((name) => ({
+    name,
+    status: artifactStatusForRun(run),
+    lines: null,
+    phase,
+    href: `/tasks/${taskId}/${phase}`,
+    preview: artifactPreviewForPhase(phase, name),
+  }));
+}
+
+function artifactNamesForPhase(phase: ArtifactSummary["phase"]): readonly string[] {
+  switch (phase) {
+    case "brainstorm":
+      return ["design.md", "spec.md"];
+    case "plan":
+      return ["plan.md", "blast-radius.yaml", "scenarios.yaml"];
+    case "verify":
+      return ["proof-report.md"];
+  }
+}
+
+function artifactStatusForRun(run: Run): string {
+  switch (run.status) {
+    case "running":
+      return "active";
+    case "succeeded":
+      return "ready";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    case "pending":
+      return "queued";
+  }
+}
+
+function artifactPreviewForPhase(phase: ArtifactSummary["phase"], name: string): string {
+  switch (phase) {
+    case "brainstorm":
+      return `${name} is produced by the brainstorm phase. Open the brainstorm page to inspect the full design and spec artifacts.`;
+    case "plan":
+      return `${name} is produced by the plan phase. Open the plan page to review implementation steps, scenarios, and approval controls.`;
+    case "verify":
+      return `${name} is produced by verification. Open the verify page to inspect proof and remaining blockers.`;
+  }
 }

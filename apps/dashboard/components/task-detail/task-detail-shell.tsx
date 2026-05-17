@@ -1,0 +1,119 @@
+import Link from "next/link";
+import type { Run, Task } from "@pi-harness/shared";
+import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
+import { TaskCostStrip } from "./task-cost-strip";
+
+export function TaskDetailShell({
+  task,
+  runs,
+  liveRunId,
+  inspectorControls,
+  children,
+}: {
+  readonly task: Task;
+  readonly runs: readonly Run[];
+  readonly liveRunId: string | null;
+  readonly inspectorControls: React.ReactNode;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <main className="mx-auto max-w-[1180px] px-4 py-5 md:px-7 md:py-7">
+      <nav className="mb-[18px] flex items-center gap-2 font-mono text-[11px] text-fg-mute">
+        <Link href="/" className="transition-colors hover:text-fg-body">
+          ← Board
+        </Link>
+        <span className="text-fg-faint">/</span>
+        <span className="text-fg-body">{task.id}</span>
+      </nav>
+
+      <section className="mb-[22px] grid grid-cols-1 items-start gap-[18px] md:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="min-w-0">
+          <h1 className="m-0 text-[26px] leading-[1.14] font-semibold tracking-[-0.02em] text-fg md:text-[28px]">
+            {task.title}
+          </h1>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <MetaPill>
+              <StatusIcon kind={statusKindFor(task.status)} size={12} live={liveRunId !== null} />
+              <strong>{statusLabel(task.status)}</strong>
+            </MetaPill>
+            <MetaPill>
+              phase <strong>{phaseLabel(task.status)}</strong>
+            </MetaPill>
+            <MetaPill>
+              branch <strong>{task.branchName ?? "—"}</strong>
+            </MetaPill>
+            <MetaPill>
+              workflow <strong>{task.workflow ?? "—"}</strong>
+            </MetaPill>
+            {runs.length > 0 && (
+              <MetaPill>
+                <TaskCostStrip initialRuns={[...runs]} liveRunId={liveRunId} />
+              </MetaPill>
+            )}
+          </div>
+        </div>
+        {inspectorControls}
+      </section>
+
+      {children}
+    </main>
+  );
+}
+
+function MetaPill({ children }: { readonly children: React.ReactNode }) {
+  return (
+    <span className="inline-flex h-[26px] max-w-full items-center gap-1.5 rounded-full border border-line bg-white/[0.025] px-2.5 font-mono text-[11px] text-fg-mute">
+      {children}
+    </span>
+  );
+}
+
+function statusLabel(status: Task["status"]): string {
+  switch (status) {
+    case "backlog":
+      return "queued";
+    case "brainstorming":
+    case "planning":
+      return "needs input";
+    case "executing":
+    case "verifying":
+    case "ready_to_ship":
+      return "running";
+    case "done":
+      return "done";
+    case "cancelled":
+      return "cancelled";
+    case "brainstorm_failed":
+    case "plan_failed":
+    case "code_failed":
+    case "verification_failed":
+    case "pr_failed":
+      return "blocked";
+  }
+}
+
+function phaseLabel(status: Task["status"]): string {
+  switch (status) {
+    case "brainstorming":
+    case "brainstorm_failed":
+      return "brainstorm";
+    case "planning":
+    case "plan_failed":
+      return "plan";
+    case "executing":
+    case "code_failed":
+      return "code";
+    case "verifying":
+    case "verification_failed":
+      return "verify";
+    case "ready_to_ship":
+    case "pr_failed":
+      return "pr";
+    case "backlog":
+      return "intake";
+    case "done":
+      return "done";
+    case "cancelled":
+      return "cancelled";
+  }
+}

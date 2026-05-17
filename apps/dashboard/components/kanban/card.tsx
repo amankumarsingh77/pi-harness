@@ -2,8 +2,11 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { Task } from "@pi-harness/shared";
 import { clsx } from "clsx";
-import { StatusIcon, statusKindFor } from "./status-icon";
+import { useDraggable } from "@dnd-kit/react";
+import { useCallback } from "react";
 import { formatRelativeCompact } from "@/lib/format";
+import type { KanbanDndData } from "./drag-types";
+import { taskDragId } from "./drag-types";
 
 const LIVE_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "brainstorming",
@@ -12,8 +15,6 @@ const LIVE_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "verifying",
 ]);
 
-// Any failure state needs to grab the user's eye — bordered red so they can
-// scan the board and immediately spot what needs triage.
 const FAILED_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "brainstorm_failed",
   "plan_failed",
@@ -22,123 +23,114 @@ const FAILED_STATUSES: ReadonlySet<Task["status"]> = new Set([
   "verification_failed",
 ]);
 
-export function TaskCard({ task }: { task: Task }) {
-  const kind = statusKindFor(task.status);
-  const live = LIVE_STATUSES.has(task.status);
-  const attention = FAILED_STATUSES.has(task.status);
+export function TaskCard({
+  task,
+  pending,
+  requiresHumanIntervention,
+}: {
+  task: Task;
+  pending: boolean;
+  requiresHumanIntervention: boolean;
+}) {
   const age = formatRelativeCompact(task.updatedAt ?? task.createdAt);
-  const meta = metaLineFor(task);
+  const draggable = task.status === "backlog";
+  const stripe = stripeFor(task, requiresHumanIntervention);
+  const priority = priorityGlyph(task);
+  const subMeta = subMetaFor(task);
+  const { handleRef, isDragging, ref } = useDraggable<KanbanDndData>({
+    id: taskDragId(task.id),
+    data: { kind: "task", taskId: task.id, status: task.status },
+    disabled: !draggable || pending,
+  });
+  const setDragRefs = useCallback(
+    (element: HTMLElement | null) => {
+      ref(element);
+      handleRef(draggable ? element : null);
+    },
+    [draggable, handleRef, ref],
+  );
 
   return (
-    <Link
-      href={`/tasks/${task.id}` as Route}
+    <article
+      ref={setDragRefs}
+      data-testid={`task-card-${task.id}`}
       className={clsx(
-        "group relative block rounded-md border px-3 py-2.5",
-        "transition-colors duration-150",
-        attention
-          ? "border-st-blocked/60 bg-card hover:border-st-blocked hover:bg-card-hover"
-          : "border-line bg-card hover:border-line-hover hover:bg-card-hover",
+        "group relative overflow-hidden rounded-md border border-line bg-card px-3 py-2.5 pl-3.5",
+        "transition-colors duration-150 hover:border-line-hover hover:bg-card-hover",
+        draggable && !pending && "cursor-grab active:cursor-grabbing",
+        (pending || isDragging) && "opacity-60",
       )}
     >
-      <div className="flex items-center gap-2 font-mono text-[11px] tracking-[0.01em] text-fg-mute">
-        <StatusIcon kind={kind} live={live} />
-        <span className="text-fg-mute">#{task.id.slice(0, 4).toUpperCase()}</span>
-        <span className="ml-auto text-fg-faint">{age}</span>
+      {stripe && (
         <span
-          className={clsx(
-            "-mr-1 inline-flex h-[22px] w-[22px] items-center justify-center rounded text-fg-faint",
-            "opacity-0 transition-opacity duration-150 hover:bg-white/[0.06] hover:text-fg",
-            "group-hover:opacity-100",
-          )}
+          data-testid={`task-card-stripe-${task.id}`}
+          className="absolute inset-y-0 left-0 w-0.5"
+          style={{ background: stripe }}
           aria-hidden="true"
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14">
-            <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.2" fill="currentColor" />
-            <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
-          </svg>
-        </span>
-      </div>
-
-      <div
-        className={clsx(
-          "mt-2 line-clamp-2 text-[13.5px] font-medium leading-[1.4] tracking-[-0.012em]",
-          task.status === "done" ? "text-fg-mute" : "text-fg",
-        )}
-      >
-        {task.title}
-      </div>
-
-      {meta.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-0 font-mono text-[11.5px] tracking-[0.01em] text-fg-mute">
-          {meta.map((part, i) => (
-            <span key={i} className={clsx("inline-flex items-center", part.tone && TONE_CLASS[part.tone])}>
-              {i > 0 && <span className="px-[7px] text-fg-faint">·</span>}
-              {part.text}
-            </span>
-          ))}
-        </div>
+        />
       )}
-    </Link>
+      <Link
+        href={`/tasks/${task.id}` as Route}
+        aria-label={`Open ${task.title}`}
+        className="absolute inset-0 z-10 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-line-hover"
+      />
+
+      <div className="pointer-events-none relative z-20">
+        <div className="flex items-center gap-1.5 font-mono text-[10.5px] tracking-[0.01em] text-fg-mute">
+          <span className="text-fg-mute">T-{task.id.slice(0, 4).toUpperCase()}</span>
+          {priority && (
+            <span className={clsx("text-[10px] leading-none", priority.className)}>
+              {priority.glyph}
+            </span>
+          )}
+          <span className="ml-auto text-fg-faint">{age}</span>
+        </div>
+
+        <div
+          className={clsx(
+            "mt-2 line-clamp-2 [line-clamp:2] text-[13px] font-medium leading-[1.4]",
+            "transition-colors group-hover:text-fg",
+            task.status === "done" ? "text-fg-mute" : "text-fg",
+          )}
+        >
+          {task.title}
+        </div>
+
+        {subMeta && (
+          <div className="mt-2 truncate font-mono text-[10.5px] tracking-[0.01em] text-fg-mute">
+            {subMeta}
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
 
-type Tone = "live" | "review" | "blocked" | "merged" | "pr" | "accent";
+function stripeFor(task: Task, requiresHumanIntervention: boolean): string | null {
+  if (requiresHumanIntervention) return "var(--color-card-stripe-review)";
+  if (FAILED_STATUSES.has(task.status)) return "var(--color-card-stripe-blocked)";
+  if (LIVE_STATUSES.has(task.status)) return "var(--color-card-stripe-progress)";
+  if (task.status === "ready_to_ship") return "var(--color-card-stripe-shipping)";
+  if (task.status === "done") return "var(--color-card-stripe-done)";
+  return null;
+}
 
-const TONE_CLASS: Record<Tone, string> = {
-  live: "text-st-progress",
-  review: "text-st-review",
-  blocked: "text-st-blocked",
-  merged: "text-st-done",
-  pr: "text-st-shipping",
-  accent: "text-fg-body",
-};
-
-type MetaPart = { text: string; tone?: Tone };
-
-function metaLineFor(task: Task): MetaPart[] {
-  const parts: MetaPart[] = [];
-  switch (task.status) {
-    case "backlog":
-      parts.push({ text: "ready to start" });
-      break;
-    case "brainstorming":
-      parts.push({ text: "brainstorm", tone: "live" });
-      break;
-    case "brainstorm_failed":
-      parts.push({ text: "brainstorm failed", tone: "blocked" });
-      break;
-    case "planning":
-      parts.push({ text: "planning", tone: "live" });
-      break;
-    case "plan_failed":
-      parts.push({ text: "plan failed", tone: "blocked" });
-      break;
-    case "executing":
-      parts.push({ text: "code", tone: "live" });
-      break;
-    case "code_failed":
-      parts.push({ text: "code failed", tone: "blocked" });
-      break;
-    case "verifying":
-      parts.push({ text: "verify", tone: "live" });
-      break;
-    case "verification_failed":
-      parts.push({ text: `retry ${task.retryCount}/2`, tone: "blocked" });
-      break;
-    case "ready_to_ship":
-      parts.push({ text: "PR open", tone: "pr" });
-      break;
-    case "pr_failed":
-      parts.push({ text: "PR failed", tone: "blocked" });
-      break;
-    case "done":
-      parts.push({ text: "merged", tone: "merged" });
-      break;
-    case "cancelled":
-      parts.push({ text: "cancelled" });
-      break;
+function priorityGlyph(task: Task): { glyph: string; className: string } | null {
+  switch (task.priority) {
+    case "urgent":
+      return { glyph: "▲", className: "text-st-blocked" };
+    case "high":
+      return { glyph: "◆", className: "text-fg-body" };
+    case "medium":
+      return { glyph: "◇", className: "text-fg-mute" };
+    case "low":
+    case "none":
+      return null;
   }
-  if (task.branchName) parts.push({ text: task.branchName });
-  return parts;
+}
+
+function subMetaFor(task: Task): string | null {
+  if (task.branchName) return task.branchName;
+  if (task.status === "backlog") return task.workflow;
+  return null;
 }

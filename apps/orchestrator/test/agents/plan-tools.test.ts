@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
@@ -36,11 +36,33 @@ const validScenariosYaml = `scenarios:
   - id: s1
     type: api
     name: smoke
+    requirementRefs:
+      - REQ-001
+    blastRadiusRefs:
+      - BR-001
     request:
       method: GET
       url: http://localhost/health
     expect:
       status: 200
+`;
+
+const validBlastRadiusYaml = `items:
+  - id: BR-001
+    requirementRefs:
+      - REQ-001
+    surface: api
+    title: Health route impact
+    risk: medium
+    touchpoints:
+      - path: src/webhooks.ts
+        role: change
+        note: Current send path has no retry.
+    inbound: []
+    outbound: []
+    precedentRefs: []
+    verificationRefs:
+      - s1
 `;
 
 const validPlanBody = [
@@ -82,7 +104,11 @@ async function seedRepo() {
   await git.checkoutLocalBranch("pi/T-1");
 }
 
-async function writePlanArtifacts(planBody: string, scenariosBody: string) {
+async function writePlanArtifacts(
+  planBody: string,
+  scenariosBody: string,
+  blastRadiusBody = validBlastRadiusYaml,
+) {
   const plan: Artifact = {
     fm: {
       task: "T-1",
@@ -107,8 +133,21 @@ async function writePlanArtifacts(planBody: string, scenariosBody: string) {
     },
     body: scenariosBody,
   };
+  const blastRadius: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "blast-radius",
+      parent: "spec.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "orchestrator",
+    },
+    body: blastRadiusBody,
+  };
   await store.writeArtifact(cwd, "T-1", plan);
   await store.writeArtifact(cwd, "T-1", scenarios);
+  await store.writeArtifact(cwd, "T-1", blastRadius);
 }
 
 beforeEach(async () => {
@@ -173,6 +212,43 @@ describe("mark_ready", () => {
     expect(result.details.missing).toBe("scenarios.yaml not found");
   });
 
+  it("rejects when blast-radius.yaml is missing", async () => {
+    const plan: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "plan",
+        parent: "design.md",
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "orchestrator",
+      },
+      body: validPlanBody,
+    };
+    const scenarios: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "scenarios",
+        parent: "plan.md",
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "orchestrator",
+      },
+      body: validScenariosYaml,
+    };
+    await store.writeArtifact(cwd, "T-1", plan);
+    await store.writeArtifact(cwd, "T-1", scenarios);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toBe("blast-radius.yaml not found");
+  });
+
   it("rejects when a required section is missing", async () => {
     const planMissing = validPlanBody.replace("## Out of scope\n- Inbound webhook receipts", "");
     await writePlanArtifacts(planMissing, validScenariosYaml);
@@ -233,6 +309,18 @@ describe("mark_ready", () => {
     const result = await tool.execute("t1", {}, undefined, undefined, null as never);
     expect(result.details.ok).toBe(false);
     expect(result.details.missing).toContain("scenarios.yaml");
+  });
+
+  it("rejects when blast-radius.yaml fails schema", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml, "items: []\n");
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("blast-radius.yaml");
   });
 
   it("rejects when claim-verifier flags Falsified claims", async () => {
@@ -315,8 +403,10 @@ describe("mark_ready", () => {
 
     const plan = await store.readArtifact(cwd, "T-1", "plan");
     const scenarios = await store.readArtifact(cwd, "T-1", "scenarios");
+    const blastRadius = await store.readArtifact(cwd, "T-1", "blast-radius");
     expect(plan?.fm.status).toBe("ready");
     expect(scenarios?.fm.status).toBe("ready");
+    expect(blastRadius?.fm.status).toBe("ready");
     expect(plan?.fm.last_updated_by).toBe("plan-agent");
 
     const events = await eventStore.list("r-1");
@@ -351,8 +441,21 @@ describe("mark_ready", () => {
       },
       body: validScenariosYaml,
     };
+    const blastRadiusReady: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "blast-radius",
+        parent: "spec.md",
+        status: "ready",
+        branch: "pi/T-1",
+        last_updated: new Date().toISOString(),
+        last_updated_by: "plan-agent",
+      },
+      body: validBlastRadiusYaml,
+    };
     await store.writeArtifact(cwd, "T-1", planReady);
     await store.writeArtifact(cwd, "T-1", scenariosReady);
+    await store.writeArtifact(cwd, "T-1", blastRadiusReady);
 
     const tool = makeMarkReadyTool({
       store, bus, cwd, taskId: "T-1",
@@ -381,6 +484,20 @@ describe("validateScenariosYaml", () => {
 describe("parseFalsifiedClaims", () => {
   it("returns empty when no Falsified entries", () => {
     expect(parseFalsifiedClaims("# claims\n## c1\nVerified\n")).toEqual([]);
+  });
+
+  it("collects pipe-delimited Falsified finding rows with justifications", () => {
+    const findings = [
+      "FINDING S1 | Verified | quote matches at src/a.ts:1",
+      "FINDING S2 | Falsified | cited file src/missing.ts does not exist",
+      "FINDING S3 | Weakened | narrower than stated at src/b.ts:2",
+      "FINDING S4 | Falsified | claim contradicted by src/c.ts:3",
+    ].join("\n");
+
+    expect(parseFalsifiedClaims(findings)).toEqual([
+      "S2: cited file src/missing.ts does not exist",
+      "S4: claim contradicted by src/c.ts:3",
+    ]);
   });
 
   it("collects each header preceded by a Falsified marker", () => {

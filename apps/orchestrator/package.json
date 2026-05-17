@@ -1,23 +1,50 @@
 {
   "name": "@pi-harness/orchestrator",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
+  "description": "Fastify runner service for pi-harness task orchestration, phase runs, and worktrees.",
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "apps/orchestrator"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "fastify",
+    "orchestrator",
+    "worktrees"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
+    "prepack": "pnpm run build",
     "start": "node dist/index.js",
-    "test": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://piharness:piharness@localhost:54330/piharness_test} vitest run",
+    "test": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://piharness:piharness@localhost:54330/piharness_test} vitest run --pool forks --no-file-parallelism --maxWorkers=1",
+    "test:live": "PI_LIVE=1 vitest run --config vitest.live.config.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'no lint configured'"
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
-    "@pi-harness/db": "workspace:*",
-    "@pi-harness/pi-bridge": "workspace:*",
-    "@pi-harness/shared": "workspace:*",
-    "@pi-harness/subagents": "workspace:*",
+    "@pi-harness/db": "workspace:0.1.0-alpha.0",
+    "@pi-harness/pi-bridge": "workspace:0.1.0-alpha.0",
+    "@pi-harness/shared": "workspace:0.1.0-alpha.0",
+    "@pi-harness/subagents": "workspace:0.1.0-alpha.0",
     "@types/js-yaml": "^4.0.9",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.36.0",
@@ -25,13 +52,13 @@
     "js-yaml": "^4.1.1",
     "pino": "^10.3.1",
     "playwright": "^1.48.0",
+    "pino-pretty": "^13.1.3",
     "simple-git": "^3.27.0",
     "typebox": "^1.1.38",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "pino-pretty": "^13.1.3",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"

@@ -226,6 +226,21 @@ describe("makeMarkReadyTool", () => {
     expect(result.terminate).toBeUndefined();
   });
 
+  it("requires External research section when brainstorm web research exists", async () => {
+    const { bus } = makeBus();
+    const store = makeStore();
+    await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
+    await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
+    const researchDir = join(cwd, ".harness", TASK, "brainstorm-research");
+    await mkdir(researchDir, { recursive: true });
+    await writeFile(join(researchDir, "web-search-researcher.md"), "findings");
+    const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
+
+    const result = await fakeExecute(tool, {});
+
+    expect(result.details).toEqual({ ok: false, missing: "design.md missing: ## External research" });
+  });
+
   it("reports missing when section heading is present but body is whitespace-only", async () => {
     const { bus } = makeBus();
     const store = makeStore();
@@ -332,6 +347,82 @@ describe("makeMarkReadyTool", () => {
     expect(result.terminate).toBeUndefined();
     // No status_changed published — the artifacts stay in draft.
     expect(eventAppends).toHaveLength(0);
+  });
+
+  it("rejects when brainstorm mocks exist but selected mock is not reflected in artifacts", async () => {
+    const { bus } = makeBus();
+    const store = makeStore();
+    await store.writeBrainstormMock(cwd, TASK, {
+      mockId: "mock-a",
+      title: "Split pane",
+      summary: "Shows options beside artifacts.",
+      recommended: true,
+      createdAt: "2026-05-13T00:00:00.000Z",
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+        },
+      ],
+    }, [{ pageId: "task-detail", html: "<h1>Mock A</h1>" }]);
+    await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
+    await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
+    const tool = makeMarkReadyTool({
+      store,
+      bus,
+      cwd,
+      taskId: TASK,
+      countPendingNudges: async () => 0,
+    });
+
+    const result = await fakeExecute(tool, {});
+
+    expect(result.details).toEqual({
+      ok: false,
+      missing: "selected mock missing from design.md and spec.md",
+    });
+  });
+
+  it("accepts mocks when selected mock is reflected in both brainstorm artifacts", async () => {
+    const { bus } = makeBus();
+    const store = makeStore();
+    await store.writeBrainstormMock(cwd, TASK, {
+      mockId: "mock-a",
+      title: "Split pane",
+      summary: "Shows options beside artifacts.",
+      recommended: true,
+      createdAt: "2026-05-13T00:00:00.000Z",
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          htmlPath: ".harness/T-1/mocks/mock-a/task-detail.html",
+        },
+      ],
+    }, [{ pageId: "task-detail", html: "<h1>Mock A</h1>" }]);
+    await store.selectBrainstormMock(cwd, TASK, "mock-a");
+    await writeArtifactFile(
+      store,
+      "design",
+      `${VALID_DESIGN_BODY}\n## Selected UI direction\nSelected mock: mock-a\n`,
+    );
+    await writeArtifactFile(
+      store,
+      "spec",
+      `${VALID_SPEC_BODY}\n## UI acceptance criteria\nSelected mock: mock-a\n`,
+    );
+    const tool = makeMarkReadyTool({
+      store,
+      bus,
+      cwd,
+      taskId: TASK,
+      countPendingNudges: async () => 0,
+    });
+
+    const result = await fakeExecute(tool, {});
+
+    expect(result.details).toEqual({ ok: true });
   });
 });
 

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import simpleGit from "simple-git";
+import { z } from "zod";
 import {
   BrainstormArtifactSchema,
   PlanArtifactSchema,
@@ -11,16 +12,117 @@ import {
   type Artifact,
   type ArtifactKind,
   type ArtifactStatus,
+  type BrainstormMock,
+  type BrainstormMockManifest,
   type BrainstormArtifact,
   type PlanArtifact,
   type ProofReport,
 } from "@pi-harness/shared";
+import { withGitLockDiagnostic } from "../runner/git-diagnostics.js";
+
+const SafeSlugSchema = z.string().min(1).max(80).regex(/^[a-z0-9][a-z0-9-]*$/);
+
+const BrainstormMockPageSchema = z.object({
+  pageId: SafeSlugSchema,
+  title: z.string().min(1),
+  summary: z.string().min(1).optional(),
+  htmlPath: z.string().min(1),
+});
+
+const BrainstormMockMiniatureSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("rows"),
+    rows: z
+      .array(
+        z.object({
+          status: z.enum(["pass", "fail", "muted"]),
+          label: z.string().min(1),
+          sub: z.string().min(1).optional(),
+          action: z.string().min(1).optional(),
+        }),
+      )
+      .min(1)
+      .max(8),
+  }),
+  z.object({
+    kind: z.literal("grid+drawer"),
+    cells: z.array(z.object({ status: z.enum(["pass", "fail"]) })).min(1).max(8),
+    drawerTitle: z.string().min(1),
+    diffLines: z.array(z.object({ kind: z.enum(["plus", "minus"]) })).min(1).max(8),
+    confirm: z.string().min(1),
+  }),
+]);
+
+const BrainstormMockSchema = z.object({
+  mockId: SafeSlugSchema,
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  recommended: z.boolean(),
+  createdAt: z.string().min(1),
+  derivedFrom: z.string().min(1).optional(),
+  miniature: BrainstormMockMiniatureSchema.optional(),
+  pages: z.array(BrainstormMockPageSchema).min(1).max(6),
+});
+
+const BrainstormMockManifestSchema = z.object({
+  mocks: z.array(BrainstormMockSchema),
+  selectedMockId: z.string().min(1).nullable(),
+});
+
+const BrainstormMockPageHtmlSchema = z.object({
+  pageId: SafeSlugSchema,
+  html: z.string().min(1),
+});
+
+function toBrainstormMock(value: z.infer<typeof BrainstormMockSchema>): BrainstormMock {
+  const miniature =
+    value.miniature === undefined ? undefined : toBrainstormMiniature(value.miniature);
+  return {
+    mockId: value.mockId,
+    title: value.title,
+    summary: value.summary,
+    recommended: value.recommended,
+    createdAt: value.createdAt,
+    ...(value.derivedFrom !== undefined ? { derivedFrom: value.derivedFrom } : {}),
+    ...(miniature !== undefined ? { miniature } : {}),
+    pages: value.pages.map((page) => ({
+      pageId: page.pageId,
+      title: page.title,
+      ...(page.summary !== undefined ? { summary: page.summary } : {}),
+      htmlPath: page.htmlPath,
+    })),
+  };
+}
+
+function toBrainstormMiniature(
+  value: z.infer<typeof BrainstormMockMiniatureSchema>,
+): NonNullable<BrainstormMock["miniature"]> {
+  if (value.kind === "rows") {
+    return {
+      kind: "rows",
+      rows: value.rows.map((row) => ({
+        status: row.status,
+        label: row.label,
+        ...(row.sub !== undefined ? { sub: row.sub } : {}),
+        ...(row.action !== undefined ? { action: row.action } : {}),
+      })),
+    };
+  }
+  return {
+    kind: "grid+drawer",
+    cells: value.cells.map((cell) => ({ status: cell.status })),
+    drawerTitle: value.drawerTitle,
+    diffLines: value.diffLines.map((line) => ({ kind: line.kind })),
+    confirm: value.confirm,
+  };
+}
 
 // Per-kind on-disk file name. Markdown for prose artifacts; YAML for the
 // plan phase's structured scenarios file (consumed by the verify phase).
 // Centralized so callers never compose a path themselves.
 export function artifactFileName(kind: ArtifactKind): string {
-  return kind === "scenarios" ? "scenarios.yaml" : `${kind}.md`;
+  if (kind === "scenarios" || kind === "blast-radius") return `${kind}.yaml`;
+  return `${kind}.md`;
 }
 
 // Branch-scoped artifact store. Owns every read/write under
@@ -33,7 +135,8 @@ export function artifactFileName(kind: ArtifactKind): string {
 //     ├── design.md       (frontmatter + body)
 //     ├── spec.md         (frontmatter + body)
 //     ├── plan.md         (frontmatter + body)
-//     └── scenarios.yaml  (frontmatter + body)
+//     ├── scenarios.yaml  (frontmatter + body)
+//     └── blast-radius.yaml (frontmatter + body)
 //
 // Legacy run-scoped artifacts (BrainstormArtifact / PlanArtifact /
 // ProofReport JSON) live in LegacyRunArtifactsStore — separate class because
@@ -48,6 +151,22 @@ export class ArtifactsStore {
     return join(this.artifactDir(cwd, taskId), artifactFileName(kind));
   }
 
+  mockDir(cwd: string, taskId: string): string {
+    return join(this.artifactDir(cwd, taskId), "mocks");
+  }
+
+  mockManifestPath(cwd: string, taskId: string): string {
+    return join(this.mockDir(cwd, taskId), "manifest.json");
+  }
+
+  mockPageDir(cwd: string, taskId: string, mockId: string): string {
+    return join(this.mockDir(cwd, taskId), mockId);
+  }
+
+  mockPageHtmlPath(cwd: string, taskId: string, mockId: string, pageId: string): string {
+    return join(this.mockPageDir(cwd, taskId, mockId), `${pageId}.html`);
+  }
+
   async readArtifact(cwd: string, taskId: string, kind: ArtifactKind): Promise<Artifact | null> {
     const path = this.artifactPath(cwd, taskId, kind);
     if (!existsSync(path)) return null;
@@ -58,7 +177,7 @@ export class ArtifactsStore {
   async listArtifacts(
     cwd: string,
     taskId: string,
-    kinds: readonly ArtifactKind[] = ["design", "spec", "plan", "scenarios"],
+    kinds: readonly ArtifactKind[] = ["design", "spec", "plan", "scenarios", "blast-radius"],
   ): Promise<Artifact[]> {
     const out: Artifact[] = [];
     for (const kind of kinds) {
@@ -78,6 +197,81 @@ export class ArtifactsStore {
     const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
     await writeFile(tmpPath, stringifyArtifact(art));
     await rename(tmpPath, finalPath);
+  }
+
+  async readBrainstormMockManifest(
+    cwd: string,
+    taskId: string,
+  ): Promise<BrainstormMockManifest> {
+    const path = this.mockManifestPath(cwd, taskId);
+    if (!existsSync(path)) return { mocks: [], selectedMockId: null };
+    const raw = await readFile(path, "utf8");
+    const parsed = BrainstormMockManifestSchema.parse(JSON.parse(raw));
+    const mocks: BrainstormMock[] = parsed.mocks.map(toBrainstormMock);
+    return { mocks, selectedMockId: parsed.selectedMockId };
+  }
+
+  async writeBrainstormMockManifest(
+    cwd: string,
+    taskId: string,
+    manifest: BrainstormMockManifest,
+  ): Promise<void> {
+    const dir = this.mockDir(cwd, taskId);
+    await mkdir(dir, { recursive: true });
+    const finalPath = this.mockManifestPath(cwd, taskId);
+    const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await rename(tmpPath, finalPath);
+  }
+
+  async writeBrainstormMock(
+    cwd: string,
+    taskId: string,
+    mock: BrainstormMock,
+    pageHtml: ReadonlyArray<{ pageId: string; html: string }>,
+  ): Promise<void> {
+    const validatedMock = toBrainstormMock(BrainstormMockSchema.parse(mock));
+    const validatedPageHtml = z.array(BrainstormMockPageHtmlSchema).parse(pageHtml);
+    const dir = this.mockPageDir(cwd, taskId, validatedMock.mockId);
+    await mkdir(dir, { recursive: true });
+    for (const page of validatedPageHtml) {
+      const finalPath = this.mockPageHtmlPath(cwd, taskId, validatedMock.mockId, page.pageId);
+      const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+      await writeFile(tmpPath, page.html);
+      await rename(tmpPath, finalPath);
+    }
+
+    const manifest = await this.readBrainstormMockManifest(cwd, taskId);
+    const mocks = [
+      ...manifest.mocks.filter((m) => m.mockId !== validatedMock.mockId),
+      validatedMock,
+    ];
+    await this.writeBrainstormMockManifest(cwd, taskId, {
+      mocks,
+      selectedMockId: manifest.selectedMockId,
+    });
+  }
+
+  async readBrainstormMockHtml(
+    cwd: string,
+    taskId: string,
+    mockId: string,
+    pageId: string,
+  ): Promise<string | null> {
+    const path = this.mockPageHtmlPath(cwd, taskId, mockId, pageId);
+    if (!existsSync(path)) return null;
+    return readFile(path, "utf8");
+  }
+
+  async selectBrainstormMock(cwd: string, taskId: string, mockId: string): Promise<void> {
+    const manifest = await this.readBrainstormMockManifest(cwd, taskId);
+    if (!manifest.mocks.some((m) => m.mockId === mockId)) {
+      throw new Error(`brainstorm mock ${mockId} not found for ${taskId}`);
+    }
+    await this.writeBrainstormMockManifest(cwd, taskId, {
+      mocks: manifest.mocks,
+      selectedMockId: mockId,
+    });
   }
 
   // Read an artifact's contents as it existed at a specific git ref (commit
@@ -171,28 +365,23 @@ export class ArtifactsStore {
     return first ? first.hash : null;
   }
 
-  // Move the current run's per-run files into runs/<runId>/ on the same
-  // task branch, then commit the move. Used by the brainstorm and plan
-  // restart endpoints: archives both phases' artifacts + JSONLs + the plan
-  // research/ directory so the new run starts from a clean slate but the
-  // archived contents stay reachable via git history.
+  // Move the current phase's files into runs/<runId>/ on the same task
+  // branch, then commit the move. Brainstorm restarts archive brainstorm-owned
+  // inputs; plan restarts archive plan-owned outputs while preserving
+  // brainstorm-approved design.md/spec.md for the next preflight.
   //
   // Files (and the research/ directory) that don't exist are silently
   // skipped — partial-state runs still archive cleanly.
-  async archiveCurrentRun(cwd: string, taskId: string, runId: string): Promise<void> {
+  async archiveCurrentRun(
+    cwd: string,
+    taskId: string,
+    runId: string,
+    phase: "brainstorm" | "plan",
+  ): Promise<void> {
     const baseDir = this.artifactDir(cwd, taskId);
     const archiveDir = join(baseDir, "runs", runId);
     await mkdir(archiveDir, { recursive: true });
-    const candidates = [
-      "design.md",
-      "spec.md",
-      "brainstorm.jsonl",
-      "pi-session.jsonl",
-      "plan.md",
-      "scenarios.yaml",
-      "plan.jsonl",
-      "pi-session-plan.jsonl",
-    ];
+    const candidates = archiveFileNames(phase);
     const moved: string[] = [];
     for (const name of candidates) {
       const src = join(baseDir, name);
@@ -201,26 +390,30 @@ export class ArtifactsStore {
       await rename(src, dst);
       moved.push(join(".harness", taskId, "runs", runId, name));
     }
-    // Plan-phase research findings (uncommitted via per-task .gitignore).
-    // Move the whole directory if it exists; nothing to git-stage since
-    // it's ignored.
-    const researchSrc = join(baseDir, "research");
-    if (existsSync(researchSrc)) {
-      const researchDst = join(archiveDir, "research");
-      await rename(researchSrc, researchDst);
+    const movedDirs = archiveDirectoryNames(phase);
+    for (const name of movedDirs) {
+      const src = join(baseDir, name);
+      if (!existsSync(src)) continue;
+      const dst = join(archiveDir, name);
+      await rename(src, dst);
     }
     if (moved.length === 0) return;
     const git = simpleGit(cwd);
     // .harness is gitignored — same -f trick as setArtifactStatus.
-    await git.raw([
-      "add",
-      "-f",
-      "--",
-      ...moved,
-      // Stage deletions of the originals too so the commit captures the move.
-      join(".harness", taskId),
-    ]);
-    await git.commit(`chore(${taskId}): archive run ${runId}`);
+    await withGitLockDiagnostic(
+      { taskId, operation: `archive ${phase} run ${runId}` },
+      async () => {
+        await git.raw([
+          "add",
+          "-f",
+          "--",
+          ...moved,
+          // Stage deletions of the originals too so the commit captures the move.
+          join(".harness", taskId),
+        ]);
+        await git.commit(`chore(${taskId}): archive ${phase} run ${runId}`);
+      },
+    );
   }
 
   // Apply a user-authored edit to an artifact. Body is replaced verbatim;
@@ -249,8 +442,13 @@ export class ArtifactsStore {
     await this.writeArtifact(cwd, taskId, next);
     const git = simpleGit(cwd);
     const fileName = artifactFileName(kind);
-    await git.raw(["add", "-f", join(".harness", taskId, fileName)]);
-    const commit = await git.commit(`human(${taskId}): edit ${fileName}`);
+    const commit = await withGitLockDiagnostic(
+      { taskId, operation: `human edit ${fileName}` },
+      async () => {
+        await git.raw(["add", "-f", join(".harness", taskId, fileName)]);
+        return git.commit(`human(${taskId}): edit ${fileName}`);
+      },
+    );
     return { artifact: next, commitSha: commit.commit };
   }
 
@@ -279,10 +477,32 @@ export class ArtifactsStore {
     // .harness/ is gitignored at the repo root; force-add so the commit
     // captures the artifact-status flip just like the scaffolding commit
     // does (see scaffold-brainstorm.ts).
-    await git.raw(["add", "-f", join(".harness", taskId, artifactFileName(kind))]);
-    await git.commit(`chore(${taskId}): mark ${kind} as ${status}`);
+    await withGitLockDiagnostic(
+      { taskId, operation: `mark ${kind} as ${status}` },
+      async () => {
+        await git.raw(["add", "-f", join(".harness", taskId, artifactFileName(kind))]);
+        await git.commit(`chore(${taskId}): mark ${kind} as ${status}`);
+      },
+    );
     return next;
   }
+}
+
+function archiveFileNames(phase: "brainstorm" | "plan"): ReadonlyArray<string> {
+  if (phase === "brainstorm") {
+    return ["design.md", "spec.md", "brainstorm.jsonl", "pi-session.jsonl"];
+  }
+  return [
+    "plan.md",
+    "scenarios.yaml",
+    "blast-radius.yaml",
+    "plan.jsonl",
+    "pi-session-plan.jsonl",
+  ];
+}
+
+function archiveDirectoryNames(phase: "brainstorm" | "plan"): ReadonlyArray<string> {
+  return phase === "brainstorm" ? ["mocks"] : ["research"];
 }
 
 // Legacy run-scoped artifact store. Reads/writes JSON+MD pairs under

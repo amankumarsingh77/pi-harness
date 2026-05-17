@@ -49,6 +49,7 @@ function makeFakeWriter(opts: {
   failSubagents?: Set<string>;
   delayMs?: number;
   onCreate?: () => void;
+  mode?: "write" | "skip-write" | "empty-write";
 } = {}): (o: AgentSessionOptions) => Promise<AgentSession> {
   return async (sessionOpts) => {
     opts.onCreate?.();
@@ -71,16 +72,47 @@ function makeFakeWriter(opts: {
         if (opts.delayMs) {
           await new Promise((r) => setTimeout(r, opts.delayMs));
         }
-        await writeFindings.execute(
-          "test-write",
-          { body: `# ${subagent} findings\n\nfake findings body\n` },
-          undefined,
-          undefined,
-          undefined as never,
-        );
+        if (opts.mode !== "skip-write") {
+          await writeFindings.execute(
+            "test-write",
+            {
+              body: opts.mode === "empty-write"
+                ? " \n"
+                : `# ${subagent} findings\n\nfake findings body\n`,
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+        }
         return { inputTokens: 100, outputTokens: 50, costUsd: 0.01 };
       },
       async abort() {},
+      async close() {},
+    } satisfies AgentSession;
+  };
+}
+
+function makeHangingWriter(opts: {
+  onAbort?: () => void;
+  rejectOnAbort?: boolean;
+  onCreate?: () => void;
+} = {}): (o: AgentSessionOptions) => Promise<AgentSession> {
+  return async () => {
+    opts.onCreate?.();
+    let rejectPrompt: ((err: Error) => void) | null = null;
+    return {
+      async prompt() {
+        return new Promise((_, reject) => {
+          rejectPrompt = reject;
+        });
+      },
+      async abort() {
+        opts.onAbort?.();
+        if (opts.rejectOnAbort) {
+          rejectPrompt?.(new Error("aborted"));
+        }
+      },
       async close() {},
     } satisfies AgentSession;
   };
@@ -90,7 +122,7 @@ describe("runPreflight", () => {
   const N = PREFLIGHT_SUBAGENTS.length;
   const FIRST = PREFLIGHT_SUBAGENTS[0]!;
 
-  it("dispatches every preflight subagent in parallel and writes findings", async () => {
+  it("runs codebase-scout, synthesizes blast-radius.yaml, then writes remaining findings", async () => {
     const events: PreflightSubagentEvent[] = [];
     const result = await runPreflight(
       baseOpts({
@@ -116,22 +148,28 @@ describe("runPreflight", () => {
 
     expect(events.filter((e) => e.kind === "started")).toHaveLength(N);
     expect(events.filter((e) => e.kind === "ended")).toHaveLength(N);
+    expect(events[0]).toMatchObject({ kind: "started", subagent: "codebase-scout" });
+    expect(events[1]).toMatchObject({ kind: "ended", subagent: "codebase-scout" });
+
+    const blastRadius = await readFile(
+      join(cwd, ".harness", "T-001", "blast-radius.yaml"),
+      "utf8",
+    );
+    expect(blastRadius).toContain("kind: blast-radius");
+    expect(blastRadius).toContain("id: BR-001");
+    expect(blastRadius).toContain("requirementRefs:");
   });
 
-  it("dispatches subagents concurrently (all create() calls fire before any prompt resolves)", async () => {
-    let createdCount = 0;
-    const peakBeforeFirstResolve = { value: 0 };
-    let firstResolved = false;
+  it("dispatches enrichment subagents concurrently after codebase-scout resolves", async () => {
+    const enrichmentCreatedBeforeResolve = { value: 0 };
+    let scoutResolved = false;
+    let enrichmentResolved = false;
 
     const writer = makeFakeWriter({
       delayMs: 30,
       onCreate: () => {
-        createdCount += 1;
-        if (!firstResolved) {
-          peakBeforeFirstResolve.value = Math.max(
-            peakBeforeFirstResolve.value,
-            createdCount,
-          );
+        if (scoutResolved && !enrichmentResolved) {
+          enrichmentCreatedBeforeResolve.value += 1;
         }
       },
     });
@@ -141,7 +179,11 @@ describe("runPreflight", () => {
       const orig = s.prompt.bind(s);
       s.prompt = async (t) => {
         const r = await orig(t);
-        firstResolved = true;
+        if (!scoutResolved) {
+          scoutResolved = true;
+        } else {
+          enrichmentResolved = true;
+        }
         return r;
       };
       return s;
@@ -154,10 +196,10 @@ describe("runPreflight", () => {
       }),
     );
 
-    expect(peakBeforeFirstResolve.value).toBe(N);
+    expect(enrichmentCreatedBeforeResolve.value).toBe(N - 1);
   });
 
-  it("one subagent failure leaves the others successful and below the failed threshold", async () => {
+  it("a codebase-scout failure stops preflight before downstream research", async () => {
     const result = await runPreflight(
       baseOpts({
         createAgentSession: makeFakeWriter({
@@ -166,23 +208,132 @@ describe("runPreflight", () => {
       }),
     );
 
-    expect(result.failed).toBe(false);
+    expect(result.failed).toBe(true);
     const failed = result.results.find((r) => r.subagent === FIRST)!;
     expect(failed.ok).toBe(false);
     expect(failed.error).toContain("synthetic failure");
-    const others = result.results.filter((r) => r.subagent !== FIRST);
-    expect(others.every((r) => r.ok)).toBe(true);
+    expect(result.results).toHaveLength(1);
   });
 
-  it("a majority of failures sets failed=true so caller can fail the phase", async () => {
-    const majority = Math.floor(N / 2) + 1;
-    const fail = new Set(PREFLIGHT_SUBAGENTS.slice(0, majority));
+  it("a session that returns without write_findings fails the subagent", async () => {
     const result = await runPreflight(
       baseOpts({
-        createAgentSession: makeFakeWriter({ failSubagents: fail }),
+        createAgentSession: makeFakeWriter({ mode: "skip-write" }),
       }),
     );
+
     expect(result.failed).toBe(true);
+    expect(result.results).toHaveLength(1);
+    expect(result.results.every((r) => !r.ok)).toBe(true);
+    expect(result.results[0]?.error).toContain("completed without writing findings");
+  });
+
+  it("an empty findings file fails the subagent", async () => {
+    const result = await runPreflight(
+      baseOpts({
+        createAgentSession: makeFakeWriter({ mode: "empty-write" }),
+      }),
+    );
+
+    expect(result.failed).toBe(true);
+    expect(result.results).toHaveLength(1);
+    expect(result.results.every((r) => !r.ok)).toBe(true);
+    expect(result.results[0]?.error).toContain("completed without writing findings");
+  });
+
+  it("does not pass a turn cap to preflight sessions", async () => {
+    const maxTurns: Array<number | undefined> = [];
+    const writer = makeFakeWriter({
+      onCreate: () => {},
+    });
+    await runPreflight(
+      baseOpts({
+        createAgentSession: async (o) => {
+          maxTurns.push(o.maxTurns);
+          return writer(o);
+        },
+      }),
+    );
+
+    expect(maxTurns).toEqual(Array.from({ length: N }, () => undefined));
+  });
+
+  it("injects git_history only for precedent-locator and never exposes bash", async () => {
+    const toolMap = new Map<string, { tools: string[]; customTools: string[] }>();
+    const writer = makeFakeWriter();
+
+    await runPreflight(
+      baseOpts({
+        createAgentSession: async (o) => {
+          const writeFindings = (o.customTools ?? []).find(
+            (t) => t.name === "write_findings",
+          ) as { __subagent?: string } | undefined;
+          const subagent = writeFindings?.__subagent;
+          if (subagent) {
+            toolMap.set(subagent, {
+              tools: [...(o.tools ?? [])],
+              customTools: (o.customTools ?? []).map((t) => t.name),
+            });
+          }
+          return writer(o);
+        },
+      }),
+    );
+
+    expect(toolMap.get("precedent-locator")?.customTools).toContain("git_history");
+    for (const [subagent, tools] of toolMap) {
+      expect(tools.tools, subagent).not.toContain("bash");
+      if (subagent !== "precedent-locator") {
+        expect(tools.customTools, subagent).not.toContain("git_history");
+      }
+    }
+  });
+
+  it("times out hanging subagents and aborts their sessions", async () => {
+    let aborts = 0;
+    const result = await runPreflight(
+      baseOpts({
+        createAgentSession: makeHangingWriter({
+          onAbort: () => {
+            aborts += 1;
+          },
+        }),
+        subagentTimeoutMs: 5,
+      }),
+    );
+
+    expect(result.failed).toBe(true);
+    expect(aborts).toBe(1);
+    expect(result.results.every((r) => r.error?.includes("timed out"))).toBe(true);
+  });
+
+  it("parent abort signal cancels in-flight subagents", async () => {
+    const controller = new AbortController();
+    let created = 0;
+    let aborts = 0;
+    const resultPromise = runPreflight(
+      baseOpts({
+        createAgentSession: makeHangingWriter({
+          rejectOnAbort: true,
+          onCreate: () => {
+            created += 1;
+            if (created === 1) {
+              setTimeout(() => controller.abort(), 0);
+            }
+          },
+          onAbort: () => {
+            aborts += 1;
+          },
+        }),
+        signal: controller.signal,
+        subagentTimeoutMs: 1000,
+      }),
+    );
+
+    const result = await resultPromise;
+    expect(result.failed).toBe(true);
+    expect(result.cancelled).toBe(true);
+    expect(aborts).toBe(1);
   });
 
   it("re-entry skips subagents whose findings file already exists", async () => {
@@ -215,6 +366,28 @@ describe("runPreflight", () => {
     expect(skipped.inputTokens).toBe(0);
   });
 
+  it("re-entry reruns subagents whose findings file is empty", async () => {
+    const researchDir = join(cwd, ".harness", "T-001", "research");
+    await mkdir(researchDir, { recursive: true });
+    await writeFile(join(researchDir, `${FIRST}.md`), " \n");
+
+    let createCount = 0;
+    const result = await runPreflight(
+      baseOpts({
+        createAgentSession: makeFakeWriter({
+          onCreate: () => {
+            createCount += 1;
+          },
+        }),
+      }),
+    );
+
+    expect(result.failed).toBe(false);
+    expect(createCount).toBe(N);
+    const body = await readFile(join(researchDir, `${FIRST}.md`), "utf8");
+    expect(body).toContain(`${FIRST} findings`);
+  });
+
   it("inlines the ticket digest, not the full design/spec, into the user prompt", async () => {
     let captured = "";
     const writer = makeFakeWriter();
@@ -244,5 +417,37 @@ describe("runPreflight", () => {
     expect(captured).toContain("WHEN /cancel arrives");
     expect(captured).not.toContain(designSentinel);
     expect(captured).toContain("Full context (read on demand)");
+  });
+
+  it("passes synthesized blast radius context to downstream research prompts", async () => {
+    const captured: Record<string, string> = {};
+    const writer = makeFakeWriter();
+    const wrapped: typeof writer = async (o) => {
+      const writeFindings = (o.customTools ?? []).find((t) => t.name === "write_findings") as
+        | (NonNullable<AgentSessionOptions["customTools"]>[number] & {
+            __subagent: string;
+          })
+        | undefined;
+      const subagent = writeFindings?.__subagent ?? "unknown";
+      const s = await writer(o);
+      const orig = s.prompt.bind(s);
+      s.prompt = async (t) => {
+        captured[subagent] = t;
+        return orig(t);
+      };
+      return s;
+    };
+
+    await runPreflight(
+      baseOpts({
+        createAgentSession: wrapped,
+        specBody: "# Spec\n\nREQ-002: Verify plan blast radius.\n",
+      }),
+    );
+
+    expect(captured["codebase-scout"]).not.toContain("Current blast-radius.yaml");
+    expect(captured["integration-scanner"]).toContain("Current blast-radius.yaml");
+    expect(captured["integration-scanner"]).toContain("BR-001");
+    expect(captured["precedent-locator"]).toContain("BR-001");
   });
 });

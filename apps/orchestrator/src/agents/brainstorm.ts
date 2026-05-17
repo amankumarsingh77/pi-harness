@@ -17,8 +17,17 @@ import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import {
   makeMarkReadyTool,
   makeReplyToUserTool,
+  makeSubmitMockChoicesTool,
   makeSubmitQuestionsTool,
+  makeWriteMockRevisionTool,
 } from "./brainstorm-tools.js";
+import {
+  brainstormResearchPath,
+  makePiWebFetchTool,
+  makePiWebSearchTool,
+  makeWriteBrainstormResearchFindingsTool,
+  shouldRunWebResearch,
+} from "./web-research-tools.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -60,6 +69,8 @@ type Decision =
   | { kind: "initial"; nudges: PendingNudge[] }
   | { kind: "answers"; prompt: string; nudges: PendingNudge[] }
   | { kind: "revision"; prompt: string; nudges: PendingNudge[] }
+  | { kind: "mock_selection"; prompt: string; nudges: PendingNudge[] }
+  | { kind: "mock_edit"; prompt: string; nudges: PendingNudge[] }
   | { kind: "nudge_only"; nudges: PendingNudge[] };
 
 type HaltReason = "questions" | "ready" | "exhausted";
@@ -83,6 +94,10 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
     return zeroUsage({ ok: true, ready: false });
   }
 
+  const research = decision.kind === "initial"
+    ? await ensureWebResearch(opts)
+    : { digest: readWebResearchDigest(opts.cwd, opts.taskId), usage: zeroPromptUsage() };
+
   // Mark every pending nudge as consumed *before* the prompt fires. This is
   // the durable record that the agent has now seen them — even if the prompt
   // fails or is aborted later, the next tick won't re-fold the same comments.
@@ -100,6 +115,7 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
       ? buildInitialPrompt({
           taskId: opts.taskId,
           cwd: opts.cwd,
+          ...(research.digest !== undefined ? { researchDigest: research.digest } : {}),
           ...(opts.ticketTitle !== undefined ? { title: opts.ticketTitle } : {}),
           ...(opts.ticketDescription !== undefined
             ? { description: opts.ticketDescription }
@@ -113,7 +129,13 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
     ? `${buildNudgeBlock(decision.nudges)}\n\n${basePrompt}`
     : basePrompt;
 
-  return runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
+  const turn = await runTurn(opts, promptText, opts.sessionPath, /* allowRetry */ true);
+  return {
+    ...turn,
+    costUsd: turn.costUsd + research.usage.costUsd,
+    inputTokens: turn.inputTokens + research.usage.inputTokens,
+    outputTokens: turn.outputTokens + research.usage.outputTokens,
+  };
 }
 
 async function runTurn(
@@ -126,6 +148,18 @@ async function runTurn(
   let lastWriteWasReady = false;
 
   const submitQuestionsTool = makeSubmitQuestionsTool({ bus: opts.bus });
+  const submitMockChoicesTool = makeSubmitMockChoicesTool({
+    store: opts.store,
+    bus: opts.bus,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
+  const writeMockRevisionTool = makeWriteMockRevisionTool({
+    store: opts.store,
+    bus: opts.bus,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
   const markReadyTool = makeMarkReadyTool({
     store: opts.store,
     bus: opts.bus,
@@ -149,6 +183,8 @@ async function runTurn(
     if (
       (e.kind === "tool_call" || e.kind === "tool_result") &&
       (e.tool === "submit_questions" ||
+        e.tool === "submit_mock_choices" ||
+        e.tool === "write_mock_revision" ||
         e.tool === "mark_ready" ||
         e.tool === "reply_to_user")
     ) {
@@ -186,6 +222,10 @@ async function runTurn(
       haltReason = "questions";
       return;
     }
+    if (e.kind === "tool_call" && e.tool === "submit_mock_choices") {
+      haltReason = "questions";
+      return;
+    }
     if (e.kind === "tool_result" && e.tool === "mark_ready") {
       // The tool's details encodes whether mark_ready was accepted. We watch
       // for ok:true to flip haltReason; a rejection (missing section) leaves
@@ -200,8 +240,10 @@ async function runTurn(
   };
 
   let systemPrompt: string;
+  let brainstormDef: ReturnType<typeof getSubagent>;
   try {
-    systemPrompt = readFileSync(getSubagent("brainstorm").promptPath, "utf8");
+    brainstormDef = getSubagent("brainstorm");
+    systemPrompt = readFileSync(brainstormDef.promptPath, "utf8");
   } catch (err) {
     return zeroUsage({
       ok: false,
@@ -223,7 +265,16 @@ async function runTurn(
         : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
-      customTools: [submitQuestionsTool, markReadyTool, replyToUserTool],
+      tools: [...brainstormDef.allowedTools],
+      customTools: [
+        submitQuestionsTool,
+        submitMockChoicesTool,
+        writeMockRevisionTool,
+        markReadyTool,
+        replyToUserTool,
+        makePiWebSearchTool(),
+        makePiWebFetchTool(),
+      ],
       onEvent: handleEvent,
     });
   } catch (err) {
@@ -285,18 +336,6 @@ async function runTurn(
     const message = (err as Error).message;
     if (signal?.aborted || message === "aborted") {
       return zeroUsage({ ok: false, ready: false, cancelled: true });
-    }
-    if (message === "maxTurns exceeded") {
-      await opts.bus.publish({
-        kind: "brainstorm_system",
-        systemKind: "blocked",
-        data: { reason: `maxTurns (${opts.phaseModel.maxTurns}) exceeded` },
-      });
-      return zeroUsage({
-        ok: false,
-        ready: false,
-        error: "brainstorm: maxTurns exceeded",
-      });
     }
     await opts.bus.publish({
       kind: "brainstorm_system",
@@ -375,7 +414,11 @@ function decide(events: JsonlEvent[]): Decision {
 
   const lastAgentIdx = lastIndexWhere(
     events,
-    (e) => e.kind === "brainstorm_question" || e.kind === "brainstorm_system",
+    (e) =>
+      e.kind === "brainstorm_question" ||
+      e.kind === "brainstorm_system" ||
+      e.kind === "brainstorm_mock_proposed" ||
+      e.kind === "brainstorm_mock_revised",
   );
 
   // Revision wins over answers when both postdate the last agent activity:
@@ -389,6 +432,29 @@ function decide(events: JsonlEvent[]): Decision {
     return {
       kind: "revision",
       prompt: buildRevisionPrompt(typeof last["comment"] === "string" ? (last["comment"] as string) : ""),
+      nudges,
+    };
+  }
+
+  const newMockEdits = events
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => e.kind === "brainstorm_mock_edit_requested" && i > lastAgentIdx);
+  if (newMockEdits.length > 0) {
+    return {
+      kind: "mock_edit",
+      prompt: buildMockEditPrompt(newMockEdits.map(({ e }) => e)),
+      nudges,
+    };
+  }
+
+  const newMockSelections = events
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => e.kind === "brainstorm_mock_selected" && i > lastAgentIdx);
+  if (newMockSelections.length > 0) {
+    const last = newMockSelections[newMockSelections.length - 1]!.e;
+    return {
+      kind: "mock_selection",
+      prompt: buildMockSelectionPrompt(String(last["mockId"] ?? "")),
       nudges,
     };
   }
@@ -433,6 +499,165 @@ function pendingNudges(events: JsonlEvent[]): PendingNudge[] {
   return out;
 }
 
+async function ensureWebResearch(opts: BrainstormOpts): Promise<{
+  digest: string | undefined;
+  usage: { costUsd: number; inputTokens: number; outputTokens: number };
+}> {
+  const existingDigest = readWebResearchDigest(opts.cwd, opts.taskId);
+  if (existingDigest) return { digest: existingDigest, usage: zeroPromptUsage() };
+
+  if (!shouldRunWebResearch({
+    ...(opts.ticketTitle !== undefined ? { title: opts.ticketTitle } : {}),
+    ...(opts.ticketDescription !== undefined ? { description: opts.ticketDescription } : {}),
+  })) {
+    return { digest: undefined, usage: zeroPromptUsage() };
+  }
+
+  await opts.bus.publish({
+    kind: "brainstorm_system",
+    systemKind: "probe_complete",
+    data: { kind: "web_research", status: "started" },
+  });
+
+  const usage = await runWebResearchSubagent(opts);
+  const digest = readWebResearchDigest(opts.cwd, opts.taskId);
+  await opts.bus.publish({
+    kind: "brainstorm_system",
+    systemKind: "probe_complete",
+    data: {
+      kind: "web_research",
+      status: digest ? "complete" : "unavailable",
+      path: `.harness/${opts.taskId}/brainstorm-research/web-search-researcher.md`,
+    },
+  });
+  return { digest, usage };
+}
+
+async function runWebResearchSubagent(
+  opts: BrainstormOpts,
+): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
+  const subagent = "web-search-researcher";
+  const def = getSubagent(subagent);
+  const systemPrompt = readFileSync(def.promptPath, "utf8");
+  const prompt = buildWebResearchPrompt(opts);
+
+  try {
+    const session = await opts.createAgentSession({
+      cwd: opts.cwd,
+      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+      ...(opts.phaseModel.thinkingLevel !== "off"
+        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+        : {}),
+      systemPrompt,
+      tools: [...def.allowedTools],
+      customTools: [
+        makePiWebSearchTool(),
+        makePiWebFetchTool(),
+        makeWriteBrainstormResearchFindingsTool({
+          cwd: opts.cwd,
+          taskId: opts.taskId,
+          subagent,
+        }),
+      ],
+      onEvent: (e) => forwardResearchEvent({
+        event: e,
+        eventStore: opts.eventStore,
+        runId: opts.runId,
+        taskId: opts.taskId,
+        subagent,
+      }),
+    });
+    try {
+      return await session.prompt(prompt);
+    } finally {
+      await session.close().catch(() => {});
+    }
+  } catch (err) {
+    await opts.eventStore.append(
+      mkEvent({
+        runId: opts.runId,
+        taskId: opts.taskId,
+        kind: "log",
+        level: "warn",
+        text: `web research unavailable: ${(err as Error).message}`,
+        subagent,
+      }),
+    );
+    return zeroPromptUsage();
+  }
+}
+
+function forwardResearchEvent(input: {
+  event: PiBridgeEvent;
+  eventStore: EventStore;
+  runId: string;
+  taskId: string;
+  subagent: string;
+}): void {
+  const base = {
+    runId: input.runId,
+    taskId: input.taskId,
+    subagent: input.subagent,
+  };
+  const e = input.event;
+  if (e.kind === "message_delta") {
+    void input.eventStore.append(mkEvent({ ...base, kind: "message_delta", text: e.text })).catch(() => {});
+    return;
+  }
+  if (e.kind === "tool_call") {
+    void input.eventStore.append(mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input })).catch(() => {});
+    return;
+  }
+  if (e.kind === "tool_result") {
+    void input.eventStore.append(
+      mkEvent({
+        ...base,
+        kind: "tool_result",
+        tool: e.tool,
+        ok: e.ok,
+        ...(e.output !== undefined ? { output: e.output } : {}),
+      }),
+    ).catch(() => {});
+    return;
+  }
+  if (e.kind === "log") {
+    void input.eventStore.append(
+      mkEvent({ ...base, kind: "log", level: e.level, text: e.text }),
+    ).catch(() => {});
+    return;
+  }
+  if (e.kind === "error") {
+    void input.eventStore.append(
+      mkEvent({ ...base, kind: "log", level: "warn", text: e.text }),
+    ).catch(() => {});
+  }
+}
+
+function buildWebResearchPrompt(opts: BrainstormOpts): string {
+  return [
+    "Research external context for this brainstorm task before the main brainstorm agent asks the user questions.",
+    opts.ticketTitle ? `Title: ${opts.ticketTitle}` : "",
+    opts.ticketDescription ? `Description: ${opts.ticketDescription}` : "",
+    "",
+    "Use pi_web_search for discovery and pi_web_fetch for the most relevant primary sources.",
+    "Prioritize official docs, release notes, package/repo pages, pricing pages, and credible comparisons.",
+    "Write concise findings with source links, maturity signals, and recommended fallback choices.",
+    "Persist findings through write_findings exactly once.",
+  ].filter((line) => line.length > 0).join("\n");
+}
+
+function readWebResearchDigest(cwd: string, taskId: string): string | undefined {
+  const path = brainstormResearchPath(cwd, taskId);
+  if (!existsSync(path)) return undefined;
+  const raw = readFileSync(path, "utf8").trim();
+  if (raw.length === 0) return undefined;
+  return raw.length <= 4_000 ? raw : `${raw.slice(0, 4_000)}\n… (truncated)`;
+}
+
+function zeroPromptUsage(): { costUsd: number; inputTokens: number; outputTokens: number } {
+  return { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+}
+
 function buildNudgeBlock(nudges: PendingNudge[]): string {
   const lines = nudges.map((n) => `- [nudgeId: ${n.nudgeId}] ${n.comment}`).join("\n");
   return `Recent user input (consider before asking your next question):\n${lines}\n\nWhen you call reply_to_user, set inReplyToNudgeId to the bracketed id of the nudge you are responding to.`;
@@ -443,6 +668,7 @@ function buildInitialPrompt(opts: {
   cwd: string;
   title?: string;
   description?: string;
+  researchDigest?: string;
 }): string {
   const parts: string[] = [];
   parts.push(`Begin brainstorming this task.`);
@@ -452,6 +678,12 @@ function buildInitialPrompt(opts: {
   parts.push(
     `Artifacts to author: .harness/${opts.taskId}/design.md and .harness/${opts.taskId}/spec.md.`,
   );
+  if (opts.researchDigest) {
+    parts.push(
+      `External research is available at .harness/${opts.taskId}/brainstorm-research/web-search-researcher.md.`,
+    );
+    parts.push(`Research digest:\n${opts.researchDigest}`);
+  }
   parts.push(
     `Use submit_questions to ask the user everything you need before you start writing. After they answer, fill the artifacts and call mark_ready.`,
   );
@@ -483,13 +715,49 @@ function buildRevisionPrompt(comment: string): string {
   return `User requested revisions: ${comment}\n\nRe-examine the artifacts and ask any clarifying questions you need before revising.`;
 }
 
-function hasReadyEvent(events: JsonlEvent[]): boolean {
-  return events.some(
-    (e) =>
-      e.kind === "brainstorm_system" &&
-      e["systemKind"] === "status_changed" &&
-      ((e["data"] as { status?: string } | undefined)?.status === "ready"),
+function buildMockSelectionPrompt(mockId: string): string {
+  return [
+    `User selected UI mock: ${mockId}`,
+    "",
+    "Read the selected mock direction from .harness/<taskId>/mocks/, fold every selected page into design.md under ## Selected UI direction and spec.md under ## UI acceptance criteria, then continue toward mark_ready.",
+  ].join("\n");
+}
+
+function buildMockEditPrompt(events: JsonlEvent[]): string {
+  const lines = ["User requested mock edit:"];
+  for (const e of events) {
+    lines.push(
+      `- requestId: ${String(e["requestId"] ?? "?")}; mockId: ${String(e["mockId"] ?? "?")}; comment: ${String(e["comment"] ?? "")}`,
+    );
+  }
+  lines.push(
+    "",
+    "Use write_mock_revision to create a derived mock direction with a complete replacement page set. Do not overwrite the original mock.",
   );
+  return lines.join("\n");
+}
+
+function hasReadyEvent(events: JsonlEvent[]): boolean {
+  const latestRevisionIndex = lastIndexWhere(
+    events,
+    (e) => e.kind === "brainstorm_revision_requested",
+  );
+  return events.some((e, index) => index > latestRevisionIndex && isReadyStatusEvent(e));
+}
+
+function isReadyStatusEvent(e: JsonlEvent): boolean {
+  return (
+    e.kind === "brainstorm_system" &&
+    e["systemKind"] === "status_changed" &&
+    objectStringField(e["data"], "status") === "ready"
+  );
+}
+
+function objectStringField(value: unknown, key: string): string | null {
+  if (typeof value !== "object" || value === null) return null;
+  const entry = Object.entries(value).find(([entryKey]) => entryKey === key);
+  const fieldValue = entry?.[1];
+  return typeof fieldValue === "string" ? fieldValue : null;
 }
 
 function numField(e: JsonlEvent, key: string): number | null {

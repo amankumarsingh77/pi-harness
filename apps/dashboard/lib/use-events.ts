@@ -1,5 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import type { AgentEvent } from "@pi-harness/shared";
 
 export type UseEventsResult = {
@@ -34,6 +42,9 @@ export function useEvents(
   const [gapDetected, setGapDetected] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const seenRef = useRef<Set<string>>(new Set());
+  const lastPublishedAtRef = useRef<number | null>(null);
+  const pendingLastEventAtRef = useRef<Date | null>(null);
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setEvents([]);
@@ -42,6 +53,10 @@ export function useEvents(
     setLastEventAt(null);
     setGapDetected(false);
     seenRef.current = new Set();
+    lastPublishedAtRef.current = null;
+    pendingLastEventAtRef.current = null;
+    if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
+    pendingTimerRef.current = null;
 
     if (!runId) return;
     let attempt = 0;
@@ -49,31 +64,28 @@ export function useEvents(
 
     const open = (): void => {
       if (cancelled) return;
-      // Dedicated SSE route — passes req.signal to the upstream fetch so a
-      // browser disconnect cleanly terminates the orchestrator-side request
-      // instead of being torn down mid-pipe (which surfaces as a "failed to
-      // pipe response" error in Next.js dev logs). The catch-all
-      // /api/proxy/* path is for plain JSON; SSE has its own route.
       const es = new EventSource(`/api/sse/${runId}`);
       esRef.current = es;
       es.onopen = () => {
         setConnected(true);
-        // Reset backoff only after a successful connection, so a stream
-        // that lived for an hour and then dropped doesn't punish itself
-        // with the same backoff curve as a stream that's never connected.
         attempt = 0;
       };
       es.onmessage = (ev) => {
         try {
-          const parsed = JSON.parse(ev.data) as AgentEvent;
+          const parsed = hydrateEvent(JSON.parse(ev.data) as AgentEvent);
           setLastEventId(parsed.id);
-          setLastEventAt(new Date(parsed.ts));
           setEvents((curr) => {
             if (seenRef.current.has(parsed.id)) return curr;
             seenRef.current.add(parsed.id);
             return [...curr, parsed].sort(
               (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
             );
+          });
+          publishLastEventAtThrottled(parsed.ts, {
+            lastPublishedAtRef,
+            pendingLastEventAtRef,
+            pendingTimerRef,
+            setLastEventAt,
           });
         } catch {
           setGapDetected(true);
@@ -83,9 +95,6 @@ export function useEvents(
         es.close();
         setConnected(false);
         attempt++;
-        // Exponential backoff (cap 8s) with ±20% jitter so multiple tabs
-        // reconnecting after an orchestrator restart don't all reopen on
-        // the same millisecond.
         const base = Math.min(8000, 500 * 2 ** attempt);
         const jitter = base * 0.2 * (Math.random() * 2 - 1);
         setTimeout(open, base + jitter);
@@ -96,8 +105,49 @@ export function useEvents(
     return () => {
       cancelled = true;
       esRef.current?.close();
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = null;
     };
   }, [runId]);
 
   return { events, connected, lastEventId, lastEventAt, gapDetected };
+}
+
+type LastEventThrottle = {
+  lastPublishedAtRef: MutableRefObject<number | null>;
+  pendingLastEventAtRef: MutableRefObject<Date | null>;
+  pendingTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  setLastEventAt: Dispatch<SetStateAction<Date | null>>;
+};
+
+function publishLastEventAtThrottled(
+  next: Date,
+  throttle: LastEventThrottle,
+): void {
+  const now = Date.now();
+  const lastPublishedAt = throttle.lastPublishedAtRef.current;
+  const elapsed = lastPublishedAt === null ? 1000 : now - lastPublishedAt;
+  if (elapsed >= 1000) {
+    throttle.lastPublishedAtRef.current = now;
+    throttle.setLastEventAt(next);
+    return;
+  }
+
+  throttle.pendingLastEventAtRef.current = next;
+  if (throttle.pendingTimerRef.current) return;
+
+  throttle.pendingTimerRef.current = setTimeout(() => {
+    throttle.pendingTimerRef.current = null;
+    throttle.lastPublishedAtRef.current = Date.now();
+    throttle.setLastEventAt(throttle.pendingLastEventAtRef.current);
+    throttle.pendingLastEventAtRef.current = null;
+  }, 1000 - elapsed);
+}
+
+function toEventDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function hydrateEvent(event: AgentEvent): AgentEvent {
+  return { ...event, ts: toEventDate(event.ts) };
 }

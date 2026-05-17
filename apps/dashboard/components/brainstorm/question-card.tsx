@@ -6,9 +6,9 @@ import { submitBrainstormAnswersAction } from "@/app/tasks/[id]/actions";
 import { EvidencePill } from "./evidence-pill";
 
 type QuestionEvent = Extract<BrainstormJsonlEvent, { kind: "brainstorm_question" }>;
-type AnsweredMap = Map<
+type ReadonlyAnsweredMap = ReadonlyMap<
   string,
-  { optionId?: string; optionIds?: string[]; freeText?: string }
+  { readonly optionId?: string; readonly optionIds?: readonly string[]; readonly freeText?: string }
 >;
 
 // Per-question local selection state. `selected` holds picked option ids;
@@ -51,8 +51,8 @@ export function QuestionBatch({
   answered,
 }: {
   taskId: string;
-  questions: QuestionEvent[];
-  answered: AnsweredMap;
+  questions: ReadonlyArray<QuestionEvent>;
+  answered: ReadonlyAnsweredMap;
 }) {
   const allAnswered = questions.every((q) => answered.has(q.questionId));
   const [drafts, setDrafts] = useState<Map<string, Draft>>(
@@ -163,7 +163,9 @@ function QuestionItem({
   onChange,
 }: {
   question: QuestionEvent;
-  answered: { optionId?: string; optionIds?: string[]; freeText?: string } | undefined;
+  answered:
+    | { readonly optionId?: string; readonly optionIds?: readonly string[]; readonly freeText?: string }
+    | undefined;
   draft: Draft;
   pending: boolean;
   onChange: (fn: (d: Draft) => Draft) => void;

@@ -23,11 +23,16 @@ export type PhaseModelConfig = {
 // in pi-bridge (see packages/pi-bridge/src/providers/crofai.ts). Single provider
 // keeps auth surface to one env key (CROFAI_API_KEY).
 export const DEFAULT_PHASE_MODELS: Record<Phase, PhaseModelConfig> = {
-  brainstorm: { provider: "crofai", model: "kimi-k2.6-precision", thinkingLevel: "medium" },
-  plan:       { provider: "crofai", model: "kimi-k2.6-precision", thinkingLevel: "high"   },
-  code:       { provider: "crofai", model: "kimi-k2.6-precision", thinkingLevel: "medium" },
-  verify:     { provider: "crofai", model: "kimi-k2.6-precision", thinkingLevel: "high"   },
-  pr:         { provider: "crofai", model: "kimi-k2.6-precision", thinkingLevel: "off"    },
+  brainstorm: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "medium" },
+  plan:       { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high"   },
+  code:       { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "medium" },
+  verify:     { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high"   },
+  pr:         { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "off"    },
+  // brainstorm: { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium" },
+  // plan:       { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium"   },
+  // code:       { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "medium" },
+  // verify:     { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "high"   },
+  // pr:         { provider: "openai-codex", model: "gpt-5.5", thinkingLevel: "off"    },
 };
 
 export function mergePhaseModels(

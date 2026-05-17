@@ -112,7 +112,7 @@ describe("ArtifactsStore", () => {
     expect(log.latest?.message).toContain("mark design as approved");
   });
 
-  it("archiveCurrentRun moves design.md, spec.md, jsonl files into runs/<runId>/ and commits", async () => {
+  it("archiveCurrentRun moves brainstorm-owned files into runs/<runId>/ and commits", async () => {
     const store = new ArtifactsStore();
     // Lay down the four files the archive helper relocates.
     await store.writeArtifact(cwd, "T-1", sample);
@@ -129,7 +129,7 @@ describe("ArtifactsStore", () => {
     await git.raw(["add", "-f", join(".harness", "T-1")]);
     await git.commit("seed");
 
-    await store.archiveCurrentRun(cwd, "T-1", "r_old");
+    await store.archiveCurrentRun(cwd, "T-1", "r_old", "brainstorm");
 
     // Originals gone, archive populated.
     const { existsSync } = await import("node:fs");
@@ -144,7 +144,7 @@ describe("ArtifactsStore", () => {
     expect(existsSync(join(archive, "pi-session.jsonl"))).toBe(true);
 
     const log = await git.log();
-    expect(log.latest?.message).toContain("archive run r_old");
+    expect(log.latest?.message).toContain("archive brainstorm run r_old");
   });
 
   it("archiveCurrentRun is idempotent on missing files (only what exists is moved)", async () => {
@@ -155,7 +155,7 @@ describe("ArtifactsStore", () => {
     await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
     await git.commit("seed");
 
-    await store.archiveCurrentRun(cwd, "T-1", "r_partial");
+    await store.archiveCurrentRun(cwd, "T-1", "r_partial", "brainstorm");
 
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(cwd, ".harness", "T-1", "design.md"))).toBe(false);
@@ -304,21 +304,40 @@ describe("ArtifactsStore", () => {
     body: "scenarios: []\n",
   };
 
-  it("plan + scenarios round-trip with correct file extensions", async () => {
+  const blastRadiusSample: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "blast-radius",
+      parent: "spec.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: "2026-05-10T00:00:00.000Z",
+      last_updated_by: "orchestrator",
+    },
+    body: "items: []\n",
+  };
+
+  it("plan + YAML plan artifacts round-trip with correct file extensions", async () => {
     const store = new ArtifactsStore();
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
+    await store.writeArtifact(cwd, "T-1", blastRadiusSample);
 
     const planPath = store.artifactPath(cwd, "T-1", "plan");
     const scenariosPath = store.artifactPath(cwd, "T-1", "scenarios");
+    const blastRadiusPath = store.artifactPath(cwd, "T-1", "blast-radius");
     expect(planPath.endsWith("plan.md")).toBe(true);
     expect(scenariosPath.endsWith("scenarios.yaml")).toBe(true);
+    expect(blastRadiusPath.endsWith("blast-radius.yaml")).toBe(true);
 
     const plan = await store.readArtifact(cwd, "T-1", "plan");
     const scenarios = await store.readArtifact(cwd, "T-1", "scenarios");
+    const blastRadius = await store.readArtifact(cwd, "T-1", "blast-radius");
     expect(plan?.fm.kind).toBe("plan");
     expect(scenarios?.fm.kind).toBe("scenarios");
+    expect(blastRadius?.fm.kind).toBe("blast-radius");
     expect(scenarios?.body).toContain("scenarios:");
+    expect(blastRadius?.body).toContain("items:");
   });
 
   it("setArtifactStatus on scenarios commits with the .yaml file path", async () => {
@@ -333,14 +352,21 @@ describe("ArtifactsStore", () => {
     expect(log.latest?.message).toContain("mark scenarios as ready");
   });
 
-  it("listArtifacts returns all four kinds when present", async () => {
+  it("listArtifacts returns all five kinds when present", async () => {
     const store = new ArtifactsStore();
     await store.writeArtifact(cwd, "T-1", sample);
     await store.writeArtifact(cwd, "T-1", { fm: { ...sample.fm, kind: "spec", parent: "design.md" }, body: "# Spec\n" });
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
+    await store.writeArtifact(cwd, "T-1", blastRadiusSample);
     const list = await store.listArtifacts(cwd, "T-1");
-    expect(list.map((a) => a.fm.kind)).toEqual(["design", "spec", "plan", "scenarios"]);
+    expect(list.map((a) => a.fm.kind)).toEqual([
+      "design",
+      "spec",
+      "plan",
+      "scenarios",
+      "blast-radius",
+    ]);
   });
 
   it("listArtifacts honors a kinds filter", async () => {
@@ -351,10 +377,16 @@ describe("ArtifactsStore", () => {
     expect(list.map((a) => a.fm.kind)).toEqual(["plan"]);
   });
 
-  it("archiveCurrentRun moves plan artifacts + research/ directory", async () => {
+  it("archiveCurrentRun moves plan artifacts + research/ directory but preserves design and spec", async () => {
     const store = new ArtifactsStore();
+    await store.writeArtifact(cwd, "T-1", sample);
+    await store.writeArtifact(cwd, "T-1", {
+      fm: { ...sample.fm, kind: "spec", parent: "design.md" },
+      body: "# Spec\n",
+    });
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
+    await store.writeArtifact(cwd, "T-1", blastRadiusSample);
     const dir = join(cwd, ".harness", "T-1");
     await writeFile(join(dir, "plan.jsonl"), "{\"kind\":\"x\"}\n");
     await writeFile(join(dir, "pi-session-plan.jsonl"), "session\n");
@@ -362,21 +394,37 @@ describe("ArtifactsStore", () => {
     await writeFile(join(dir, "research", "codebase-locator.md"), "# findings\n");
 
     const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "plan.md"), join(".harness", "T-1", "scenarios.yaml"), join(".harness", "T-1", "plan.jsonl"), join(".harness", "T-1", "pi-session-plan.jsonl")]);
+    await git.raw([
+      "add",
+      "-f",
+      join(".harness", "T-1", "design.md"),
+      join(".harness", "T-1", "spec.md"),
+      join(".harness", "T-1", "plan.md"),
+      join(".harness", "T-1", "scenarios.yaml"),
+      join(".harness", "T-1", "blast-radius.yaml"),
+      join(".harness", "T-1", "plan.jsonl"),
+      join(".harness", "T-1", "pi-session-plan.jsonl"),
+    ]);
     await git.commit("seed");
 
-    await store.archiveCurrentRun(cwd, "T-1", "r_old");
+    await store.archiveCurrentRun(cwd, "T-1", "r_old", "plan");
 
     const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, "design.md"))).toBe(true);
+    expect(existsSync(join(dir, "spec.md"))).toBe(true);
     expect(existsSync(join(dir, "plan.md"))).toBe(false);
     expect(existsSync(join(dir, "scenarios.yaml"))).toBe(false);
+    expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(false);
     expect(existsSync(join(dir, "plan.jsonl"))).toBe(false);
     expect(existsSync(join(dir, "pi-session-plan.jsonl"))).toBe(false);
     expect(existsSync(join(dir, "research"))).toBe(false);
 
     const archive = join(dir, "runs", "r_old");
+    expect(existsSync(join(archive, "design.md"))).toBe(false);
+    expect(existsSync(join(archive, "spec.md"))).toBe(false);
     expect(existsSync(join(archive, "plan.md"))).toBe(true);
     expect(existsSync(join(archive, "scenarios.yaml"))).toBe(true);
+    expect(existsSync(join(archive, "blast-radius.yaml"))).toBe(true);
     expect(existsSync(join(archive, "plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "research", "codebase-locator.md"))).toBe(true);

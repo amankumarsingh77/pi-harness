@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Topbar } from "@/components/topbar";
+import { BrainstormShell } from "@/components/brainstorm/shell";
 import { ApiError } from "@/lib/api";
 import { BrainstormEventsProvider } from "@/lib/brainstorm-events-context";
 import { orchestrator } from "@/lib/server/api";
-import { BrainstormPageLive } from "@/components/brainstorm/brainstorm-page-live";
+import "./brainstorm.css";
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -26,12 +30,39 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
       throw e;
     }),
   ]);
-  const brainstormRunId =
-    [...taskResult.runs].reverse().find((run) => run.phase === "brainstorm")?.id ?? null;
+  const { task, runs } = taskResult;
+  // Latest brainstorm run drives the SSE subscription. Null until the run
+  // exists (e.g. the user has filed the task but not approved start-brainstorm).
+  const brainstormRun = [...runs].reverse().find((r) => r.phase === "brainstorm") ?? null;
+  const brainstormRunId = brainstormRun?.id ?? null;
+  const brainstormRunActive =
+    brainstormRun?.status === "pending" || brainstormRun?.status === "running";
+  // waterfall: the run id comes from the task detail response.
+  const initialAgentEvents = brainstormRunId
+    ? (await orchestrator.listEvents(brainstormRunId)).events
+    : [];
 
   return (
-    <BrainstormEventsProvider runId={brainstormRunId}>
-      <BrainstormPageLive taskId={id} initialTask={taskResult} initialBundle={bundle} />
-    </BrainstormEventsProvider>
+    <>
+      <Topbar runningCount={1} blockedCount={1} doneTodayCount={12} branch="main" />
+
+      <BrainstormEventsProvider runId={brainstormRunId}>
+        <BrainstormShell
+          task={task}
+          runId={brainstormRunId}
+          gate={bundle.gate}
+          design={bundle.design}
+          spec={bundle.spec}
+          initialEvents={bundle.events}
+          initialAgentEvents={initialAgentEvents}
+          canCancel={
+            task.status === "brainstorming" &&
+            bundle.gate === "running" &&
+            brainstormRunActive
+          }
+          cancelled={task.status === "brainstorming" && brainstormRun?.status === "cancelled"}
+        />
+      </BrainstormEventsProvider>
+    </>
   );
 }

@@ -36,6 +36,13 @@
       "when": 1778326578059,
       "tag": "0004_curved_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789411500000,
+      "tag": "0005_board_task_metadata",
+      "breakpoints": true
     }
   ]
 }

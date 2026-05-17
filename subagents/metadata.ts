@@ -8,6 +8,7 @@ import type { Phase } from "@pi-harness/shared";
 
 export type SubagentRole =
   | "phase-driver"
+  | "brainstorm-research"
   | "preflight-research"
   | "post-plan-audit";
 
@@ -20,14 +21,26 @@ export type BuiltinTool =
   | "edit"
   | "write";
 
+export type CustomTool =
+  | "submit_questions"
+  | "submit_mock_choices"
+  | "write_mock_revision"
+  | "reply_to_user"
+  | "mark_ready"
+  | "pi_web_search"
+  | "pi_web_fetch"
+  | "write_findings"
+  | "git_history";
+
 export type SubagentMeta = {
   name: string;
   role: SubagentRole;
-  // Path is resolved relative to the subagents root (_vendored or ours), so
+  // Path is resolved relative to subagents/prompts, so
   // the metadata layer can describe it without touching the filesystem.
-  promptDir: "vendored" | "ours";
+  promptDir: "phase" | "research" | "audit";
   promptFile: string;
   allowedTools: readonly BuiltinTool[];
+  customTools?: readonly CustomTool[];
   invokedBy: readonly Phase[];
   framing: string;
   description: string;
@@ -37,9 +50,18 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   brainstorm: {
     name: "brainstorm",
     role: "phase-driver",
-    promptDir: "ours",
+    promptDir: "phase",
     promptFile: "brainstorm.md",
-    allowedTools: ["read", "grep", "find", "ls", "edit", "write"],
+    allowedTools: ["read", "write"],
+    customTools: [
+      "submit_questions",
+      "submit_mock_choices",
+      "write_mock_revision",
+      "mark_ready",
+      "reply_to_user",
+      "pi_web_search",
+      "pi_web_fetch",
+    ],
     invokedBy: ["brainstorm"],
     framing: "",
     description: "Drives the Q&A loop and writes design.md + spec.md",
@@ -47,9 +69,10 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   plan: {
     name: "plan",
     role: "phase-driver",
-    promptDir: "ours",
+    promptDir: "phase",
     promptFile: "plan.md",
-    allowedTools: ["read", "grep", "find", "ls", "edit", "write"],
+    allowedTools: ["read", "grep", "find", "write"],
+    customTools: ["mark_ready"],
     invokedBy: ["plan"],
     framing: "",
     description: "Reads research findings, authors plan.md + scenarios.yaml",
@@ -57,20 +80,34 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   "codebase-scout": {
     name: "codebase-scout",
     role: "preflight-research",
-    promptDir: "vendored",
+    promptDir: "research",
     promptFile: "codebase-scout.md",
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["write_findings"],
     invokedBy: ["plan"],
     framing:
       "Scout the codebase end-to-end for this ticket. Produce a single findings doc with three sections: Files (every file to be read or modified), Patterns (analogous code with file:line cites), Call paths (how the relevant flows work today).",
     description: "One-pass codebase research: files + patterns + call paths",
   },
+  "web-search-researcher": {
+    name: "web-search-researcher",
+    role: "brainstorm-research",
+    promptDir: "research",
+    promptFile: "web-search-researcher.md",
+    allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["pi_web_search", "pi_web_fetch", "write_findings"],
+    invokedBy: ["brainstorm"],
+    framing:
+      "Research external libraries, APIs, pricing, recent approaches, and source-backed alternatives before brainstorm asks the user questions.",
+    description: "Searches the web for current external context",
+  },
   "integration-scanner": {
     name: "integration-scanner",
     role: "preflight-research",
-    promptDir: "vendored",
+    promptDir: "research",
     promptFile: "integration-scanner.md",
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["write_findings"],
     invokedBy: ["plan"],
     framing:
       "Identify inbound and outbound system edges affected by this ticket.",
@@ -79,9 +116,10 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   "precedent-locator": {
     name: "precedent-locator",
     role: "preflight-research",
-    promptDir: "vendored",
+    promptDir: "research",
     promptFile: "precedent-locator.md",
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["git_history", "write_findings"],
     invokedBy: ["plan"],
     framing:
       "Find past similar changes from git history and what went wrong with each one.",
@@ -90,9 +128,10 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   "claim-verifier": {
     name: "claim-verifier",
     role: "post-plan-audit",
-    promptDir: "vendored",
+    promptDir: "audit",
     promptFile: "claim-verifier.md",
     allowedTools: ["read", "grep", "find", "ls"],
+    customTools: ["git_history", "write_findings"],
     invokedBy: ["plan"],
     framing: "",
     description: "Audits the planner's draft plan.md, tags claims",
@@ -106,7 +145,6 @@ export const RETIRED_PROMPTS = [
   "test-case-locator",
   "thoughts-analyzer",
   "thoughts-locator",
-  "web-search-researcher",
   "peer-comparator",
   "diff-auditor",
   "proof-capture",

@@ -6,11 +6,15 @@ import type { BrainstormJsonlEvent } from "@/lib/api";
 // microtask so the useTransition spinner has a chance to flicker. Tests
 // assert against the mock to verify wiring. vi.hoisted moves the mock fn
 // definition above the hoisted vi.mock() call so the factory can capture it.
-const { submitNudgeMock } = vi.hoisted(() => ({
+const { submitNudgeMock, editMockMock, selectMockMock } = vi.hoisted(() => ({
   submitNudgeMock: vi.fn(async (..._args: unknown[]) => {}),
+  editMockMock: vi.fn(async (..._args: unknown[]) => {}),
+  selectMockMock: vi.fn(async (..._args: unknown[]) => {}),
 }));
 vi.mock("@/app/tasks/[id]/actions", () => ({
   submitBrainstormNudgeAction: submitNudgeMock,
+  submitBrainstormMockEditAction: editMockMock,
+  selectBrainstormMockAction: selectMockMock,
   approveBrainstormAction: vi.fn(),
   requestBrainstormChangesAction: vi.fn(),
   submitBrainstormAnswersAction: vi.fn(),
@@ -37,11 +41,14 @@ vi.mock("next/navigation", () => ({
 
 beforeEach(() => {
   submitNudgeMock.mockClear();
+  editMockMock.mockClear();
+  selectMockMock.mockClear();
   useEventsMock.mockReturnValue({ events: [], connected: false });
   cleanup();
 });
 
 import { ChatPanel } from "@/components/brainstorm/chat-panel";
+import { MockPagePreview } from "@/components/brainstorm/mock-page-preview";
 import { NudgeInput } from "@/components/brainstorm/nudge-input";
 
 describe("NudgeInput", () => {
@@ -80,6 +87,40 @@ describe("NudgeInput", () => {
     const ta = screen.getByLabelText(/nudge the agent/i);
     fireEvent.change(ta, { target: { value: "x".repeat(4001) } });
     expect(screen.getByRole("button", { name: /send nudge/i })).toBeDisabled();
+  });
+});
+
+describe("MockPagePreview", () => {
+  it("switches iframe content between mock pages", () => {
+    render(
+      <MockPagePreview
+        title="Split pane review"
+        pages={[
+          {
+            pageId: "task-detail",
+            title: "Task detail",
+            htmlPath: ".harness/t1/mocks/mock-a/task-detail.html",
+          },
+          {
+            pageId: "brainstorm-review",
+            title: "Brainstorm review",
+            summary: "Review state",
+            htmlPath: ".harness/t1/mocks/mock-a/brainstorm-review.html",
+          },
+        ]}
+        htmlByPageId={{
+          "task-detail": "<h1>Task detail page</h1>",
+          "brainstorm-review": "<h1>Brainstorm review page</h1>",
+        }}
+      />,
+    );
+
+    const iframe = screen.getByTitle(/mock preview split pane review/i);
+    expect(iframe).toHaveAttribute("srcdoc", "<h1>Task detail page</h1>");
+
+    fireEvent.click(screen.getByRole("button", { name: "Brainstorm review" }));
+
+    expect(iframe).toHaveAttribute("srcdoc", "<h1>Brainstorm review page</h1>");
   });
 });
 
@@ -201,7 +242,7 @@ describe("ChatPanel — nudges in transcript", () => {
           ts: new Date(),
           kind: "tool_call",
           tool: "read",
-          input: { path: "subagents/ours/brainstorm.md" },
+          input: { path: "subagents/prompts/phase/brainstorm.md" },
         },
       ],
     });
@@ -216,7 +257,7 @@ describe("ChatPanel — nudges in transcript", () => {
     );
     const line = screen.getByTestId("activity-line");
     expect(line.textContent).toContain("read");
-    expect(line.textContent).toContain("subagents/ours/brainstorm.md");
+    expect(line.textContent).toContain("subagents/prompts/phase/brainstorm.md");
   });
 
   it("hides activity-line once gate is awaiting_user", () => {
@@ -317,5 +358,201 @@ describe("ChatPanel — nudges in transcript", () => {
       />,
     );
     expect(screen.getByLabelText(/nudge the agent/i)).toBeEnabled();
+  });
+
+  it("renders brainstorm mock cards and wires Edit/Choose actions", async () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-13T00:00:00.000Z",
+        mock: {
+          mockId: "mock-a",
+          title: "Split pane review",
+          summary: "Shows options beside artifacts.",
+          recommended: true,
+          createdAt: "2026-05-13T00:00:00.000Z",
+          pages: [
+            {
+              pageId: "task-detail",
+              title: "Task detail",
+              htmlPath: ".harness/t1/mocks/mock-a/task-detail.html",
+            },
+            {
+              pageId: "brainstorm-review",
+              title: "Brainstorm review",
+              htmlPath: ".harness/t1/mocks/mock-a/brainstorm-review.html",
+            },
+          ],
+        },
+      },
+    ];
+    render(
+      <ChatPanel
+        taskId="t1"
+        runId="r1"
+        initialEvents={events}
+        gate="running"
+        taskStatus="brainstorming"
+      />,
+    );
+
+    expect(screen.getByText("Split pane review")).toBeInTheDocument();
+    expect(screen.getByText("2 pages")).toBeInTheDocument();
+    expect(screen.getByText("Task detail")).toBeInTheDocument();
+    expect(screen.getByText("Brainstorm review")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open mock split pane review/i })).toHaveAttribute(
+      "href",
+      "/tasks/t1/brainstorm/mocks/mock-a",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /edit mock split pane review/i }));
+    fireEvent.change(screen.getByLabelText(/mock edit request/i), {
+      target: { value: "Make the artifact pane narrower." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /submit mock edit/i }));
+    await waitFor(() => expect(editMockMock).toHaveBeenCalledWith(
+      "t1",
+      "mock-a",
+      "Make the artifact pane narrower.",
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: /choose mock split pane review/i }));
+    await waitFor(() => expect(selectMockMock).toHaveBeenCalledWith("t1", "mock-a"));
+  });
+
+  it("marks the selected mock in the transcript", () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-13T00:00:00.000Z",
+        mock: {
+          mockId: "mock-a",
+          title: "Split pane review",
+          summary: "Shows options beside artifacts.",
+          recommended: false,
+          createdAt: "2026-05-13T00:00:00.000Z",
+          pages: [
+            {
+              pageId: "task-detail",
+              title: "Task detail",
+              htmlPath: ".harness/t1/mocks/mock-a/task-detail.html",
+            },
+          ],
+        },
+      },
+      {
+        kind: "brainstorm_mock_selected",
+        ts: "2026-05-13T00:00:01.000Z",
+        mockId: "mock-a",
+      },
+    ];
+    render(
+      <ChatPanel
+        taskId="t1"
+        runId="r1"
+        initialEvents={events}
+        gate="running"
+        taskStatus="brainstorming"
+      />,
+    );
+
+    expect(screen.getByText("selected")).toBeInTheDocument();
+  });
+
+  it("locks mock actions after an edit request is submitted", () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-13T00:00:00.000Z",
+        mock: {
+          mockId: "mock-a",
+          title: "Split pane review",
+          summary: "Shows options beside artifacts.",
+          recommended: false,
+          createdAt: "2026-05-13T00:00:00.000Z",
+          pages: [
+            {
+              pageId: "task-detail",
+              title: "Task detail",
+              htmlPath: ".harness/t1/mocks/mock-a/task-detail.html",
+            },
+          ],
+        },
+      },
+      {
+        kind: "brainstorm_mock_edit_requested",
+        ts: "2026-05-13T00:00:01.000Z",
+        requestId: "mer_1",
+        mockId: "mock-a",
+        comment: "Make it tighter.",
+      },
+    ];
+    render(
+      <ChatPanel
+        taskId="t1"
+        runId="r1"
+        initialEvents={events}
+        gate="running"
+        taskStatus="brainstorming"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /edit mock split pane review/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /choose mock split pane review/i })).toBeDisabled();
+  });
+
+  it("renders only the latest event when a revised mock reuses an id", () => {
+    const events: BrainstormJsonlEvent[] = [
+      {
+        kind: "brainstorm_mock_proposed",
+        ts: "2026-05-13T00:00:00.000Z",
+        mock: {
+          mockId: "mock-a",
+          title: "Original direction",
+          summary: "First version.",
+          recommended: false,
+          createdAt: "2026-05-13T00:00:00.000Z",
+          pages: [
+            {
+              pageId: "task-detail",
+              title: "Task detail",
+              htmlPath: ".harness/t1/mocks/mock-a/task-detail.html",
+            },
+          ],
+        },
+      },
+      {
+        kind: "brainstorm_mock_revised",
+        ts: "2026-05-13T00:00:01.000Z",
+        editRequestId: "mer_1",
+        mock: {
+          mockId: "mock-a",
+          title: "Revised direction",
+          summary: "Second version.",
+          recommended: false,
+          createdAt: "2026-05-13T00:00:01.000Z",
+          derivedFrom: "mock-a",
+          pages: [
+            {
+              pageId: "task-detail",
+              title: "Task detail",
+              htmlPath: ".harness/t1/mocks/mock-a/task-detail.html",
+            },
+          ],
+        },
+      },
+    ];
+    render(
+      <ChatPanel
+        taskId="t1"
+        runId="r1"
+        initialEvents={events}
+        gate="running"
+        taskStatus="brainstorming"
+      />,
+    );
+
+    expect(screen.queryByText("Original direction")).not.toBeInTheDocument();
+    expect(screen.getByText("Revised direction")).toBeInTheDocument();
   });
 });

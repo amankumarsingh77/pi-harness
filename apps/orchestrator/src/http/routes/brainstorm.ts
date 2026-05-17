@@ -5,6 +5,7 @@ import type { RunStore } from "../../adapters/run-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
+import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import { JsonlWriter, readJsonl } from "../../adapters/jsonl-writer.js";
 import { BrainstormEventBus } from "../../agents/brainstorm-event-bus.js";
@@ -12,6 +13,8 @@ import { join } from "node:path";
 import { ValidationError } from "../../domain/errors.js";
 import { deriveBrainstormGate } from "../../agents/brainstorm-gate.js";
 import { scaffoldBrainstorm } from "../../runner/scaffold-brainstorm.js";
+
+type BrainstormJsonlEvent = Record<string, unknown> & { kind?: string };
 
 const AnswerEntrySchema = z
   .object({
@@ -34,6 +37,57 @@ const SubmitAnswersSchema = z.object({
   // (3–5) but bounded so a malformed client can't flood the JSONL.
   answers: z.array(AnswerEntrySchema).min(1).max(20),
 });
+
+function mockActionLockReason(
+  events: ReadonlyArray<BrainstormJsonlEvent>,
+  mockId: string,
+): string | null {
+  const latestMockIdx = lastIndexWhere(
+    events,
+    (event) =>
+      (event.kind === "brainstorm_mock_proposed" ||
+        event.kind === "brainstorm_mock_revised") &&
+      eventMockId(event) === mockId,
+  );
+  if (latestMockIdx === -1) return null;
+
+  const laterEvents = events.slice(latestMockIdx + 1);
+  if (laterEvents.some((event) => event.kind === "brainstorm_mock_selected")) {
+    return "mock_already_selected";
+  }
+  if (
+    laterEvents.some(
+      (event) =>
+        event.kind === "brainstorm_mock_edit_requested" &&
+        stringField(event, "mockId") === mockId,
+    )
+  ) {
+    return "mock_edit_already_submitted";
+  }
+  if (laterEvents.some((event) => event.kind === "brainstorm_revision_requested")) {
+    return "mock_review_closed";
+  }
+  return null;
+}
+
+function eventMockId(event: BrainstormJsonlEvent): string | null {
+  const mock = event["mock"];
+  if (typeof mock !== "object" || mock === null || !("mockId" in mock)) return null;
+  const mockId = mock.mockId;
+  return typeof mockId === "string" ? mockId : null;
+}
+
+function stringField(event: BrainstormJsonlEvent, key: string): string | null {
+  const value = event[key];
+  return typeof value === "string" ? value : null;
+}
+
+function lastIndexWhere<T>(items: ReadonlyArray<T>, predicate: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (predicate(items[i]!)) return i;
+  }
+  return -1;
+}
 
 // GET /api/tasks/:id/brainstorm
 //
@@ -61,6 +115,7 @@ export function registerBrainstormRoutes(
     events?: EventStore;
     scheduler?: TaskScheduler;
     cancellation?: CancellationRegistry;
+    mutationLock: TaskMutationLock;
   },
 ): void {
   app.get<{ Params: { id: string } }>("/api/tasks/:id/brainstorm", async (req, reply) => {
@@ -332,6 +387,168 @@ export function registerBrainstormRoutes(
     },
   );
 
+  app.get<{ Params: { id: string } }>(
+    "/api/tasks/:id/brainstorm/mocks",
+    async (req, reply) => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (!task.worktreePath) {
+        reply.code(409);
+        return { error: "no_worktree", message: "task has no worktree yet" };
+      }
+      return deps.artifacts.readBrainstormMockManifest(task.worktreePath, task.id);
+    },
+  );
+
+  app.get<{ Params: { id: string; mockId: string; pageId: string } }>(
+    "/api/tasks/:id/brainstorm/mocks/:mockId/pages/:pageId/html",
+    async (req, reply) => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (!task.worktreePath) {
+        reply.code(409);
+        return { error: "no_worktree", message: "task has no worktree yet" };
+      }
+      const manifest = await deps.artifacts.readBrainstormMockManifest(task.worktreePath, task.id);
+      const mock = manifest.mocks.find((entry) => entry.mockId === req.params.mockId);
+      if (!mock) {
+        reply.code(404);
+        return { error: "mock_not_found", message: `mock ${req.params.mockId} not found` };
+      }
+      if (!mock.pages.some((page) => page.pageId === req.params.pageId)) {
+        reply.code(404);
+        return {
+          error: "mock_page_not_found",
+          message: `mock page ${req.params.pageId} not found`,
+        };
+      }
+      const html = await deps.artifacts.readBrainstormMockHtml(
+        task.worktreePath,
+        task.id,
+        req.params.mockId,
+        req.params.pageId,
+      );
+      if (html === null) {
+        reply.code(404);
+        return {
+          error: "mock_page_not_found",
+          message: `mock page ${req.params.pageId} not found`,
+        };
+      }
+      reply.type("text/html; charset=utf-8");
+      return html;
+    },
+  );
+
+  app.post<{ Params: { id: string; mockId: string } }>(
+    "/api/tasks/:id/brainstorm/mocks/:mockId/edit",
+    async (req, reply) => {
+      let parsed: z.infer<typeof EditMockRequestSchema>;
+      try {
+        parsed = EditMockRequestSchema.parse(req.body);
+      } catch (e) {
+        if (e instanceof ZodError) {
+          throw new ValidationError("invalid mock edit body", { issues: e.issues });
+        }
+        throw e;
+      }
+      const task = await deps.runs.getTask(req.params.id);
+      if (task.status !== "brainstorming") {
+        reply.code(409);
+        return {
+          error: "not_brainstorming",
+          message: `task is in ${task.status}; mock edits only apply during brainstorming`,
+        };
+      }
+      if (!task.worktreePath) {
+        reply.code(409);
+        return { error: "no_worktree", message: "task has no worktree yet" };
+      }
+      const [manifest, events] = await Promise.all([
+        deps.artifacts.readBrainstormMockManifest(task.worktreePath, task.id),
+        readJsonl<BrainstormJsonlEvent>(
+          join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl"),
+        ),
+      ]);
+      if (!manifest.mocks.some((mock) => mock.mockId === req.params.mockId)) {
+        reply.code(404);
+        return { error: "mock_not_found", message: `mock ${req.params.mockId} not found` };
+      }
+      const lockReason = mockActionLockReason(events, req.params.mockId);
+      if (lockReason !== null) {
+        reply.code(409);
+        return {
+          error: lockReason,
+          message: `mock ${req.params.mockId} is no longer editable`,
+        };
+      }
+      const requestId = `mer_${randomUUID()}`;
+      await publishBrainstormRouteEvent({
+        runs: deps.runs,
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        ...(deps.events ? { events: deps.events } : {}),
+        input: {
+          kind: "brainstorm_mock_edit_requested",
+          requestId,
+          mockId: req.params.mockId,
+          comment: parsed.comment,
+        },
+      });
+      deps.scheduler?.enqueue(task.id);
+      return { ok: true, requestId };
+    },
+  );
+
+  app.post<{ Params: { id: string; mockId: string } }>(
+    "/api/tasks/:id/brainstorm/mocks/:mockId/select",
+    async (req, reply) => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (task.status !== "brainstorming") {
+        reply.code(409);
+        return {
+          error: "not_brainstorming",
+          message: `task is in ${task.status}; mock selection only applies during brainstorming`,
+        };
+      }
+      if (!task.worktreePath) {
+        reply.code(409);
+        return { error: "no_worktree", message: "task has no worktree yet" };
+      }
+      const events = await readJsonl<BrainstormJsonlEvent>(
+        join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl"),
+      );
+      const lockReason = mockActionLockReason(events, req.params.mockId);
+      if (lockReason !== null) {
+        reply.code(lockReason === "mock_not_found" ? 404 : 409);
+        return {
+          error: lockReason,
+          message: `mock ${req.params.mockId} is no longer selectable`,
+        };
+      }
+      try {
+        await deps.artifacts.selectBrainstormMock(
+          task.worktreePath,
+          task.id,
+          req.params.mockId,
+        );
+      } catch {
+        reply.code(404);
+        return { error: "mock_not_found", message: `mock ${req.params.mockId} not found` };
+      }
+      await publishBrainstormRouteEvent({
+        runs: deps.runs,
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        ...(deps.events ? { events: deps.events } : {}),
+        input: {
+          kind: "brainstorm_mock_selected",
+          mockId: req.params.mockId,
+        },
+      });
+      deps.scheduler?.enqueue(task.id);
+      return { ok: true, mockId: req.params.mockId };
+    },
+  );
+
   // POST /api/tasks/:id/brainstorm/restart
   // Discard the current brainstorm run and dispatch a fresh one. Old per-run
   // files (design.md, spec.md, brainstorm.jsonl, pi-session.jsonl) are
@@ -375,21 +592,25 @@ export function registerBrainstormRoutes(
       // Settle the active run so findActiveRun() returns null on the next
       // dispatch. The dashboard's SSE subscription on the old run drops with
       // the cancelled status; the page revalidates and picks up the new run.
-      const activeRun = await deps.runs.findActiveRun(task.id, "brainstorm");
-      if (!activeRun) {
+      const restartRun =
+        (await deps.runs.findActiveRun(task.id, "brainstorm")) ??
+        (await deps.runs.findLatestRun(task.id, "brainstorm", "cancelled"));
+      if (!restartRun) {
         reply.code(409);
         return {
           error: "no_active_run",
-          message: "no active brainstorm run to restart",
+          message: "no active or cancelled brainstorm run to restart",
         };
       }
-      await deps.runs.updateRun(activeRun.id, {
-        status: "cancelled",
-        endedAt: new Date(),
-      });
+      if (restartRun.status !== "cancelled") {
+        await deps.runs.updateRun(restartRun.id, {
+          status: "cancelled",
+          endedAt: new Date(),
+        });
+      }
 
       // Move old files into runs/<archivedRunId>/.
-      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, activeRun.id);
+      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id, "brainstorm");
 
       // Re-scaffold draft design.md / spec.md so the next tick has the files
       // it expects to read + write.
@@ -418,13 +639,13 @@ export function registerBrainstormRoutes(
       }
       await w.append({
         ts: new Date().toISOString(),
-        kind: "brainstorm_system",
-        systemKind: "session_reset",
-        data: {
-          archivedRunId: activeRun.id,
-          ...(note ? { note } : {}),
-        },
-      });
+          kind: "brainstorm_system",
+          systemKind: "session_reset",
+          data: {
+            archivedRunId: restartRun.id,
+            ...(note ? { note } : {}),
+          },
+        });
 
       // Create the new Run row + wake the scheduler. dispatchBrainstorm in
       // the run-loop also creates one if findActiveRun is null, but pre-
@@ -435,7 +656,7 @@ export function registerBrainstormRoutes(
 
       return {
         ok: true,
-        archivedRunId: activeRun.id,
+        archivedRunId: restartRun.id,
         newRunId: newRun.id,
       };
     },
@@ -463,3 +684,41 @@ const SubmitNudgeSchema = z.object({
     .transform((s) => s.trim())
     .refine((s) => s.length > 0, { message: "comment must not be blank" }),
 });
+
+const EditMockRequestSchema = z.object({
+  comment: z
+    .string()
+    .min(1)
+    .max(4000)
+    .transform((s) => s.trim())
+    .refine((s) => s.length > 0, { message: "comment must not be blank" }),
+});
+
+async function publishBrainstormRouteEvent(opts: {
+  runs: RunStore;
+  events?: EventStore;
+  worktreePath: string;
+  taskId: string;
+  input: Parameters<BrainstormEventBus["publish"]>[0];
+}): Promise<void> {
+  const jsonl = new JsonlWriter(
+    join(opts.worktreePath, ".harness", opts.taskId, "brainstorm.jsonl"),
+  );
+  const activeRun = opts.events
+    ? await opts.runs.findActiveRun(opts.taskId, "brainstorm")
+    : null;
+  if (activeRun && opts.events) {
+    const bus = new BrainstormEventBus({
+      eventStore: opts.events,
+      jsonl,
+      runId: activeRun.id,
+      taskId: opts.taskId,
+    });
+    await bus.publish(opts.input);
+    return;
+  }
+  await jsonl.append({
+    ts: new Date().toISOString(),
+    ...opts.input,
+  });
+}

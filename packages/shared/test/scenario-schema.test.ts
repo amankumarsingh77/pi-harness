@@ -19,6 +19,45 @@ describe("ScenarioFileSchema", () => {
     expect(parsed.scenarios[0]!.type).toBe("api");
   });
 
+  it("parses requirement and blast radius references", () => {
+    const input = {
+      scenarios: [
+        {
+          id: "api-1",
+          type: "api",
+          name: "GET /health returns 200",
+          requirementRefs: ["REQ-001"],
+          blastRadiusRefs: ["BR-001"],
+          request: { method: "GET", url: "http://localhost:3000/health" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const parsed = ScenarioFileSchema.parse(input);
+
+    expect(parsed.scenarios[0]!.requirementRefs).toEqual(["REQ-001"]);
+    expect(parsed.scenarios[0]!.blastRadiusRefs).toEqual(["BR-001"]);
+  });
+
+  it("rejects invalid requirement and blast radius references", () => {
+    const input = {
+      scenarios: [
+        {
+          id: "api-1",
+          type: "api",
+          name: "GET /health returns 200",
+          requirementRefs: ["R-001"],
+          blastRadiusRefs: ["blast-1"],
+          request: { method: "GET", url: "http://localhost:3000/health" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    expect(() => ScenarioFileSchema.parse(input)).toThrow();
+  });
+
   it("parses a valid ui scenario", () => {
     const input = {
       scenarios: [

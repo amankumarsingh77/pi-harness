@@ -5,6 +5,12 @@
     "test": { "dependsOn": ["^build"] },
     "lint": {},
     "typecheck": { "dependsOn": ["^build"] },
-    "dev": { "cache": false, "persistent": true }
+    "@pi-harness/cli#typecheck": {
+      "dependsOn": ["@pi-harness/db#build", "@pi-harness/shared#build"]
+    },
+    "@pi-harness/cli#test": {
+      "dependsOn": ["@pi-harness/db#build", "@pi-harness/shared#build"]
+    },
+    "dev": { "dependsOn": ["^build"], "cache": false, "persistent": true }
   }
 }

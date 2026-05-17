@@ -1,0 +1,6 @@
+id: no-as-unknown-as
+language: TypeScript
+severity: error
+message: Do not use double assertions through unknown. Add a runtime type guard or narrow the API type.
+rule:
+  pattern: $VALUE as unknown as $TYPE

@@ -4,6 +4,7 @@ export * from "./types/event.js";
 export * from "./types/dashboard-event.js";
 export * from "./types/scenario.js";
 export * from "./schemas/scenario.js";
+export * from "./schemas/blast-radius.js";
 export * from "./types/artifacts.js";
 export * from "./types/artifact.js";
 export { parseArtifact, stringifyArtifact } from "./frontmatter.js";
@@ -14,6 +15,19 @@ export {
   type PhaseModelConfig,
   type ThinkingLevel,
 } from "./config/phase-models.js";
+export {
+  ContainerRuntimeSchema,
+  DEFAULT_HARNESS_PROJECT_CONFIG,
+  HarnessProjectConfigSchema,
+  WebProviderSchema,
+  defineHarnessConfig,
+  mergeHarnessProjectConfig,
+  parseHarnessProjectEnv,
+  type ContainerRuntime,
+  type HarnessProjectConfig,
+  type HarnessProjectConfigInput,
+  type WebProvider,
+} from "./config/harness-project.js";
 export {
   BrainstormArtifactSchema,
   PlanArtifactSchema,
