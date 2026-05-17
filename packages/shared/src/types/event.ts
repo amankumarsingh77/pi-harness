@@ -185,6 +185,7 @@ export type AgentEvent =
         | "preflight_started"
         | "preflight_complete"
         | "planner_started"
+        | "planner_turn_completed"
         | "status_changed"
         | "blocked"
         | "session_reset";
@@ -198,11 +199,13 @@ export type AgentEvent =
       kind: "plan_subagent_started";
       subagent: string;
       sessionId: string;
+      attemptId?: string;
     })
   | (AgentEventBase & {
       kind: "plan_subagent_ended";
       subagent: string;
       sessionId: string;
+      attemptId?: string;
       ok: boolean;
       durationMs: number;
       costUsd: number;

@@ -3,6 +3,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { AgentEvent, Artifact, Run, Task } from "@pi-harness/shared";
 import { PlanApprovalGate } from "@/components/plan/approval-gate";
 import { PlanConsole } from "@/components/plan/plan-console";
+import { buildLogRows } from "@/components/plan/plan-log-rows";
+import { deriveKind } from "@/components/plan/preflight-progress";
 import type { PlanJsonlEvent } from "@/lib/api";
 import { PlanEventsProvider } from "@/lib/plan-events-context";
 
@@ -126,6 +128,43 @@ describe("PlanConsole", () => {
 
     fireEvent.click(toggle);
     expect(screen.getByText("planner hasn't called any tools yet")).toBeInTheDocument();
+  });
+
+  it("groups adjacent message deltas into one assistant stream row", () => {
+    const rows = buildLogRows([
+      messageDelta("m1", "codebase-scout", "Let"),
+      messageDelta("m2", "codebase-scout", " me"),
+      messageDelta("m3", "codebase-scout", " read"),
+      toolCall("t1", "codebase-scout", "read", { path: "package.json" }),
+      messageDelta("m4", "codebase-scout", "Done"),
+    ]);
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      verb: "msg",
+      detail: "Let me read",
+    });
+    expect(rows[1]).toMatchObject({
+      verb: "read",
+      detail: "package.json",
+    });
+    expect(rows[2]).toMatchObject({
+      verb: "msg",
+      detail: "Done",
+    });
+  });
+
+  it("derives preflight status from the latest attempt only", () => {
+    const events: readonly PlanJsonlEvent[] = [
+      planSystem("preflight_started", "attempt-old"),
+      started("integration-scanner", "old-live", "attempt-old"),
+      planSystem("preflight_started", "attempt-new"),
+      started("integration-scanner", "new-done", "attempt-new"),
+      ended("integration-scanner", "new-done", true, 1000, 0.01, "attempt-new"),
+      started("integration-scanner", "old-orphan", "attempt-old"),
+    ];
+
+    expect(deriveKind("integration-scanner", { "integration-scanner": null }, events)).toBe("blocked");
   });
 });
 
@@ -252,12 +291,13 @@ function artifact(kind: "plan" | "blast-radius" | "scenarios", body: string): Ar
   };
 }
 
-function started(subagent: string, sessionId: string): PlanJsonlEvent {
+function started(subagent: string, sessionId: string, attemptId?: string): PlanJsonlEvent {
   return {
     kind: "plan_subagent_started",
     ts: "2026-05-15T10:02:00.000Z",
     subagent,
     sessionId,
+    ...(attemptId ? { attemptId } : {}),
   };
 }
 
@@ -267,6 +307,7 @@ function ended(
   ok: boolean,
   durationMs: number,
   costUsd: number,
+  attemptId?: string,
 ): PlanJsonlEvent {
   return {
     kind: "plan_subagent_ended",
@@ -278,6 +319,16 @@ function ended(
     costUsd,
     inputTokens: 100,
     outputTokens: 50,
+    ...(attemptId ? { attemptId } : {}),
+  };
+}
+
+function planSystem(systemKind: "preflight_started", attemptId: string): PlanJsonlEvent {
+  return {
+    kind: "plan_system",
+    ts: "2026-05-15T10:01:00.000Z",
+    systemKind,
+    data: { attemptId },
   };
 }
 
@@ -307,6 +358,18 @@ function log(id: string, subagent: string, text: string): AgentEvent {
     ts: new Date("2026-05-15T10:02:18Z"),
     kind: "log",
     level: "info",
+    text,
+    subagent,
+  };
+}
+
+function messageDelta(id: string, subagent: string, text: string): AgentEvent {
+  return {
+    id,
+    runId: "00000000-0000-4000-8000-000000000010",
+    taskId: "T-1",
+    ts: new Date("2026-05-15T10:02:15Z"),
+    kind: "message_delta",
     text,
     subagent,
   };

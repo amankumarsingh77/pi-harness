@@ -13,53 +13,88 @@ export type LogRow = {
 };
 
 export function buildLogRows(events: readonly AgentEvent[]): readonly LogRow[] {
-  return events.flatMap((event): readonly LogRow[] => {
+  const rows: LogRow[] = [];
+  let stream: MessageStream | null = null;
+
+  const flushStream = (): void => {
+    if (!stream) return;
+    const detail = truncate(stream.text.replace(/\s+/g, " ").trim(), 96);
+    if (detail.length > 0) {
+      rows.push({
+        id: `${stream.firstId}:${stream.lastId}`,
+        ts: toEventDate(stream.firstTs),
+        verb: "msg",
+        detail,
+        tone: "muted",
+      });
+    }
+    stream = null;
+  };
+
+  for (const event of events) {
     switch (event.kind) {
       case "tool_call":
-        return [
-          {
-            id: event.id,
-            ts: toEventDate(event.ts),
-            verb: normalizeToolName(event.tool),
-            detail: summarizeInput(event.tool, event.input),
-            tone: "progress" satisfies LogRowTone,
-          },
-        ];
+        flushStream();
+        rows.push({
+          id: event.id,
+          ts: toEventDate(event.ts),
+          verb: normalizeToolName(event.tool),
+          detail: summarizeInput(event.tool, event.input),
+          tone: "progress" satisfies LogRowTone,
+        });
+        break;
       case "tool_result":
-        return [
-          {
-            id: event.id,
-            ts: toEventDate(event.ts),
-            verb: event.ok ? "ok" : "fail",
-            detail: summarizeOutput(event.output),
-            tone: event.ok ? "done" : "blocked",
-          },
-        ];
+        flushStream();
+        rows.push({
+          id: event.id,
+          ts: toEventDate(event.ts),
+          verb: event.ok ? "ok" : "fail",
+          detail: summarizeOutput(event.output),
+          tone: event.ok ? "done" : "blocked",
+        });
+        break;
       case "log":
-        return [
-          {
-            id: event.id,
-            ts: toEventDate(event.ts),
-            verb: event.level,
-            detail: event.text,
-            tone: event.level === "error" ? "blocked" : event.level === "warn" ? "muted" : "done",
-          },
-        ];
+        flushStream();
+        rows.push({
+          id: event.id,
+          ts: toEventDate(event.ts),
+          verb: event.level,
+          detail: event.text,
+          tone: event.level === "error" ? "blocked" : event.level === "warn" ? "muted" : "done",
+        });
+        break;
       case "message_delta":
-        return [
-          {
-            id: event.id,
-            ts: toEventDate(event.ts),
-            verb: "msg",
-            detail: truncate(event.text.replace(/\s+/g, " ").trim(), 96),
-            tone: "muted",
-          },
-        ];
+        if (stream === null) {
+          stream = {
+            firstId: event.id,
+            lastId: event.id,
+            firstTs: event.ts,
+            text: event.text,
+          };
+        } else {
+          stream = {
+            firstId: stream.firstId,
+            lastId: event.id,
+            firstTs: stream.firstTs,
+            text: `${stream.text}${event.text}`,
+          };
+        }
+        break;
       default:
-        return [];
+        flushStream();
     }
-  });
+  }
+  flushStream();
+
+  return rows;
 }
+
+type MessageStream = {
+  readonly firstId: string;
+  readonly lastId: string;
+  readonly firstTs: Date | string;
+  readonly text: string;
+};
 
 export function LogRows({
   rows,

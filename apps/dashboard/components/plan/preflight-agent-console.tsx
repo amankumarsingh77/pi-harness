@@ -359,6 +359,7 @@ function liveEventsToPlanEvents(events: readonly AgentEvent[]): readonly PlanJso
           ts: toEventDate(event.ts).toISOString(),
           subagent: event.subagent,
           sessionId: event.sessionId,
+          ...(event.attemptId ? { attemptId: event.attemptId } : {}),
         },
       ];
     }
@@ -374,6 +375,7 @@ function liveEventsToPlanEvents(events: readonly AgentEvent[]): readonly PlanJso
           costUsd: event.costUsd,
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
+          ...(event.attemptId ? { attemptId: event.attemptId } : {}),
           ...(event.error ? { error: event.error } : {}),
         },
       ];
