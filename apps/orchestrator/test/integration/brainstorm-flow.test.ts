@@ -80,7 +80,7 @@ describe("brainstorm integration flow", () => {
     process.chdir(envDir);
     writeFileSync(
       join(envDir, ".env.harness"),
-      "CROFAI_API_KEY=test-key\nOPENCODE_API_KEY=test-key\nANTHROPIC_API_KEY=test-key\n",
+      "OPENCODE_API_KEY=test-key\nANTHROPIC_API_KEY=test-key\nCROFAI_API_KEY=test-key\n",
     );
     __resetAuthCache();
     queue = [];

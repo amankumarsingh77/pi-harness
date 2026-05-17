@@ -17,13 +17,13 @@ export function deriveKind(
   if (research[subagent]) return "done";
   const attemptId = latestPreflightAttemptId(events);
   let latest: { sessionId: string; ended: boolean } | null = null;
-  for (const e of events) {
-    if (!matchesAttempt(e, attemptId)) continue;
-    if (e.kind === "plan_subagent_started" && e.subagent === subagent) {
-      latest = { sessionId: e.sessionId, ended: false };
+  for (const event of events) {
+    if (!matchesAttempt(event, attemptId)) continue;
+    if (event.kind === "plan_subagent_started" && event.subagent === subagent) {
+      latest = { sessionId: event.sessionId, ended: false };
     }
-    if (e.kind === "plan_subagent_ended" && e.subagent === subagent) {
-      latest = { sessionId: e.sessionId, ended: true };
+    if (event.kind === "plan_subagent_ended" && event.subagent === subagent) {
+      latest = { sessionId: event.sessionId, ended: true };
     }
   }
   if (!latest) return "intake";

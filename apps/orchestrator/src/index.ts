@@ -5,6 +5,7 @@ import { createDb } from "@pi-harness/db";
 import { loadConfig } from "./config.js";
 import { RunStore } from "./adapters/run-store.js";
 import { EventStore } from "./adapters/event-store.js";
+import { DashboardEventBus } from "./adapters/dashboard-event-bus.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
 import { deriveBrainstormGate } from "./agents/brainstorm-gate.js";
@@ -35,7 +36,11 @@ async function main(): Promise<void> {
 
   const { db } = createDb(config.databaseUrl);
 
-  const runs = new RunStore(db);
+  const dashboardEvents = new DashboardEventBus();
+  const runs = new RunStore(db, {
+    onTaskChanged: (task) => dashboardEvents.publishTask(task),
+    onRunChanged: (run) => dashboardEvents.publishRun(run),
+  });
   const events = new EventStore(db);
   const worktrees = new WorktreeManager({
     repoRoot: config.repoRoot,
@@ -105,6 +110,7 @@ async function main(): Promise<void> {
     scheduler,
     cancellation,
     pinoLogger: pinoRoot,
+    dashboardEvents,
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   log.info({ port: config.port }, "orchestrator listening");

@@ -1,6 +1,7 @@
 export * from "./types/task.js";
 export * from "./types/run.js";
 export * from "./types/event.js";
+export * from "./types/dashboard-event.js";
 export * from "./types/scenario.js";
 export * from "./schemas/scenario.js";
 export * from "./schemas/blast-radius.js";

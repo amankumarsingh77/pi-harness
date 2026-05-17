@@ -6,8 +6,16 @@ import { NotFoundError } from "../domain/errors.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export type RunStoreObserver = {
+  onTaskChanged?: (task: Task) => void | Promise<void>;
+  onRunChanged?: (run: Run) => void | Promise<void>;
+};
+
 export class RunStore {
-  constructor(private readonly db: DbClient) {}
+  constructor(
+    private readonly db: DbClient,
+    private readonly observer: RunStoreObserver = {},
+  ) {}
 
   async createTask(input: {
     title: string;
@@ -24,7 +32,9 @@ export class RunStore {
         ...(input.tags !== undefined ? { tags: [...input.tags] } : {}),
       })
       .returning();
-    return row as Task;
+    const task = row as Task;
+    await this.observer.onTaskChanged?.(task);
+    return task;
   }
 
   async getTask(id: string): Promise<Task> {
@@ -50,7 +60,9 @@ export class RunStore {
       .where(eq(tasks.id, id))
       .returning();
     if (!row) throw new NotFoundError("task", id);
-    return row as Task;
+    const task = row as Task;
+    await this.observer.onTaskChanged?.(task);
+    return task;
   }
 
   async updateTaskStatus(id: string, status: TaskStatus): Promise<Task> {
@@ -93,7 +105,9 @@ export class RunStore {
       .insert(runs)
       .values({ taskId: input.taskId, phase: input.phase })
       .returning();
-    return row as Run;
+    const run = row as Run;
+    await this.observer.onRunChanged?.(run);
+    return run;
   }
 
   // Cheap existence check used by the phaseModels freeze gate. LIMIT 1 so we
@@ -120,6 +134,11 @@ export class RunStore {
       .from(runs)
       .where(eq(runs.taskId, taskId))
       .orderBy(asc(runs.startedAt));
+    return rows as Run[];
+  }
+
+  async listAllRuns(): Promise<Run[]> {
+    const rows = await this.db.select().from(runs).orderBy(asc(runs.startedAt));
     return rows as Run[];
   }
 
@@ -177,6 +196,8 @@ export class RunStore {
   async updateRun(id: string, patch: Partial<Run>): Promise<Run> {
     const [row] = await this.db.update(runs).set(patch).where(eq(runs.id, id)).returning();
     if (!row) throw new NotFoundError("run", id);
-    return row as Run;
+    const run = row as Run;
+    await this.observer.onRunChanged?.(run);
+    return run;
   }
 }

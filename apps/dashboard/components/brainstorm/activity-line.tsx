@@ -43,7 +43,7 @@ export function ActivityLine({ activity }: { activity: ActivityState }) {
 // Returns the activity state to render. The 60s threshold flips the line to
 // "thinking" so a hung call doesn't masquerade as active.
 export function deriveActivity(
-  events: ReadonlyArray<{ kind: string; tool?: string; input?: unknown; ts: Date | string }>,
+  events: ReadonlyArray<{ kind: string; callId?: string; tool?: string; input?: unknown; ts: Date | string }>,
   now: number,
 ): ActivityState {
   let lastCallIdx = -1;
@@ -55,9 +55,9 @@ export function deriveActivity(
   }
   if (lastCallIdx === -1) return null;
   const call = events[lastCallIdx]!;
-  // Look for a same-tool tool_result *after* the call.
+  const key = call.callId ?? `tool:${call.tool ?? ""}`;
   const resolvedAfter = events.slice(lastCallIdx + 1).some(
-    (e) => e.kind === "tool_result" && e.tool === call.tool,
+    (e) => e.kind === "tool_result" && (e.callId ?? `tool:${e.tool ?? ""}`) === key,
   );
   if (resolvedAfter) return null;
   const ts = call.ts instanceof Date ? call.ts.getTime() : new Date(call.ts).getTime();

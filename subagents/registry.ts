@@ -1,7 +1,18 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Phase } from "@pi-harness/shared";
+import {
+  SUBAGENT_META,
+  PREFLIGHT_SUBAGENTS,
+  RETIRED_PROMPTS,
+  type SubagentMeta,
+  type SubagentRole,
+  type BuiltinTool,
+  type CustomTool,
+} from "./metadata.js";
+
+export { PREFLIGHT_SUBAGENTS, RETIRED_PROMPTS };
+export type { SubagentRole, BuiltinTool, CustomTool };
 
 // Anchor relative to this module's location, but tolerate dist mode. The
 // package compiles index.ts + registry.ts into subagents/dist/; prompt
@@ -30,156 +41,33 @@ export const RESEARCH_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "research
 export const AUDIT_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "audit") : "";
 export const RETIRED_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "retired") : "";
 
-export type SubagentRole =
-  | "phase-driver"
-  | "brainstorm-research"
-  | "preflight-research"
-  | "post-plan-audit";
-
-export type BuiltinTool =
-  | "read"
-  | "grep"
-  | "find"
-  | "ls"
-  | "bash"
-  | "edit"
-  | "write";
-
-export type CustomTool =
-  | "submit_questions"
-  | "submit_mock_choices"
-  | "write_mock_revision"
-  | "reply_to_user"
-  | "mark_ready"
-  | "pi_web_search"
-  | "pi_web_fetch"
-  | "write_findings"
-  | "git_history";
-
-export type SubagentDef = {
-  name: string;
-  role: SubagentRole;
+export type SubagentDef = Omit<SubagentMeta, "promptDir" | "promptFile"> & {
   promptPath: string;
-  allowedTools: readonly BuiltinTool[];
-  customTools?: readonly CustomTool[];
-  invokedBy: readonly Phase[];
-  // One-line per-ticket job framing the dispatcher inlines into the user
-  // prompt. Empty for phase-drivers — they build their own prompts.
-  framing: string;
-  // Human-readable one-liner for the dashboard agent drawer.
-  description: string;
 };
 
-// Single source of truth. Adding/renaming a subagent means editing this map
-// and nothing else (callers consume derived views).
-export const SUBAGENTS: Record<string, SubagentDef> = {
-  brainstorm: {
-    name: "brainstorm",
-    role: "phase-driver",
-    promptPath: resolve(PHASE_PROMPTS_DIR, "brainstorm.md"),
-    allowedTools: ["read", "write"],
-    customTools: [
-      "submit_questions",
-      "submit_mock_choices",
-      "write_mock_revision",
-      "mark_ready",
-      "reply_to_user",
-      "pi_web_search",
-      "pi_web_fetch",
-    ],
-    invokedBy: ["brainstorm"],
-    framing: "",
-    description: "Drives the Q&A loop and writes design.md + spec.md",
-  },
-  plan: {
-    name: "plan",
-    role: "phase-driver",
-    promptPath: resolve(PHASE_PROMPTS_DIR, "plan.md"),
-    allowedTools: ["read", "grep", "find", "write"],
-    customTools: ["mark_ready"],
-    invokedBy: ["plan"],
-    framing: "",
-    description: "Reads research findings, authors plan.md + scenarios.yaml",
-  },
-  "codebase-scout": {
-    name: "codebase-scout",
-    role: "preflight-research",
-    promptPath: resolve(RESEARCH_PROMPTS_DIR, "codebase-scout.md"),
-    allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["write_findings"],
-    invokedBy: ["plan"],
-    framing:
-      "Scout the codebase end-to-end for this ticket. Produce a single findings doc with three sections: Files (every file to be read or modified), Patterns (analogous code with file:line cites), Call paths (how the relevant flows work today).",
-    description: "One-pass codebase research: files + patterns + call paths",
-  },
-  "web-search-researcher": {
-    name: "web-search-researcher",
-    role: "brainstorm-research",
-    promptPath: resolve(RESEARCH_PROMPTS_DIR, "web-search-researcher.md"),
-    allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["pi_web_search", "pi_web_fetch", "write_findings"],
-    invokedBy: ["brainstorm"],
-    framing:
-      "Research external libraries, APIs, pricing, recent approaches, and source-backed alternatives before brainstorm asks the user questions.",
-    description: "Searches the web for current external context",
-  },
-  "integration-scanner": {
-    name: "integration-scanner",
-    role: "preflight-research",
-    promptPath: resolve(RESEARCH_PROMPTS_DIR, "integration-scanner.md"),
-    allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["write_findings"],
-    invokedBy: ["plan"],
-    framing:
-      "Identify inbound and outbound system edges affected by this ticket.",
-    description: "Identifies inbound/outbound system edges",
-  },
-  "precedent-locator": {
-    name: "precedent-locator",
-    role: "preflight-research",
-    promptPath: resolve(RESEARCH_PROMPTS_DIR, "precedent-locator.md"),
-    allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["git_history", "write_findings"],
-    invokedBy: ["plan"],
-    framing:
-      "Find past similar changes from git history and what went wrong with each one.",
-    description: "Finds prior similar changes from git history",
-  },
-  "claim-verifier": {
-    name: "claim-verifier",
-    role: "post-plan-audit",
-    promptPath: resolve(AUDIT_PROMPTS_DIR, "claim-verifier.md"),
-    allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["git_history", "write_findings"],
-    invokedBy: ["plan"],
-    framing: "",
-    description: "Audits the planner's draft plan.md, tags claims",
-  },
-};
+function withPromptPath(meta: SubagentMeta): SubagentDef {
+  const dir = promptDir(meta.promptDir);
+  const { promptDir: _promptDir, promptFile, ...rest } = meta;
+  return { ...rest, promptPath: resolve(dir, promptFile) };
+}
 
-// Filenames intentionally kept on disk but not wired into any phase yet.
-// Loader test asserts the union of (registry, retired) covers every .md.
-export const RETIRED_PROMPTS = [
-  "scope-tracer",
-  "test-case-locator",
-  "thoughts-analyzer",
-  "thoughts-locator",
-  "peer-comparator",
-  "diff-auditor",
-  "proof-capture",
-  "screenshot-taker",
-  "verification-author",
-  // Merged into codebase-scout. Prompts kept on disk for revivability.
-  "codebase-locator",
-  "codebase-pattern-finder",
-  "codebase-analyzer",
-] as const;
+function promptDir(dir: SubagentMeta["promptDir"]): string {
+  switch (dir) {
+    case "phase":
+      return PHASE_PROMPTS_DIR;
+    case "research":
+      return RESEARCH_PROMPTS_DIR;
+    case "audit":
+      return AUDIT_PROMPTS_DIR;
+  }
+}
 
-// Derived view: ordering follows SUBAGENTS declaration order, which the
-// dashboard relies on for stable dot positions.
-export const PREFLIGHT_SUBAGENTS: readonly string[] = Object.values(SUBAGENTS)
-  .filter((s) => s.role === "preflight-research")
-  .map((s) => s.name);
+// Single source of truth for prompt-path-resolved registry. The metadata
+// itself lives in `metadata.ts` so browser bundles can import names/roles
+// without dragging in node:fs.
+export const SUBAGENTS: Record<string, SubagentDef> = Object.fromEntries(
+  Object.entries(SUBAGENT_META).map(([key, meta]) => [key, withPromptPath(meta)]),
+);
 
 export function getSubagent(name: string): SubagentDef {
   const def = SUBAGENTS[name];

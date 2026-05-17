@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentEvent, Artifact, Run, Task } from "@pi-harness/shared";
 import { PlanApprovalGate } from "@/components/plan/approval-gate";
 import { PlanConsole } from "@/components/plan/plan-console";
@@ -178,30 +179,35 @@ describe("PlanApprovalGate", () => {
 });
 
 function renderConsole(opts: { readonly liveEvents?: readonly AgentEvent[] } = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <PlanEventsProvider runId={null}>
-      <PlanConsole
-        task={task()}
-        runs={[run()]}
-        gate="running"
-        headerStatus="in progress"
-        iconKind="progress"
-        canCancelRun
-        plan={artifact("plan", planBody)}
-        blastRadius={artifact("blast-radius", blastRadiusBody)}
-        scenarios={artifact("scenarios", scenariosBody)}
-        research={{
-          "codebase-scout": "# Scout\n\nNo backend change needed.",
-          "integration-scanner": null,
-          "precedent-locator": null,
-          "claim-verifier": null,
-        }}
-        planEvents={planEvents}
-        liveEvents={opts.liveEvents ?? liveEvents}
-        connected={true}
-        plannerLogDefaultOpen
-      />
-    </PlanEventsProvider>,
+    <QueryClientProvider client={queryClient}>
+      <PlanEventsProvider runId={null}>
+        <PlanConsole
+          task={task()}
+          runs={[run()]}
+          gate="running"
+          headerStatus="in progress"
+          iconKind="progress"
+          canCancelRun
+          plan={artifact("plan", planBody)}
+          blastRadius={artifact("blast-radius", blastRadiusBody)}
+          scenarios={artifact("scenarios", scenariosBody)}
+          research={{
+            "codebase-scout": "# Scout\n\nNo backend change needed.",
+            "integration-scanner": null,
+            "precedent-locator": null,
+            "claim-verifier": null,
+          }}
+          planEvents={planEvents}
+          liveEvents={opts.liveEvents ?? liveEvents}
+          connected={true}
+          plannerLogDefaultOpen
+        />
+      </PlanEventsProvider>
+    </QueryClientProvider>,
   );
 }
 

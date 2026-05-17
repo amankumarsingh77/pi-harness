@@ -134,8 +134,8 @@ describe("createAgentSession", () => {
 
     const call = events.find((e) => e.kind === "tool_call");
     const result = events.find((e) => e.kind === "tool_result");
-    expect(call).toEqual({ kind: "tool_call", tool: "foo", input: { x: 1 } });
-    expect(result).toEqual({ kind: "tool_result", tool: "foo", ok: true, output: { y: 2 } });
+    expect(call).toEqual({ kind: "tool_call", callId: "t1", tool: "foo", input: { x: 1 } });
+    expect(result).toEqual({ kind: "tool_result", callId: "t1", tool: "foo", ok: true, output: { y: 2 } });
   });
 
   it("tool allowlist keeps custom tools available", async () => {
@@ -191,6 +191,7 @@ describe("createAgentSession", () => {
     const result = events.find((e) => e.kind === "tool_result");
     expect(result).toEqual({
       kind: "tool_result",
+      callId: "t1",
       tool: "foo",
       ok: false,
       output: { message: "boom" },

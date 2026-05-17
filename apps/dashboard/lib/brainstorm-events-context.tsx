@@ -1,7 +1,10 @@
 "use client";
 import { createContext, useContext, type ReactNode } from "react";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { AgentEvent } from "@pi-harness/shared";
 import { useEvents } from "./use-events";
+import { queryKeys } from "./client/queries";
 
 // Single SSE subscription shared by every component on the brainstorm page.
 //
@@ -32,11 +35,25 @@ export function BrainstormEventsProvider({
   children: ReactNode;
 }) {
   const { events, connected } = useEvents(runId, "BrainstormPage");
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const latest = events.at(-1);
+    if (!latest || !isBrainstormBundleEvent(latest)) return;
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.brainstormBundle(latest.taskId),
+    });
+  }, [events, queryClient]);
+
   return (
     <BrainstormEventsContext.Provider value={{ events, connected }}>
       {children}
     </BrainstormEventsContext.Provider>
   );
+}
+
+function isBrainstormBundleEvent(e: AgentEvent): boolean {
+  return e.kind.startsWith("brainstorm_");
 }
 
 // Consumer hook. Throws if used outside the provider — callers on the

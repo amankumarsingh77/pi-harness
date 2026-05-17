@@ -32,7 +32,8 @@
     "access": "public"
   },
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./metadata": { "types": "./dist/metadata.d.ts", "default": "./dist/metadata.js" }
   },
   "scripts": {
     "build": "tsc",

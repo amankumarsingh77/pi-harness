@@ -67,6 +67,26 @@ describe("RunStore", () => {
     expect(runs.map((r) => r.phase)).toEqual(["brainstorm", "plan"]);
   });
 
+  it("notifies an observer after task and run writes", async () => {
+    const notifications: string[] = [];
+    const observed = new RunStore(db, {
+      onTaskChanged: (task) => notifications.push(`task:${task.status}`),
+      onRunChanged: (run) => notifications.push(`run:${run.status}`),
+    });
+
+    const task = await observed.createTask({ title: "observed" });
+    const run = await observed.createRun({ taskId: task.id, phase: "brainstorm" });
+    await observed.updateTask(task.id, { status: "brainstorming" });
+    await observed.updateRun(run.id, { status: "running" });
+
+    expect(notifications).toEqual([
+      "task:backlog",
+      "run:pending",
+      "task:brainstorming",
+      "run:running",
+    ]);
+  });
+
   it("hasAnyRun is false until the first run is created", async () => {
     const t = await store.createTask({ title: "freeze-probe" });
     expect(await store.hasAnyRun(t.id)).toBe(false);

@@ -50,6 +50,13 @@ export class EventStore {
     })) as AgentEvent[];
   }
 
+  async listForRunAfter(runId: string, afterId: string | null): Promise<AgentEvent[]> {
+    const all = await this.listForRun(runId);
+    if (afterId === null) return all;
+    const idx = all.findIndex((e) => e.id === afterId);
+    return idx === -1 ? all : all.slice(idx + 1);
+  }
+
   async latestEventAt(): Promise<Date | null> {
     const [row] = await this.db
       .select({ ts: eventsTable.ts })

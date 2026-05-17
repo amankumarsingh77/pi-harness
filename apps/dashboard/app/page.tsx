@@ -1,22 +1,11 @@
 import type { Metadata } from "next";
-import { Topbar } from "@/components/topbar";
-import { KanbanBoard } from "@/components/kanban/board";
+import { BoardLive } from "@/components/kanban/board-live";
 import { orchestrator } from "@/lib/server/api";
 
 export const metadata: Metadata = { title: "Board · pi-harness" };
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const { tasks, counts, humanInterventionTaskIds, summary } = await orchestrator.listTasks();
-
-  return (
-    <>
-      <Topbar summary={summary} branch="main" />
-      <KanbanBoard
-        tasks={tasks}
-        counts={counts}
-        humanInterventionTaskIds={humanInterventionTaskIds}
-      />
-    </>
-  );
+  const initialData = await orchestrator.listTasks();
+  return <BoardLive initialData={initialData} />;
 }

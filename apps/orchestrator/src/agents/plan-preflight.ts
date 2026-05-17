@@ -224,7 +224,7 @@ async function runOneSubagent(args: {
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
       systemPrompt,
-      tools: [...def.allowedTools],
+      tools: [...def.allowedTools, ...(hasGitHistory ? ["git_history"] : []), "write_findings"],
       customTools,
       onEvent: (e) => opts.onSubagentBridgeEvent?.(subagent, e),
     });

@@ -57,7 +57,7 @@ export function AgentTimeline({
 
 function buildRows(events: AgentEvent[]): Row[] {
   const rows: Row[] = [];
-  const pending = new Map<string, number>(); // tool name → idx awaiting result
+  const pending = new Map<string, number>();
   for (const e of events) {
     if (e.kind === "tool_call") {
       const verb = normalizeToolName(e.tool);
@@ -69,14 +69,14 @@ function buildRows(events: AgentEvent[]): Row[] {
         arg,
         status: "pending",
       });
-      pending.set(e.tool, rows.length - 1);
+      pending.set(callKey(e), rows.length - 1);
       continue;
     }
     if (e.kind === "tool_result") {
-      const idx = pending.get(e.tool);
+      const idx = pending.get(callKey(e));
       if (idx !== undefined) {
         rows[idx]!.status = e.ok ? "ok" : "fail";
-        pending.delete(e.tool);
+        pending.delete(callKey(e));
       } else {
         rows.push({
           id: e.id,
@@ -89,6 +89,12 @@ function buildRows(events: AgentEvent[]): Row[] {
     }
   }
   return rows;
+}
+
+function callKey(
+  e: Extract<AgentEvent, { kind: "tool_call" | "tool_result" }>,
+): string {
+  return e.callId ?? `tool:${e.tool}`;
 }
 
 function normalizeToolName(tool: string): string {

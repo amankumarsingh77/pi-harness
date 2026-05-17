@@ -218,6 +218,55 @@ function artifactPaths(cwd: string, taskId: string): Record<string, string> {
   };
 }
 
+// Test surface for the regression where a revision after ready must dispatch
+// planner work again. Runtime uses derivePlanExecutionState; these helpers keep
+// the small decision-matrix test independent from pi session setup.
+export const __testing = {
+  hasReadyEvent,
+  hasRevisionAfterReady,
+  decidePlannerPrompt,
+};
+
+function hasReadyEvent(events: JsonlEvent[]): boolean {
+  return events.some(isReadyEvent);
+}
+
+function hasRevisionAfterReady(events: JsonlEvent[]): boolean {
+  const lastReady = lastIndexWhere(events, isReadyEvent);
+  const lastRevision = lastIndexWhere(events, isRevisionEvent);
+  return lastRevision !== -1 && lastRevision > lastReady;
+}
+
+function decidePlannerPrompt(
+  events: JsonlEvent[],
+): { kind: "noop" } | { kind: "revision"; prompt: string } {
+  if (!hasRevisionAfterReady(events)) return { kind: "noop" };
+  const revision = [...events].reverse().find(isRevisionEvent);
+  const comment = typeof revision?.comment === "string" ? revision.comment : "";
+  return { kind: "revision", prompt: buildRevisionPrompt("", "", comment) };
+}
+
+function isReadyEvent(e: JsonlEvent): boolean {
+  if (e.kind !== "plan_system") return false;
+  if (e["systemKind"] !== "status_changed") return false;
+  const data = e["data"] as { status?: string } | undefined;
+  return data?.status === "ready";
+}
+
+function isRevisionEvent(e: JsonlEvent): boolean {
+  return e.kind === "plan_revision_requested";
+}
+
+function lastIndexWhere(
+  events: readonly JsonlEvent[],
+  predicate: (event: JsonlEvent) => boolean,
+): number {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (predicate(events[i]!)) return i;
+  }
+  return -1;
+}
+
 async function isPreflightComplete(opts: PlanOpts): Promise<boolean> {
   const blastRadius = await opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius");
   return (
@@ -289,11 +338,12 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     if (e.kind === "message_delta") {
       event = mkEvent({ ...base, kind: "message_delta", text: e.text, subagent });
     } else if (e.kind === "tool_call") {
-      event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input, subagent });
+      event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input, subagent });
     } else if (e.kind === "tool_result") {
       event = mkEvent({
         ...base,
         kind: "tool_result",
+        callId: e.callId,
         tool: e.tool,
         ok: e.ok,
         ...(e.output !== undefined ? { output: e.output } : {}),
@@ -464,37 +514,96 @@ async function runPlannerStage(
     const userPrompt = [
       `You are auditing the plan for task ${opts.taskId}. Read the plan below and tag every claim as Verified, Weakened, or Falsified per your system prompt.`,
       ``,
-      `Persist your findings via the \`write_findings\` tool using the standard claim-verifier output format.`,
+      `Persist your findings via the \`write_findings\` tool using the standard claim-verifier output format. This is mandatory — if you finish your audit without calling write_findings, the harness will reject mark_ready.`,
       ``,
       `# plan.md`,
       ``,
       planBody,
     ].join("\n");
 
-    const session = await opts.createAgentSession({
-      cwd: opts.cwd,
-      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
-      ...(opts.phaseModel.thinkingLevel !== "off"
-        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
-        : {}),
-      systemPrompt,
-      tools: [...cvDef.allowedTools],
-      customTools: [
-        makeGitHistoryTool({ cwd: opts.cwd }),
-        makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
-      ],
-      onEvent: () => {},
+    const sessionId = `psa_${randomUUID()}`;
+    const startedAt = Date.now();
+    await opts.bus.publish({
+      kind: "plan_subagent_started",
+      subagent: "claim-verifier",
+      sessionId,
     });
+
+    // Forward claim-verifier bridge events to EventStore so the dashboard's
+    // per-agent drawer can show its tool-call stream. Mirrors the preflight
+    // forwarder in this file. Skip turn_end / error (control-plane only) and
+    // write_findings (we publish richer bus events for that lifecycle).
+    const cvForward = (e: PiBridgeEvent): void => {
+      if (e.kind === "turn_end" || e.kind === "error") return;
+      const base = { runId: opts.runId, taskId: opts.taskId };
+      const subagent = "claim-verifier";
+      let event: AgentEvent | null = null;
+      if (e.kind === "message_delta") {
+        event = mkEvent({ ...base, kind: "message_delta", text: e.text, subagent });
+      } else if (e.kind === "tool_call") {
+        event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input, subagent });
+      } else if (e.kind === "tool_result") {
+        event = mkEvent({
+          ...base,
+          kind: "tool_result",
+          callId: e.callId,
+          tool: e.tool,
+          ok: e.ok,
+          ...(e.output !== undefined ? { output: e.output } : {}),
+          subagent,
+        });
+      } else if (e.kind === "log") {
+        event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text, subagent });
+      }
+      if (event) void opts.eventStore.append(event).catch(() => {});
+    };
+
+    let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    let dispatchError: string | undefined;
     try {
-      await session.prompt(userPrompt);
-    } finally {
-      await session.close().catch(() => {});
+      const session = await opts.createAgentSession({
+        cwd: opts.cwd,
+        model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+        ...(opts.phaseModel.thinkingLevel !== "off"
+          ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+          : {}),
+        systemPrompt,
+        // SDK `tools` is an absolute allowlist that filters custom tools too —
+        // see plan-preflight.ts for the same fix.
+        tools: [...cvDef.allowedTools, "git_history", "write_findings"],
+        customTools: [
+          makeGitHistoryTool({ cwd: opts.cwd }),
+          makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
+        ],
+        onEvent: cvForward,
+      });
+      try {
+        usage = await session.prompt(userPrompt);
+      } finally {
+        await session.close().catch(() => {});
+      }
+    } catch (err) {
+      dispatchError = (err as Error).message;
     }
-    if (!existsSync(findingsPath)) {
-      return { falsifiedClaims: [] };
+
+    const findingsWritten = existsSync(findingsPath);
+    await opts.bus.publish({
+      kind: "plan_subagent_ended",
+      subagent: "claim-verifier",
+      sessionId,
+      ok: findingsWritten && dispatchError === undefined,
+      durationMs: Date.now() - startedAt,
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      ...(dispatchError !== undefined ? { error: dispatchError } : {}),
+    });
+
+    if (!findingsWritten) {
+      return { falsifiedClaims: [], findingsWritten: false };
     }
     const findings = readFileSync(findingsPath, "utf8");
-    return { falsifiedClaims: parseFalsifiedClaims(findings) };
+    return { falsifiedClaims: parseFalsifiedClaims(findings), findingsWritten: true };
   };
 
   const markReadyTool = makeMarkReadyTool({
@@ -549,11 +658,12 @@ async function runPlannerStage(
         if (e.kind === "message_delta") {
           event = mkEvent({ ...base, kind: "message_delta", text: e.text });
         } else if (e.kind === "tool_call") {
-          event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input });
+          event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input });
         } else if (e.kind === "tool_result") {
           event = mkEvent({
             ...base,
             kind: "tool_result",
+            callId: e.callId,
             tool: e.tool,
             ok: e.ok,
             ...(e.output !== undefined ? { output: e.output } : {}),

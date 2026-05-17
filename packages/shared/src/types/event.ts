@@ -64,8 +64,8 @@ export type AgentEvent =
   // primary phase agent (the planner itself, brainstorm, etc.). The dashboard
   // routes drawer rendering off this field.
   | (AgentEventBase & { kind: "message_delta"; text: string; subagent?: string })
-  | (AgentEventBase & { kind: "tool_call"; tool: string; input: unknown; subagent?: string })
-  | (AgentEventBase & { kind: "tool_result"; tool: string; ok: boolean; output?: unknown; subagent?: string })
+  | (AgentEventBase & { kind: "tool_call"; callId?: string; tool: string; input: unknown; subagent?: string })
+  | (AgentEventBase & { kind: "tool_result"; callId?: string; tool: string; ok: boolean; output?: unknown; subagent?: string })
   | (AgentEventBase & { kind: "log"; level: "info" | "warn" | "error"; text: string; subagent?: string })
   // Brainstorm-specific events. Mirrored to <worktree>/.harness/<taskId>/brainstorm.jsonl.
   | (AgentEventBase & {

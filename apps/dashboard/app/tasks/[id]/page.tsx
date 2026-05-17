@@ -1,21 +1,12 @@
 import type { Metadata } from "next";
-import { Topbar } from "@/components/topbar";
-import { TaskActivityPanel } from "@/components/task-detail/task-activity-panel";
-import {
-  type ArtifactSummary,
-  TaskDetailInspectors,
-} from "@/components/task-detail/task-detail-inspectors";
-import { TaskDetailShell } from "@/components/task-detail/task-detail-shell";
-import { TaskFactsPanel } from "@/components/task-detail/task-facts-panel";
-import { TaskPhaseStrip } from "@/components/task-detail/task-phase-strip";
 import {
   deriveTaskIntervention,
-  TaskInterventionStrip,
 } from "@/components/task-detail/task-intervention";
-import type { Run, Task } from "@pi-harness/shared";
+import type { Task } from "@pi-harness/shared";
 import { notFound } from "next/navigation";
 import { ApiError } from "@/lib/api";
 import { orchestrator } from "@/lib/server/api";
+import { TaskDetailLive } from "@/components/task-detail/task-detail-live";
 
 /**
  * Task detail page. Layout (top → bottom), aligned to:
@@ -52,10 +43,11 @@ export default async function TaskDetailPage({
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const requestedRunId = typeof sp.run === "string" ? sp.run : undefined;
 
-  const { task, runs } = await orchestrator.getTask(id).catch((e) => {
+  const taskResult = await orchestrator.getTask(id).catch((e) => {
     if (e instanceof ApiError && e.status === 404) notFound();
     throw e;
   });
+  const { task, runs } = taskResult;
 
   const selectedRun =
     (requestedRunId ? runs.find((r) => r.id === requestedRunId) : undefined) ??
@@ -78,46 +70,15 @@ export default async function TaskDetailPage({
     interventionPromise,
   ]);
 
-  const liveRun = runs.find((r) => r.status === "running") ?? null;
-  const artifactSummaries = buildArtifactSummaries(task, runs);
-
   return (
-    <>
-      <Topbar
-        runningCount={1}
-        blockedCount={1}
-        doneTodayCount={12}
-        branch="main"
-      />
-
-      <TaskDetailShell
-        task={task}
-        runs={runs}
-        liveRunId={liveRun?.id ?? null}
-        inspectorControls={
-          <TaskDetailInspectors
-            events={events}
-            files={files}
-            artifactSummaries={artifactSummaries}
-            runId={selectedRun?.id ?? "—"}
-            live={liveRun !== null && liveRun.id === selectedRun?.id}
-          />
-        }
-      >
-        {intervention && <TaskInterventionStrip intervention={intervention} />}
-        <TaskPhaseStrip task={task} runs={runs} intervention={intervention} />
-
-        <section className="grid grid-cols-1 gap-[18px] md:grid-cols-[minmax(0,1fr)_310px]">
-          <TaskActivityPanel events={events} />
-          <TaskFactsPanel
-            task={task}
-            runs={runs}
-            files={files}
-            {...(selectedRun ? { selectedRunId: selectedRun.id } : {})}
-          />
-        </section>
-      </TaskDetailShell>
-    </>
+    <TaskDetailLive
+      taskId={task.id}
+      {...(requestedRunId ? { requestedRunId } : {})}
+      initialTask={taskResult}
+      initialEvents={events}
+      initialFiles={files}
+      initialIntervention={intervention}
+    />
   );
 }
 
@@ -147,69 +108,5 @@ async function optionalNotFound<T>(promise: Promise<T>): Promise<T | null> {
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
-  }
-}
-
-function buildArtifactSummaries(task: Task, runs: readonly Run[]): readonly ArtifactSummary[] {
-  return [
-    ...artifactSummariesForPhase(task.id, "brainstorm", runs),
-    ...artifactSummariesForPhase(task.id, "plan", runs),
-    ...artifactSummariesForPhase(task.id, "verify", runs),
-  ];
-}
-
-function artifactSummariesForPhase(
-  taskId: string,
-  phase: ArtifactSummary["phase"],
-  runs: readonly Run[],
-): readonly ArtifactSummary[] {
-  const run = runs.find((item) => item.phase === phase);
-  if (!run) return [];
-
-  const names = artifactNamesForPhase(phase);
-  return names.map((name) => ({
-    name,
-    status: artifactStatusForRun(run),
-    lines: null,
-    phase,
-    href: `/tasks/${taskId}/${phase}`,
-    preview: artifactPreviewForPhase(phase, name),
-  }));
-}
-
-function artifactNamesForPhase(phase: ArtifactSummary["phase"]): readonly string[] {
-  switch (phase) {
-    case "brainstorm":
-      return ["design.md", "spec.md"];
-    case "plan":
-      return ["plan.md", "blast-radius.yaml", "scenarios.yaml"];
-    case "verify":
-      return ["proof-report.md"];
-  }
-}
-
-function artifactStatusForRun(run: Run): string {
-  switch (run.status) {
-    case "running":
-      return "active";
-    case "succeeded":
-      return "ready";
-    case "failed":
-      return "failed";
-    case "cancelled":
-      return "cancelled";
-    case "pending":
-      return "queued";
-  }
-}
-
-function artifactPreviewForPhase(phase: ArtifactSummary["phase"], name: string): string {
-  switch (phase) {
-    case "brainstorm":
-      return `${name} is produced by the brainstorm phase. Open the brainstorm page to inspect the full design and spec artifacts.`;
-    case "plan":
-      return `${name} is produced by the plan phase. Open the plan page to review implementation steps, scenarios, and approval controls.`;
-    case "verify":
-      return `${name} is produced by verification. Open the verify page to inspect proof and remaining blockers.`;
   }
 }

@@ -195,11 +195,12 @@ async function runTurn(
     if (e.kind === "message_delta") {
       event = mkEvent({ ...base, kind: "message_delta", text: e.text });
     } else if (e.kind === "tool_call") {
-      event = mkEvent({ ...base, kind: "tool_call", tool: e.tool, input: e.input });
+      event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input });
     } else if (e.kind === "tool_result") {
       event = mkEvent({
         ...base,
         kind: "tool_result",
+        callId: e.callId,
         tool: e.tool,
         ok: e.ok,
         ...(e.output !== undefined ? { output: e.output } : {}),
@@ -258,6 +259,9 @@ async function runTurn(
       model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+        : {}),
+      ...(opts.phaseModel.maxTurns !== undefined
+        ? { maxTurns: opts.phaseModel.maxTurns }
         : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
