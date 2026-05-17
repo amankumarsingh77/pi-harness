@@ -30,9 +30,13 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   ]);
   const planRunId =
     [...taskResult.runs].reverse().find((run) => run.phase === "plan")?.id ?? null;
+  // waterfall: plan run id comes from the task run list.
+  const initialEvents = planRunId
+    ? (await orchestrator.listEvents(planRunId)).events
+    : [];
 
   return (
-    <PlanEventsProvider runId={planRunId}>
+    <PlanEventsProvider runId={planRunId} initialEvents={initialEvents}>
       <PlanPageLive taskId={id} initialTask={taskResult} initialBundle={bundle} />
     </PlanEventsProvider>
   );

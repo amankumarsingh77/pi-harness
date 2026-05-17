@@ -226,8 +226,29 @@ function summarizeInput(tool: string, input: unknown): string {
 function summarizeOutput(output: unknown): string {
   if (typeof output === "string") return truncate(output.replace(/\s+/g, " "), 96);
   if (output === null || output === undefined) return "";
-  if (typeof output === "object") return "result";
+  if (isRecord(output)) {
+    const text = contentText(output["content"]);
+    return text ? truncate(text.replace(/\s+/g, " "), 96) : "result";
+  }
   return String(output);
+}
+
+function contentText(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const text = value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const contentType = item["type"];
+      const text = item["text"];
+      return contentType === "text" && typeof text === "string" ? text : null;
+    })
+    .filter((item): item is string => item !== null)
+    .join(" ");
+  return text.length > 0 ? text : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function stringField(obj: Record<string, unknown>, keys: readonly string[]): string | undefined {

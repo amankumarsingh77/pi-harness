@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AgentEvent } from "@pi-harness/shared";
@@ -20,12 +20,18 @@ const PlanEventsContext = createContext<Ctx | null>(null);
 
 export function PlanEventsProvider({
   runId,
+  initialEvents = [],
   children,
 }: {
   runId: string | null;
+  initialEvents?: readonly AgentEvent[];
   children: ReactNode;
 }) {
-  const { events, connected } = useEvents(runId, "PlanPage");
+  const { events: liveEvents, connected } = useEvents(runId, "PlanPage");
+  const events = useMemo(
+    () => mergeEvents(initialEvents, liveEvents),
+    [initialEvents, liveEvents],
+  );
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -41,6 +47,25 @@ export function PlanEventsProvider({
       {children}
     </PlanEventsContext.Provider>
   );
+}
+
+function mergeEvents(
+  initialEvents: readonly AgentEvent[],
+  liveEvents: readonly AgentEvent[],
+): AgentEvent[] {
+  const byId = new Map<string, AgentEvent>();
+  for (const event of initialEvents) byId.set(event.id, hydrateEvent(event));
+  for (const event of liveEvents) byId.set(event.id, hydrateEvent(event));
+  return [...byId.values()].sort(
+    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+  );
+}
+
+function hydrateEvent(event: AgentEvent): AgentEvent {
+  return {
+    ...event,
+    ts: event.ts instanceof Date ? event.ts : new Date(event.ts),
+  };
 }
 
 function isPlanBundleEvent(e: AgentEvent): boolean {

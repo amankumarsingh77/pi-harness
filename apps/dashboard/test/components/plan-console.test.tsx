@@ -7,7 +7,7 @@ import { PlanConsole } from "@/components/plan/plan-console";
 import { buildLogRows } from "@/components/plan/plan-log-rows";
 import { deriveKind } from "@/components/plan/preflight-progress";
 import type { PlanJsonlEvent } from "@/lib/api";
-import { PlanEventsProvider } from "@/lib/plan-events-context";
+import { PlanEventsProvider, usePlanEvents } from "@/lib/plan-events-context";
 
 vi.mock("@/app/tasks/[id]/plan/actions", () => ({
   approvePlan: vi.fn(),
@@ -177,6 +177,25 @@ describe("PlanConsole", () => {
     });
   });
 
+  it("summarizes structured failed tool output text in the compact log", () => {
+    const rows = buildLogRows([
+      toolResult("fail-1", "integration-scanner", "write_findings", false, {
+        content: [
+          {
+            type: "text",
+            text: "ENOSPC: no space left on device, open '/tmp/research/integration-scanner.md'",
+          },
+        ],
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      verb: "fail",
+      detail: expect.stringContaining("ENOSPC"),
+      tone: "blocked",
+    });
+  });
+
   it("derives preflight status from the latest attempt only", () => {
     const events: readonly PlanJsonlEvent[] = [
       planSystem("preflight_started", "attempt-old"),
@@ -199,6 +218,34 @@ describe("PlanApprovalGate", () => {
     expect(screen.getByRole("button", { name: "Approve plan" })).toBeInTheDocument();
   });
 });
+
+describe("PlanEventsProvider", () => {
+  it("hydrates terminal plan pages with persisted run events before SSE connects", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PlanEventsProvider
+          runId={null}
+          initialEvents={[
+            toolCall("persisted-1", "integration-scanner", "write_findings", { body: "x" }),
+          ]}
+        >
+          <PlanEventsProbe />
+        </PlanEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("persisted-1")).toBeInTheDocument();
+  });
+});
+
+function PlanEventsProbe() {
+  const { events } = usePlanEvents();
+  return <div>{events.map((event) => event.id).join(",")}</div>;
+}
 
 function renderConsole(
   opts: {
@@ -440,6 +487,27 @@ function log(id: string, subagent: string, text: string): AgentEvent {
     kind: "log",
     level: "info",
     text,
+    subagent,
+  };
+}
+
+function toolResult(
+  id: string,
+  subagent: string,
+  tool: string,
+  ok: boolean,
+  output: unknown,
+): AgentEvent {
+  return {
+    id,
+    runId: "00000000-0000-4000-8000-000000000010",
+    taskId: "T-1",
+    ts: new Date("2026-05-15T10:02:18Z"),
+    kind: "tool_result",
+    callId: id,
+    tool,
+    ok,
+    output,
     subagent,
   };
 }
