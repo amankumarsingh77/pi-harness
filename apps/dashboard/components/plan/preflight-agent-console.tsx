@@ -356,7 +356,7 @@ function liveEventsToPlanEvents(events: readonly AgentEvent[]): readonly PlanJso
       return [
         {
           kind: "plan_subagent_started",
-          ts: event.ts.toISOString(),
+          ts: toEventDate(event.ts).toISOString(),
           subagent: event.subagent,
           sessionId: event.sessionId,
         },
@@ -366,7 +366,7 @@ function liveEventsToPlanEvents(events: readonly AgentEvent[]): readonly PlanJso
       return [
         {
           kind: "plan_subagent_ended",
-          ts: event.ts.toISOString(),
+          ts: toEventDate(event.ts).toISOString(),
           subagent: event.subagent,
           sessionId: event.sessionId,
           ok: event.ok,
@@ -442,4 +442,8 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.floor((ms % 60_000) / 1000);
   return `${minutes}m${String(seconds).padStart(2, "0")}s`;
+}
+
+function toEventDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
 }

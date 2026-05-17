@@ -41,6 +41,7 @@ describe("useEvents", () => {
 
     await waitFor(() => expect(result.current.events).toHaveLength(1));
     expect(result.current.events[0]!.kind).toBe("log");
+    expect(result.current.events[0]!.ts).toBeInstanceOf(Date);
   });
 
   it("opens correct URL", () => {

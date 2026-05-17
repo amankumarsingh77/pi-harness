@@ -19,7 +19,7 @@ export function buildLogRows(events: readonly AgentEvent[]): readonly LogRow[] {
         return [
           {
             id: event.id,
-            ts: event.ts,
+            ts: toEventDate(event.ts),
             verb: normalizeToolName(event.tool),
             detail: summarizeInput(event.tool, event.input),
             tone: "progress" satisfies LogRowTone,
@@ -29,7 +29,7 @@ export function buildLogRows(events: readonly AgentEvent[]): readonly LogRow[] {
         return [
           {
             id: event.id,
-            ts: event.ts,
+            ts: toEventDate(event.ts),
             verb: event.ok ? "ok" : "fail",
             detail: summarizeOutput(event.output),
             tone: event.ok ? "done" : "blocked",
@@ -39,7 +39,7 @@ export function buildLogRows(events: readonly AgentEvent[]): readonly LogRow[] {
         return [
           {
             id: event.id,
-            ts: event.ts,
+            ts: toEventDate(event.ts),
             verb: event.level,
             detail: event.text,
             tone: event.level === "error" ? "blocked" : event.level === "warn" ? "muted" : "done",
@@ -49,7 +49,7 @@ export function buildLogRows(events: readonly AgentEvent[]): readonly LogRow[] {
         return [
           {
             id: event.id,
-            ts: event.ts,
+            ts: toEventDate(event.ts),
             verb: "msg",
             detail: truncate(event.text.replace(/\s+/g, " ").trim(), 96),
             tone: "muted",
@@ -128,8 +128,12 @@ export function RawJsonlRows({
 function serializeEvent(event: AgentEvent): Record<string, unknown> {
   return {
     ...event,
-    ts: event.ts.toISOString(),
+    ts: toEventDate(event.ts).toISOString(),
   };
+}
+
+function toEventDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
 }
 
 function toneClass(tone: LogRowTone): string {

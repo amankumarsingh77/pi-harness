@@ -82,6 +82,16 @@ describe("PlanConsole", () => {
     expect(screen.getByText(/"kind": "tool_call"/)).toBeInTheDocument();
   });
 
+  it("renders live SSE events whose timestamps are still serialized strings", () => {
+    renderConsole({ liveEvents: serializedLiveEvents });
+
+    expect(screen.getByRole("article", { name: "codebase-scout preflight agent" })).toHaveTextContent("package.json");
+    fireEvent.click(screen.getAllByRole("button", { name: "Full log" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Raw JSONL" }));
+
+    expect(screen.getByText(/"ts": "2026-05-15T10:02:15.000Z"/)).toBeInTheDocument();
+  });
+
   it("opens expanded artifact modals for plan, blast radius, and scenarios", () => {
     renderConsole();
 
@@ -128,7 +138,7 @@ describe("PlanApprovalGate", () => {
   });
 });
 
-function renderConsole() {
+function renderConsole(opts: { readonly liveEvents?: readonly AgentEvent[] } = {}) {
   return render(
     <PlanEventsProvider runId={null}>
       <PlanConsole
@@ -148,7 +158,7 @@ function renderConsole() {
           "claim-verifier": null,
         }}
         planEvents={planEvents}
-        liveEvents={liveEvents}
+        liveEvents={opts.liveEvents ?? liveEvents}
         connected={true}
         plannerLogDefaultOpen
       />
@@ -169,6 +179,8 @@ const liveEvents: readonly AgentEvent[] = [
   toolCall("2", "integration-scanner", "grep", { pattern: "PlanPage" }),
   log("3", "integration-scanner", "checking gate semantics"),
 ];
+
+const serializedLiveEvents = JSON.parse(JSON.stringify(liveEvents)) as readonly AgentEvent[];
 
 const planBody = `## Approach
 

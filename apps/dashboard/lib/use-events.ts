@@ -56,9 +56,9 @@ export function useEvents(
       };
       es.onmessage = (ev) => {
         try {
-          const parsed = JSON.parse(ev.data) as AgentEvent;
+          const parsed = hydrateEvent(JSON.parse(ev.data) as AgentEvent);
           setEvents((curr) => [...curr, parsed]);
-          publishLastEventAtThrottled(toEventDate(parsed.ts), {
+          publishLastEventAtThrottled(parsed.ts, {
             lastPublishedAtRef,
             pendingLastEventAtRef,
             pendingTimerRef,
@@ -126,4 +126,8 @@ function publishLastEventAtThrottled(
 
 function toEventDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
+}
+
+function hydrateEvent(event: AgentEvent): AgentEvent {
+  return { ...event, ts: toEventDate(event.ts) };
 }
