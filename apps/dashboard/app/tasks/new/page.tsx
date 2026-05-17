@@ -8,6 +8,8 @@ import { PriorityPicker } from "@/components/new-task/priority-picker";
 import { TagInput } from "@/components/new-task/tag-input";
 import { createTask } from "./actions";
 
+export const dynamic = "force-dynamic";
+
 export default async function NewTaskPage() {
   const { counts } = await orchestrator.listTasks();
   const inFlight =

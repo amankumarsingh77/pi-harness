@@ -3,6 +3,8 @@ dist
 .turbo
 .next
 .reports
+test-results/
+apps/dashboard/test-results/
 .agents/
 *.log
 *.tsbuildinfo

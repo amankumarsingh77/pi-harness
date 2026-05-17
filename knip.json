@@ -40,10 +40,16 @@
   ],
   "ignoreBinaries": ["podman"],
   "ignoreDependencies": [
+    "@pi-harness/dashboard",
+    "@pi-harness/orchestrator",
     "eslint-plugin-react",
     "eslint-plugin-react-hooks",
     "pino-pretty"
   ],
+  "ignoreIssues": {
+    "apps/dashboard/components/kanban/drag-types.ts": ["exports"],
+    "apps/orchestrator/src/agents/subagent-footer.ts": ["exports"]
+  },
   "treatConfigHintsAsErrors": false,
   "ignoreExportsUsedInFile": true
 }

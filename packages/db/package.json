@@ -1,7 +1,9 @@
 {
   "name": "@pi-harness/db",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Drizzle schema and migrations for the pi-harness Postgres database.",
   "private": false,
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,6 +18,25 @@
     "migrations",
     "package.json"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "packages/db"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "drizzle",
+    "postgres",
+    "orchestration"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "prepack": "pnpm run build",

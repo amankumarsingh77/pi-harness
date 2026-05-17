@@ -1,7 +1,9 @@
 {
   "name": "@pi-harness/subagents",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Prompt registry and phase-agent definitions for pi-harness.",
   "private": false,
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +12,25 @@
     "prompts",
     "package.json"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "subagents"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "subagents",
+    "prompts",
+    "orchestration"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
   },
@@ -21,7 +42,7 @@
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
-    "@pi-harness/shared": "workspace:*"
+    "@pi-harness/shared": "workspace:0.1.0-alpha.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

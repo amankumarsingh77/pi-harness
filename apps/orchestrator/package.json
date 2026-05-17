@@ -1,13 +1,34 @@
 {
   "name": "@pi-harness/orchestrator",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Fastify runner service for pi-harness task orchestration, phase runs, and worktrees.",
   "private": false,
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "files": [
     "dist",
     "package.json"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amankumarsingh77/pi-harness.git",
+    "directory": "apps/orchestrator"
+  },
+  "homepage": "https://github.com/amankumarsingh77/pi-harness#readme",
+  "bugs": {
+    "url": "https://github.com/amankumarsingh77/pi-harness/issues"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "fastify",
+    "orchestrator",
+    "worktrees"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
@@ -20,10 +41,10 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
-    "@pi-harness/db": "workspace:*",
-    "@pi-harness/pi-bridge": "workspace:*",
-    "@pi-harness/shared": "workspace:*",
-    "@pi-harness/subagents": "workspace:*",
+    "@pi-harness/db": "workspace:0.1.0-alpha.0",
+    "@pi-harness/pi-bridge": "workspace:0.1.0-alpha.0",
+    "@pi-harness/shared": "workspace:0.1.0-alpha.0",
+    "@pi-harness/subagents": "workspace:0.1.0-alpha.0",
     "@types/js-yaml": "^4.0.9",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.36.0",
