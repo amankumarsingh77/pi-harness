@@ -5,6 +5,7 @@ import type { RunStore } from "../../adapters/run-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
+import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import type { EventStore } from "../../adapters/event-store.js";
 import { JsonlWriter, readJsonl } from "../../adapters/jsonl-writer.js";
 import { BrainstormEventBus } from "../../agents/brainstorm-event-bus.js";
@@ -114,6 +115,7 @@ export function registerBrainstormRoutes(
     events?: EventStore;
     scheduler?: TaskScheduler;
     cancellation?: CancellationRegistry;
+    mutationLock: TaskMutationLock;
   },
 ): void {
   app.get<{ Params: { id: string } }>("/api/tasks/:id/brainstorm", async (req, reply) => {
@@ -608,7 +610,7 @@ export function registerBrainstormRoutes(
       }
 
       // Move old files into runs/<archivedRunId>/.
-      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id);
+      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id, "brainstorm");
 
       // Re-scaffold draft design.md / spec.md so the next tick has the files
       // it expects to read + write.
