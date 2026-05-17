@@ -2,35 +2,54 @@
 
 Multi-agent coding harness built on pi.dev. See `docs/superpowers/specs/2026-05-08-pi-harness-design.md`.
 
-## Setup
+## Setup In Your Project
 
 ```bash
-nvm use
-corepack enable
-pnpm install
-cp .env.example .env
-pnpm db:up
-pnpm db:migrate
+npm install -g @pi-harness/cli
+pi-harness init
+pi-harness dev
 ```
 
-Brainstorm web research uses `pi_web_search` and `pi_web_fetch`. TinyFish is the
-default provider; set `TINYFISH_API_KEY` in `.env.harness` to enable hosted
-search/fetch.
-
-For local fallback, set `PI_WEB_PROVIDER=searxng` and run `pnpm search:up`.
-That starts SearXNG at `http://localhost:8888`; override with `SEARXNG_URL` in
-`.env.harness`. Public SearXNG instances also require
-`SEARXNG_ALLOW_PUBLIC=true` and are best-effort because they may disable JSON or
-rate-limit automation. The local compose setup also starts Valkey for SearXNG's
-limiter and stores SearXNG cache data in a named volume. Local/private network
-clients are passlisted in SearXNG's limiter so harness automation is not blocked
-as bot traffic. Set `SEARXNG_SECRET` in `.env` for anything beyond local
-development.
-
-## Dev loop
+You can also run without a global install:
 
 ```bash
+npx @pi-harness/cli init
+npx @pi-harness/cli dev
+```
+
+`init` must be run inside an existing git repository. It writes `harness.config.ts`,
+`.env.harness.example`, `.harness/runtime/compose.yml`, `.harness/README.md`, and
+adds `.harness/` to `.gitignore`. It prefers Podman and records Docker only when
+Podman is unavailable.
+
+Copy `.env.harness.example` to `.env.harness` and add provider keys before
+starting real agent runs. The default phase config expects `CROFAI_API_KEY`.
+
+`dev` runs `doctor`, starts local Postgres through the generated compose file,
+applies migrations, starts the orchestrator, and opens the dashboard at
+`http://localhost:3000`. Agent work runs in per-task worktrees at
+`.harness/worktrees/<taskId>` on branches named `pi/<taskId>`.
+
+## Local Development
+
+For contributors working on this monorepo:
+
+```bash
+corepack enable
+pnpm install
+pnpm db:up
+pnpm db:migrate
+pnpm dev
+
 pnpm test       # all packages
 pnpm typecheck  # all packages
 pnpm build      # all packages
 ```
+
+## Troubleshooting
+
+- **Missing Podman:** install/start Podman, or install Docker and rerun `pi-harness init`.
+- **Missing API key:** copy `.env.harness.example` to `.env.harness` and fill `CROFAI_API_KEY` or configure another provider.
+- **Port conflict:** set `dashboardPort`, `orchestratorPort`, or `databaseUrl` in `harness.config.ts`.
+- **Non-main base branch:** edit `baseBranch` in `harness.config.ts`; worktrees are created from that branch.
+- **Dry setup check:** run `pi-harness dev --check-only` to validate config without starting services.

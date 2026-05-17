@@ -13,6 +13,7 @@ export type WorktreeInfo = {
 export type WorktreeManagerOptions = {
   repoRoot: string;
   worktreesDir: string;
+  baseBranch?: string;
 };
 
 // Owns the lifecycle of git worktrees, one per task. Spec §5.
@@ -22,7 +23,11 @@ export type WorktreeManagerOptions = {
 // worktrees independent of any specific subagent run (see janitor — Task 13).
 export class WorktreeManager {
   private readonly git: SimpleGit;
-  private readonly opts: WorktreeManagerOptions;
+  private readonly opts: {
+    readonly repoRoot: string;
+    readonly worktreesDir: string;
+    readonly baseBranch: string;
+  };
 
   constructor(opts: WorktreeManagerOptions) {
     // Resolve symlinks so comparisons against `git worktree list --porcelain`
@@ -39,6 +44,7 @@ export class WorktreeManager {
     this.opts = {
       repoRoot: canonical(opts.repoRoot),
       worktreesDir: canonical(opts.worktreesDir),
+      baseBranch: opts.baseBranch ?? "main",
     };
     this.git = simpleGit(this.opts.repoRoot);
   }
@@ -59,7 +65,7 @@ export class WorktreeManager {
       // runs from a feature branch, the worktree diverges from that branch and
       // `git diff main...` sweeps in every commit between `main` and the host
       // branch, polluting the "Files touched" list.
-      await this.git.raw(["worktree", "add", "-b", branch, path, "main"]);
+      await this.git.raw(["worktree", "add", "-b", branch, path, this.opts.baseBranch]);
     } catch (e) {
       throw new WorktreeError(`git worktree add failed: ${(e as Error).message}`, {
         taskId,

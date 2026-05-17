@@ -40,6 +40,7 @@ async function main(): Promise<void> {
   const worktrees = new WorktreeManager({
     repoRoot: config.repoRoot,
     worktreesDir: config.worktreesDir,
+    baseBranch: config.baseBranch,
   });
   const artifacts = new ArtifactsStore();
 

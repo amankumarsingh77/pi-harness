@@ -15,6 +15,19 @@ export {
   type ThinkingLevel,
 } from "./config/phase-models.js";
 export {
+  ContainerRuntimeSchema,
+  DEFAULT_HARNESS_PROJECT_CONFIG,
+  HarnessProjectConfigSchema,
+  WebProviderSchema,
+  defineHarnessConfig,
+  mergeHarnessProjectConfig,
+  parseHarnessProjectEnv,
+  type ContainerRuntime,
+  type HarnessProjectConfig,
+  type HarnessProjectConfigInput,
+  type WebProvider,
+} from "./config/harness-project.js";
+export {
   BrainstormArtifactSchema,
   PlanArtifactSchema,
   PlanStepSchema,

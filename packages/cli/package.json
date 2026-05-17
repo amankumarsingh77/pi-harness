@@ -1,29 +1,34 @@
 {
-  "name": "@pi-harness/subagents",
+  "name": "@pi-harness/cli",
   "version": "0.0.0",
   "private": false,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "bin": {
+    "pi-harness": "./dist/index.js"
+  },
   "files": [
     "dist",
-    "prompts",
-    "package.json"
+    "!dist/**/*.test.*",
+    "package.json",
+    "README.md"
   ],
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
-  },
   "scripts": {
     "build": "tsc",
+    "dev": "tsx src/index.ts",
     "prepack": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
+    "@pi-harness/dashboard": "workspace:*",
+    "@pi-harness/db": "workspace:*",
+    "@pi-harness/orchestrator": "workspace:*",
     "@pi-harness/shared": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

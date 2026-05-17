@@ -27,6 +27,25 @@ afterEach(async () => {
 });
 
 describe("WorktreeManager", () => {
+  it("create() anchors new worktrees to the configured base branch", async () => {
+    const repo = join(scratch, "repo");
+    const wtDir = join(scratch, "worktrees");
+    const git = simpleGit(repo);
+    const originalBranch = (await git.revparse(["--abbrev-ref", "HEAD"])).trim();
+    await git.checkoutLocalBranch("trunk");
+    await writeFile(join(repo, "trunk.txt"), "from trunk");
+    await git.add("trunk.txt");
+    await git.commit("trunk commit");
+    await git.checkout(originalBranch);
+    const wm = new WorktreeManager({ repoRoot: repo, worktreesDir: wtDir, baseBranch: "trunk" });
+
+    const wt = await wm.create("task-trunk", "feat/trunk");
+
+    const wtGit = simpleGit(wt.path);
+    const hasTrunkFile = await wtGit.raw(["ls-tree", "--name-only", "HEAD"]);
+    expect(hasTrunkFile).toContain("trunk.txt");
+  });
+
   it("create() makes a worktree at the configured path with a new branch", async () => {
     const repo = join(scratch, "repo");
     const wtDir = join(scratch, "worktrees");

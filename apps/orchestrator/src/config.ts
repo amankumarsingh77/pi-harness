@@ -6,6 +6,7 @@ export type OrchestratorConfig = {
   databaseUrl: string;
   runsDir: string;
   worktreesDir: string;
+  baseBranch: string;
   // Hard cap on retries per task before requiring human triage.
   // Spec §8.3: cap = 2 retries.
   retryCap: number;
@@ -50,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
       "postgresql://piharness:piharness@localhost:54330/piharness",
     runsDir: env.HARNESS_RUNS_DIR ?? ".harness/runs",
     worktreesDir: env.HARNESS_WORKTREES_DIR ?? ".harness/worktrees",
+    baseBranch: env.HARNESS_BASE_BRANCH ?? "main",
     retryCap: parseInt(env.HARNESS_RETRY_CAP ?? "2", 10),
     executingConcurrency: parseInt(env.HARNESS_EXECUTING_CONCURRENCY ?? "2", 10),
     repoRoot: env.HARNESS_REPO_ROOT ?? process.cwd(),

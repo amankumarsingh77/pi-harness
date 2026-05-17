@@ -25,7 +25,8 @@
     "infra:up": "podman compose up -d postgres searxng",
     "infra:down": "podman compose down",
     "db:migrate": "pnpm --filter @pi-harness/db migrate",
-    "db:generate": "pnpm --filter @pi-harness/db generate"
+    "db:generate": "pnpm --filter @pi-harness/db generate",
+    "cli:link-local": "pnpm --filter @pi-harness/cli build && node scripts/link-local-cli.mjs"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.42.2",
