@@ -1,10 +1,10 @@
 "use client";
-import { createContext, useContext, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AgentEvent } from "@pi-harness/shared";
-import { useEvents } from "./use-events";
 import { queryKeys } from "./client/queries";
+import { RunLiveProvider, useRunLiveEvents } from "./run-live-provider";
 
 // Single SSE subscription shared by every component on the brainstorm page.
 //
@@ -20,13 +20,6 @@ import { queryKeys } from "./client/queries";
 // Lifting the subscription here means one EventSource, one events array,
 // one set of reconnect timers per page.
 
-type Ctx = {
-  events: AgentEvent[];
-  connected: boolean;
-};
-
-const BrainstormEventsContext = createContext<Ctx | null>(null);
-
 export function BrainstormEventsProvider({
   runId,
   children,
@@ -34,7 +27,15 @@ export function BrainstormEventsProvider({
   runId: string | null;
   children: ReactNode;
 }) {
-  const { events, connected } = useEvents(runId, "BrainstormPage");
+  return (
+    <RunLiveProvider runId={runId}>
+      <BrainstormBundleInvalidator>{children}</BrainstormBundleInvalidator>
+    </RunLiveProvider>
+  );
+}
+
+function BrainstormBundleInvalidator({ children }: { readonly children: ReactNode }) {
+  const { events } = useRunLiveEvents();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -45,11 +46,7 @@ export function BrainstormEventsProvider({
     });
   }, [events, queryClient]);
 
-  return (
-    <BrainstormEventsContext.Provider value={{ events, connected }}>
-      {children}
-    </BrainstormEventsContext.Provider>
-  );
+  return <>{children}</>;
 }
 
 function isBrainstormBundleEvent(e: AgentEvent): boolean {
@@ -59,12 +56,6 @@ function isBrainstormBundleEvent(e: AgentEvent): boolean {
 // Consumer hook. Throws if used outside the provider — callers on the
 // brainstorm page are always wrapped, and accidental misuse on another page
 // should fail loudly rather than silently open a new EventSource.
-export function useBrainstormEvents(): Ctx {
-  const ctx = useContext(BrainstormEventsContext);
-  if (ctx === null) {
-    throw new Error(
-      "useBrainstormEvents must be used inside <BrainstormEventsProvider>",
-    );
-  }
-  return ctx;
+export function useBrainstormEvents() {
+  return useRunLiveEvents();
 }

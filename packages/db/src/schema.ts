@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, jsonb, doublePrecision, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, jsonb, doublePrecision, uuid, index, serial } from "drizzle-orm/pg-core";
 
 export const tasks = pgTable(
   "tasks",
@@ -63,6 +63,25 @@ export const events = pgTable(
   (t) => ({
     runIdx: index("events_run_idx").on(t.runId),
     tsIdx: index("events_ts_idx").on(t.ts),
+  }),
+);
+
+export const liveEvents = pgTable(
+  "live_events",
+  {
+    sequence: serial("sequence").primaryKey(),
+    id: uuid("id").defaultRandom().notNull().unique(),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => runs.id, { onDelete: "cascade" }),
+    scope: text("scope").notNull(),
+    kind: text("kind").notNull(),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => ({
+    taskSequenceIdx: index("live_events_task_sequence_idx").on(t.taskId, t.sequence),
+    runSequenceIdx: index("live_events_run_sequence_idx").on(t.runId, t.sequence),
+    scopeSequenceIdx: index("live_events_scope_sequence_idx").on(t.scope, t.sequence),
   }),
 );
 

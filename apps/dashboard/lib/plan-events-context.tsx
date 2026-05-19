@@ -1,22 +1,15 @@
 "use client";
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AgentEvent } from "@pi-harness/shared";
-import { useEvents } from "./use-events";
 import { queryKeys } from "./client/queries";
+import { RunLiveProvider, useRunLiveEvents } from "./run-live-provider";
 
 // Single SSE subscription shared by every component on the plan page.
 // Mirrors brainstorm-events-context: the per-agent drawer + the bottom
 // planner log panel both need the live event stream, and useEvents warns
 // against opening multiple EventSources per page. One provider, one socket.
-
-type Ctx = {
-  events: AgentEvent[];
-  connected: boolean;
-};
-
-const PlanEventsContext = createContext<Ctx | null>(null);
 
 export function PlanEventsProvider({
   runId,
@@ -27,11 +20,15 @@ export function PlanEventsProvider({
   initialEvents?: readonly AgentEvent[];
   children: ReactNode;
 }) {
-  const { events: liveEvents, connected } = useEvents(runId, "PlanPage");
-  const events = useMemo(
-    () => mergeEvents(initialEvents, liveEvents),
-    [initialEvents, liveEvents],
+  return (
+    <RunLiveProvider runId={runId} initialEvents={initialEvents}>
+      <PlanBundleInvalidator>{children}</PlanBundleInvalidator>
+    </RunLiveProvider>
   );
+}
+
+function PlanBundleInvalidator({ children }: { readonly children: ReactNode }) {
+  const { events } = useRunLiveEvents();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -42,42 +39,13 @@ export function PlanEventsProvider({
     });
   }, [events, queryClient]);
 
-  return (
-    <PlanEventsContext.Provider value={{ events, connected }}>
-      {children}
-    </PlanEventsContext.Provider>
-  );
-}
-
-function mergeEvents(
-  initialEvents: readonly AgentEvent[],
-  liveEvents: readonly AgentEvent[],
-): AgentEvent[] {
-  const byId = new Map<string, AgentEvent>();
-  for (const event of initialEvents) byId.set(event.id, hydrateEvent(event));
-  for (const event of liveEvents) byId.set(event.id, hydrateEvent(event));
-  return [...byId.values()].sort(
-    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
-  );
-}
-
-function hydrateEvent(event: AgentEvent): AgentEvent {
-  return {
-    ...event,
-    ts: event.ts instanceof Date ? event.ts : new Date(event.ts),
-  };
+  return <>{children}</>;
 }
 
 function isPlanBundleEvent(e: AgentEvent): boolean {
   return e.kind.startsWith("plan_");
 }
 
-export function usePlanEvents(): Ctx {
-  const ctx = useContext(PlanEventsContext);
-  if (ctx === null) {
-    throw new Error(
-      "usePlanEvents must be used inside <PlanEventsProvider>",
-    );
-  }
-  return ctx;
+export function usePlanEvents() {
+  return useRunLiveEvents();
 }

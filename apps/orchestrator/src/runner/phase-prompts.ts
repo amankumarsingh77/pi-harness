@@ -13,6 +13,8 @@ import { runBrainstorm } from "../agents/brainstorm.js";
 import { PlanEventBus } from "../agents/plan-event-bus.js";
 import { runPlan } from "../agents/plan.js";
 import { runCode } from "../agents/code.js";
+import type { ClaimLedgerStore } from "../adapters/mission-store.js";
+import type { ClaimPublisher } from "../agents/plan-tools.js";
 
 // Common deps every phase needs. The orchestrator constructs this once and
 // passes it into runPhase.
@@ -29,6 +31,8 @@ export type PhaseDeps = {
   createAgentSession: (opts: AgentSessionOptions) => Promise<AgentSession>;
   store: ArtifactsStore;
   eventStore: EventStore;
+  claimLedger?: ClaimLedgerStore;
+  claimPublisher?: ClaimPublisher;
   exec: (cmd: string, args: string[], opts?: { cwd?: string }) => Promise<{ ok: boolean; stdout: string; stderr?: string }>;
 };
 
@@ -106,6 +110,7 @@ export async function runPhase(
         store: deps.store,
         bus,
         eventStore: deps.eventStore,
+        ...(deps.claimLedger !== undefined ? { claimLedger: deps.claimLedger } : {}),
         phaseModel: input.phaseModel,
         sessionPath: input.sessionPath,
         createAgentSession: deps.createAgentSession,
@@ -156,6 +161,8 @@ export async function runPhase(
         ticketTitle: input.ticketTitle,
         ticketDescription: input.ticketDescription,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        ...(deps.claimLedger !== undefined ? { claimLedger: deps.claimLedger } : {}),
+        ...(deps.claimPublisher !== undefined ? { claimPublisher: deps.claimPublisher } : {}),
         // claim-verifier cap is per tick (one runPlan invocation). The cap
         // protects against a perpetual mark_ready loop within a single turn;
         // across ticks the agent has to recover its own way.

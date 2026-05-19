@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { describe, it, expect, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, tasks, runs, events } from "../src/index.js";
+import { createDb, tasks, runs, events, liveEvents } from "../src/index.js";
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
@@ -54,7 +54,7 @@ describe("schema round-trip", () => {
     await db.delete(tasks).where(eq(tasks.id, t!.id));
   });
 
-  it("cascades runs and events when task is deleted", async () => {
+  it("cascades runs, events, and live events when task is deleted", async () => {
     const [t] = await db.insert(tasks).values({ title: "cascade" }).returning();
     const [r] = await db.insert(runs).values({ taskId: t!.id, phase: "brainstorm" }).returning();
     await db.insert(events).values({
@@ -63,6 +63,13 @@ describe("schema round-trip", () => {
       kind: "log",
       payload: { level: "info", text: "hello" },
     });
+    await db.insert(liveEvents).values({
+      taskId: t!.id,
+      runId: r!.id,
+      scope: "run",
+      kind: "agent.event.appended",
+      payload: { id: "event-1" },
+    });
 
     await db.delete(tasks).where(eq(tasks.id, t!.id));
 
@@ -70,5 +77,21 @@ describe("schema round-trip", () => {
     expect(remainingRuns).toHaveLength(0);
     const remainingEvents = await db.select().from(events).where(eq(events.taskId, t!.id));
     expect(remainingEvents).toHaveLength(0);
+    const remainingLiveEvents = await db.select().from(liveEvents).where(eq(liveEvents.taskId, t!.id));
+    expect(remainingLiveEvents).toHaveLength(0);
+  });
+
+  it("supports dashboard-scoped live events without task or run ids", async () => {
+    const [event] = await db.insert(liveEvents).values({
+      scope: "dashboard",
+      kind: "dashboard.snapshot",
+      payload: { tasks: [], counts: {}, runs: [] },
+    }).returning();
+
+    expect(event!.sequence).toBeGreaterThan(0);
+    expect(event!.taskId).toBeNull();
+    expect(event!.runId).toBeNull();
+
+    await db.delete(liveEvents).where(eq(liveEvents.sequence, event!.sequence));
   });
 });

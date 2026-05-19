@@ -8,7 +8,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import type { AgentEvent } from "@pi-harness/shared";
+import type { AgentEvent, LiveEventEnvelope } from "@pi-harness/shared";
 
 export type UseEventsResult = {
   events: AgentEvent[];
@@ -18,9 +18,8 @@ export type UseEventsResult = {
   gapDetected: boolean;
 };
 
-// Subscribes to /api/sse/:runId and accumulates events. Reconnects on error
-// with backoff; caller doesn't see disconnects unless they inspect
-// `connected`.
+// Subscribes to /api/live/stream?runId=:runId and accumulates agent events.
+// The browser's EventSource handles reconnect + Last-Event-ID resume.
 //
 // On the brainstorm page, do NOT call this directly — go through
 // `useBrainstormEvents` (lib/brainstorm-events-context.tsx) so all widgets
@@ -59,21 +58,24 @@ export function useEvents(
     pendingTimerRef.current = null;
 
     if (!runId) return;
-    let attempt = 0;
     let cancelled = false;
 
     const open = (): void => {
       if (cancelled) return;
-      const es = new EventSource(`/api/sse/${runId}`);
+      const es = new EventSource(`/api/live/stream?runId=${encodeURIComponent(runId)}`);
       esRef.current = es;
       es.onopen = () => {
         setConnected(true);
-        attempt = 0;
       };
-      es.onmessage = (ev) => {
+      const onAgentEvent = (ev: MessageEvent<string>) => {
         try {
-          const parsed = hydrateEvent(JSON.parse(ev.data) as AgentEvent);
-          setLastEventId(parsed.id);
+          const envelope = parseAgentEventEnvelope(ev.data);
+          if (!envelope) {
+            setGapDetected(true);
+            return;
+          }
+          const parsed = hydrateEvent(envelope.payload);
+          setLastEventId(String(envelope.sequence));
           setEvents((curr) => {
             if (seenRef.current.has(parsed.id)) return curr;
             seenRef.current.add(parsed.id);
@@ -91,13 +93,9 @@ export function useEvents(
           setGapDetected(true);
         }
       };
+      es.addEventListener("agent.event.appended", onAgentEvent);
       es.onerror = () => {
-        es.close();
         setConnected(false);
-        attempt++;
-        const base = Math.min(8000, 500 * 2 ** attempt);
-        const jitter = base * 0.2 * (Math.random() * 2 - 1);
-        setTimeout(open, base + jitter);
       };
     };
     open();
@@ -150,4 +148,11 @@ function toEventDate(value: Date | string): Date {
 
 function hydrateEvent(event: AgentEvent): AgentEvent {
   return { ...event, ts: toEventDate(event.ts) };
+}
+
+function parseAgentEventEnvelope(raw: string): LiveEventEnvelope<"agent.event.appended"> | null {
+  const value = JSON.parse(raw) as LiveEventEnvelope;
+  return value.kind === "agent.event.appended"
+    ? value as LiveEventEnvelope<"agent.event.appended">
+    : null;
 }

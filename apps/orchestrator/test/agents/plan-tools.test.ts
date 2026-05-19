@@ -15,6 +15,7 @@ import {
   type DispatchClaimVerifier,
 } from "../../src/agents/plan-tools.js";
 import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
+import { ClaimLedgerStore } from "../../src/adapters/mission-store.js";
 import type { AgentEvent } from "@pi-harness/shared";
 
 class InMemoryEventStore {
@@ -600,6 +601,39 @@ describe("mark_ready", () => {
     });
     const result = await tool.execute("t1", {}, undefined, undefined, null as never);
     expect(result.details.ok).toBe(true);
+  });
+
+  it("syncs initial claims from execution DAG and scenarios after mark_ready succeeds", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const claimLedger = new ClaimLedgerStore({ stateDir: scratch });
+    const published: number[] = [];
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+      claimLedger,
+      claimPublisher: {
+        publishClaimsUpdated: async (_taskId, payload) => {
+          published.push(payload.claimEvents.length);
+        },
+      },
+    });
+
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(true);
+
+    await tool.execute("t2", {}, undefined, undefined, null as never);
+    const claims = await claimLedger.listClaims("T-1");
+    expect(claims).toHaveLength(2);
+    expect(claims.map((claim) => claim.sourceKey).sort()).toEqual([
+      "execution-dag:C-001",
+      "scenario:s1",
+    ]);
+    expect(claims.map((claim) => claim.text).sort()).toEqual([
+      "Scenario smoke must pass",
+      "webhook test passes with 5 retries",
+    ]);
+    expect(published).toEqual([2]);
   });
 });
 

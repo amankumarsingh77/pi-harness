@@ -1,4 +1,6 @@
+"use client";
 import type { AgentEvent } from "@pi-harness/shared";
+import { useOptionalRunLiveEvents } from "@/lib/run-live-provider";
 
 type ActivityRow = {
   readonly id: string;
@@ -15,7 +17,8 @@ export function TaskActivityPanel({
   readonly events: readonly AgentEvent[];
   readonly action?: React.ReactNode;
 }) {
-  const rows = latestActivity(events);
+  const live = useOptionalRunLiveEvents();
+  const rows = latestActivity(mergeEvents(events, live?.events ?? []));
 
   return (
     <section className="overflow-hidden rounded-[10px] border border-line bg-white/[0.018]">
@@ -44,6 +47,16 @@ export function TaskActivityPanel({
       </div>
     </section>
   );
+}
+
+function mergeEvents(
+  initial: readonly AgentEvent[],
+  live: readonly AgentEvent[],
+): readonly AgentEvent[] {
+  const byId = new Map<string, AgentEvent>();
+  for (const event of initial) byId.set(event.id, event);
+  for (const event of live) byId.set(event.id, event);
+  return [...byId.values()];
 }
 
 function latestActivity(events: readonly AgentEvent[]): readonly ActivityRow[] {

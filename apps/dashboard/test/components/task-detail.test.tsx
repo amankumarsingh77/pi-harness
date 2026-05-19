@@ -4,6 +4,7 @@ import { PhaseRail } from "@/components/task-detail/phase-rail";
 import { AgentLog } from "@/components/task-detail/agent-log";
 import { TaskActivityPanel } from "@/components/task-detail/task-activity-panel";
 import { TaskDetailInspectors } from "@/components/task-detail/task-detail-inspectors";
+import { TaskDetailShell } from "@/components/task-detail/task-detail-shell";
 import { TaskFactsPanel } from "@/components/task-detail/task-facts-panel";
 import { TaskPhaseStrip } from "@/components/task-detail/task-phase-strip";
 import {
@@ -87,6 +88,19 @@ describe("TaskPhaseStrip", () => {
 });
 
 describe("Focused task detail panels", () => {
+  it("links to Mission Command from the task detail header", () => {
+    render(
+      <TaskDetailShell task={task()} runs={[]} liveRunId={null} inspectorControls={null}>
+        <div />
+      </TaskDetailShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "Mission Command" })).toHaveAttribute(
+      "href",
+      "/tasks/T-1/mission",
+    );
+  });
+
   it("renders latest activity and task facts instead of the old full-height grid", () => {
     const selectedRun = run({ phase: "plan", status: "running" });
 

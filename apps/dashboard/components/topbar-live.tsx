@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
-import { useEvents } from "@/lib/use-events";
 
 export function TopbarShortcuts() {
   const router = useRouter();
@@ -24,12 +23,12 @@ export function TopbarShortcuts() {
 
 export function LastEventTelemetry({
   initialLastEventAt,
-  activeRunIds,
+  activeRunIds: _activeRunIds,
 }: {
   initialLastEventAt: Date | null;
   activeRunIds: readonly string[];
 }) {
-  const [lastEventAt, setLastEventAt] = useState<Date | null>(initialLastEventAt);
+  const [lastEventAt] = useState<Date | null>(initialLastEventAt);
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
@@ -46,27 +45,8 @@ export function LastEventTelemetry({
   return (
     <>
       <span>{label}</span>
-      {activeRunIds.map((runId) => (
-        <RunEventProbe key={runId} runId={runId} onLastEventAt={setLastEventAt} />
-      ))}
     </>
   );
-}
-
-function RunEventProbe({
-  runId,
-  onLastEventAt,
-}: {
-  runId: string;
-  onLastEventAt: (value: Date) => void;
-}) {
-  const { lastEventAt } = useEvents(runId, "topbar-last-event");
-
-  useEffect(() => {
-    if (lastEventAt) onLastEventAt(lastEventAt);
-  }, [lastEventAt, onLastEventAt]);
-
-  return null;
 }
 
 function formatLastEvent(lastEventAt: Date | null, nowMs: number): string {

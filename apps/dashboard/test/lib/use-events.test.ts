@@ -6,6 +6,7 @@ class MockEventSource {
   static instances: MockEventSource[] = [];
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  listeners = new Map<string, Array<(ev: { data: string }) => void>>();
   readyState = 0;
   url: string;
   closed = false;
@@ -16,6 +17,12 @@ class MockEventSource {
   }
   emit(data: string) {
     this.onmessage?.({ data });
+  }
+  emitEvent(type: string, data: string) {
+    for (const listener of this.listeners.get(type) ?? []) listener({ data });
+  }
+  addEventListener(type: string, listener: (ev: { data: string }) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
   close() { this.closed = true; }
 }
@@ -36,7 +43,7 @@ describe("useEvents", () => {
     const es = MockEventSource.instances[0]!;
 
     act(() => {
-      es.emit(JSON.stringify({ id: "1", kind: "log", level: "info", text: "hi" }));
+      es.emitEvent("agent.event.appended", liveEnvelope({ id: "1", kind: "log", level: "info", text: "hi" }));
     });
 
     await waitFor(() => expect(result.current.events).toHaveLength(1));
@@ -47,11 +54,11 @@ describe("useEvents", () => {
   it("dedupes replayed events by id", async () => {
     const { result } = renderHook(() => useEvents("run-1"));
     const es = MockEventSource.instances[0]!;
-    const event = JSON.stringify({ id: "1", kind: "log", level: "info", text: "hi" });
+    const event = liveEnvelope({ id: "1", kind: "log", level: "info", text: "hi" });
 
     act(() => {
-      es.emit(event);
-      es.emit(event);
+      es.emitEvent("agent.event.appended", event);
+      es.emitEvent("agent.event.appended", event);
     });
 
     await waitFor(() => expect(result.current.events).toHaveLength(1));
@@ -64,7 +71,7 @@ describe("useEvents", () => {
     const es = MockEventSource.instances[0]!;
 
     act(() => {
-      es.emit(JSON.stringify({ id: "1", kind: "log", level: "info", text: "old" }));
+      es.emitEvent("agent.event.appended", liveEnvelope({ id: "1", kind: "log", level: "info", text: "old" }));
     });
     await waitFor(() => expect(result.current.events).toHaveLength(1));
 
@@ -75,7 +82,7 @@ describe("useEvents", () => {
   it("opens correct URL", () => {
     renderHook(() => useEvents("run-2"));
     const es = MockEventSource.instances[0]!;
-    expect(es.url).toBe("/api/sse/run-2");
+    expect(es.url).toBe("/api/live/stream?runId=run-2");
   });
 
   it("exposes the latest event timestamp", async () => {
@@ -83,7 +90,7 @@ describe("useEvents", () => {
     const es = MockEventSource.instances[0]!;
 
     act(() => {
-      es.emit(JSON.stringify({
+      es.emitEvent("agent.event.appended", liveEnvelope({
         id: "1",
         runId: "run-3",
         taskId: "task-1",
@@ -105,7 +112,7 @@ describe("useEvents", () => {
     const es = MockEventSource.instances[0]!;
 
     act(() => {
-      es.emit(JSON.stringify({
+      es.emitEvent("agent.event.appended", liveEnvelope({
         id: "1",
         runId: "run-4",
         taskId: "task-1",
@@ -114,7 +121,7 @@ describe("useEvents", () => {
         level: "info",
         text: "first",
       }));
-      es.emit(JSON.stringify({
+      es.emitEvent("agent.event.appended", liveEnvelope({
         id: "2",
         runId: "run-4",
         taskId: "task-1",
@@ -134,3 +141,21 @@ describe("useEvents", () => {
     expect(result.current.lastEventAt?.toISOString()).toBe("2026-05-15T10:00:00.500Z");
   });
 });
+
+function liveEnvelope(event: Record<string, unknown>): string {
+  return JSON.stringify({
+    id: `live-${event["id"]}`,
+    sequence: Number(String(event["id"]).replace(/\D/g, "")) || 1,
+    ts: event["ts"] ?? "2026-05-15T10:00:00.000Z",
+    scope: "run",
+    taskId: event["taskId"] ?? "task-1",
+    runId: event["runId"] ?? "run-1",
+    kind: "agent.event.appended",
+    payload: {
+      runId: event["runId"] ?? "run-1",
+      taskId: event["taskId"] ?? "task-1",
+      ts: event["ts"] ?? "2026-05-15T10:00:00.000Z",
+      ...event,
+    },
+  });
+}

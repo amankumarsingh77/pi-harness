@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import type { Run, Task } from "@pi-harness/shared";
 import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
 import { TaskCostStrip } from "./task-cost-strip";
@@ -45,6 +46,12 @@ export function TaskDetailShell({
             <MetaPill>
               workflow <strong>{task.workflow ?? "—"}</strong>
             </MetaPill>
+            <Link
+              href={`/tasks/${task.id}/mission` as Route}
+              className="inline-flex h-[26px] max-w-full items-center gap-1.5 rounded-full border border-line bg-white/[0.025] px-2.5 font-mono text-[11px] text-fg-mute transition-colors hover:border-fg-faint hover:text-fg"
+            >
+              Mission Command
+            </Link>
             {runs.length > 0 && (
               <MetaPill>
                 <TaskCostStrip initialRuns={[...runs]} liveRunId={liveRunId} />

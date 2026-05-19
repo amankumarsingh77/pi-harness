@@ -25,12 +25,14 @@ import {
 } from "./plan-state.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { EventStore } from "../adapters/event-store.js";
+import type { ClaimLedgerStore } from "../adapters/mission-store.js";
 import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
 import {
   makeMarkReadyTool,
   parseFalsifiedClaims,
+  type ClaimPublisher,
   type ClaimVerifierState,
   type DispatchClaimVerifier,
 } from "./plan-tools.js";
@@ -54,6 +56,8 @@ export type PlanOpts = {
   // Mirrors brainstorm's split: control-plane events on the bus, raw bridge
   // events on the store.
   eventStore: EventStore;
+  claimLedger?: ClaimLedgerStore;
+  claimPublisher?: ClaimPublisher;
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
@@ -614,6 +618,8 @@ async function runPlannerStage(
     taskId: opts.taskId,
     dispatchClaimVerifier,
     claimVerifierState: opts.claimVerifierState,
+    ...(opts.claimLedger !== undefined ? { claimLedger: opts.claimLedger } : {}),
+    ...(opts.claimPublisher !== undefined ? { claimPublisher: opts.claimPublisher } : {}),
   });
 
   let systemPrompt: string;

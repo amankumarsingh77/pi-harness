@@ -2,10 +2,11 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
+import type { LiveEventStore } from "../adapters/live-event-store.js";
+import { ClaimLedgerStore, MissionStore } from "../adapters/mission-store.js";
+import type { ClaimLedgerStore as ClaimLedgerStoreType, MissionStore as MissionStoreType } from "../adapters/mission-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
-import { DashboardEventBus } from "../adapters/dashboard-event-bus.js";
-import type { DashboardEventBus as DashboardEventBusType } from "../adapters/dashboard-event-bus.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
 import { TaskMutationLock } from "../runner/task-mutation-lock.js";
@@ -13,17 +14,18 @@ import { isHarnessError } from "../domain/errors.js";
 import { registerHealth } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerRunRoutes } from "./routes/runs.js";
-import { registerEventStream } from "./routes/events.js";
 import { registerArtifactRoutes } from "./routes/artifacts.js";
 import { registerScreenshotRoutes } from "./routes/screenshots.js";
 import { registerBrainstormRoutes } from "./routes/brainstorm.js";
 import { registerPlanRoutes } from "./routes/plan.js";
-import { registerDashboardEventStream } from "./routes/dashboard-events.js";
+import { registerLiveEventStream } from "./routes/live.js";
+import { registerMissionRoutes } from "./routes/mission.js";
 
 export type ServerDeps = {
   runs: RunStore;
   events: EventStore;
   runsDir: string;
+  stateDir?: string;
   // Optional override for tests; production builds construct one from runsDir.
   artifacts?: ArtifactsStore;
   // Optional in tests that don't need to drive the agent. Production always
@@ -37,7 +39,9 @@ export type ServerDeps = {
   // for HTTP request logging and per-request `req.log` children. When omitted
   // (tests), Fastify falls back to a quiet warn-level logger.
   pinoLogger?: FastifyBaseLogger;
-  dashboardEvents?: DashboardEventBusType;
+  liveEvents?: LiveEventStore;
+  missionStore?: MissionStoreType;
+  claimLedger?: ClaimLedgerStoreType;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -70,20 +74,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
-  const dashboardEvents = deps.dashboardEvents ?? new DashboardEventBus();
   const mutationLock = deps.mutationLock ?? new TaskMutationLock();
+  const stateDir = deps.stateDir ?? ".harness";
+  const missionStore = deps.missionStore ?? new MissionStore({ stateDir });
+  const claimLedger = deps.claimLedger ?? new ClaimLedgerStore({ stateDir });
   registerHealth(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,
     artifacts,
+    missionStore,
     mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
   registerRunRoutes(app, { runs: deps.runs, events: deps.events });
-  registerEventStream(app, { events: deps.events });
-  registerDashboardEventStream(app, { runs: deps.runs, dashboardEvents });
+  registerMissionRoutes(app, {
+    runs: deps.runs,
+    missionStore,
+    claimLedger,
+    ...(deps.liveEvents ? { liveEvents: deps.liveEvents } : {}),
+  });
+  if (deps.liveEvents) {
+    registerLiveEventStream(app, {
+      liveEvents: deps.liveEvents,
+      runs: deps.runs,
+      events: deps.events,
+      artifacts,
+    });
+  }
   registerArtifactRoutes(app, { runsDir: deps.runsDir });
   registerScreenshotRoutes(app, { runsDir: deps.runsDir });
   registerBrainstormRoutes(app, {

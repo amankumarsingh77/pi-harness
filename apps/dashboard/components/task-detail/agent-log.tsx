@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
 import type { AgentEvent } from "@pi-harness/shared";
-import { useEvents } from "@/lib/use-events";
+import { useOptionalRunLiveEvents } from "@/lib/run-live-provider";
 
 /**
  * Live agent log. Three-column grid: timestamp · phase · message. Phase is
@@ -40,8 +40,8 @@ export function AgentLog({
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  const subscribeId = live && runId !== "—" ? runId : null;
-  const { events: liveEvents } = useEvents(subscribeId);
+  const runLive = useOptionalRunLiveEvents();
+  const liveEvents = live && runId !== "—" ? runLive?.events ?? [] : [];
 
   const merged = useMemo(
     () => mergeById(events, liveEvents),

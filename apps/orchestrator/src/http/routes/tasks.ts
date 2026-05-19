@@ -8,6 +8,7 @@ import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
 import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
+import type { MissionStore } from "../../adapters/mission-store.js";
 import { transition } from "../../domain/state-machine.js";
 import { CreateTaskSchema, TransitionSchema, UpdateTaskSchema } from "../schemas.js";
 import { ValidationError } from "../../domain/errors.js";
@@ -21,39 +22,16 @@ export function registerTaskRoutes(
     runs: RunStore;
     events: EventStore;
     artifacts: ArtifactsStore;
+    missionStore?: MissionStore;
     scheduler?: TaskScheduler;
     cancellation?: CancellationRegistry;
     mutationLock: TaskMutationLock;
   },
 ): void {
-  const { runs, events: eventStore, artifacts, scheduler, cancellation, mutationLock } = deps;
+  const { runs, events: eventStore, artifacts, missionStore, scheduler, cancellation, mutationLock } = deps;
 
   app.get("/api/tasks", async () => {
-    const [tasks, counts, activeRunIds, costUsd, lastEventAt] = await Promise.all([
-      runs.listTasks(),
-      runs.countByStatus(),
-      runs.listActiveRunIds(),
-      runs.totalCostUsd(),
-      eventStore.latestEventAt(),
-    ]);
-    const [reviewCount, humanInterventionTaskIds] = await Promise.all([
-      deriveReviewCount(tasks, artifacts),
-      deriveHumanInterventionTaskIds(tasks, artifacts, eventStore, runs),
-    ]);
-    return {
-      tasks,
-      counts,
-      humanInterventionTaskIds,
-      summary: {
-        runningCount: runningCount(counts),
-        reviewCount,
-        blockedCount: blockedCount(counts),
-        costUsd,
-        costCapUsd: costCapUsd(process.env.HARNESS_COST_CAP_USD),
-        lastEventAt,
-        activeRunIds,
-      } satisfies DashboardSummary,
-    };
+    return buildDashboardTaskList({ runs, eventStore, artifacts });
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (req) => {
@@ -76,6 +54,7 @@ export function registerTaskRoutes(
       priority: parsed.priority,
       tags: parsed.tags,
     });
+    await missionStore?.ensureMission(t);
     reply.code(201);
     return t;
   });
@@ -373,6 +352,43 @@ export function registerTaskRoutes(
       });
     },
   );
+}
+
+export async function buildDashboardTaskList(deps: {
+  runs: RunStore;
+  eventStore: EventStore;
+  artifacts: ArtifactsStore;
+}): Promise<{
+  tasks: Task[];
+  counts: Record<TaskStatus, number>;
+  humanInterventionTaskIds: readonly string[];
+  summary: DashboardSummary;
+}> {
+  const [tasks, counts, activeRunIds, costUsd, lastEventAt] = await Promise.all([
+    deps.runs.listTasks(),
+    deps.runs.countByStatus(),
+    deps.runs.listActiveRunIds(),
+    deps.runs.totalCostUsd(),
+    deps.eventStore.latestEventAt(),
+  ]);
+  const [reviewCount, humanInterventionTaskIds] = await Promise.all([
+    deriveReviewCount(tasks, deps.artifacts),
+    deriveHumanInterventionTaskIds(tasks, deps.artifacts, deps.eventStore, deps.runs),
+  ]);
+  return {
+    tasks,
+    counts,
+    humanInterventionTaskIds,
+    summary: {
+      runningCount: runningCount(counts),
+      reviewCount,
+      blockedCount: blockedCount(counts),
+      costUsd,
+      costCapUsd: costCapUsd(process.env.HARNESS_COST_CAP_USD),
+      lastEventAt,
+      activeRunIds,
+    },
+  };
 }
 
 const RUNNING_STATUSES: readonly TaskStatus[] = [

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import type { Run } from "@pi-harness/shared";
-import { useEvents } from "@/lib/use-events";
+import { useOptionalRunLiveEvents } from "@/lib/run-live-provider";
 
 // Combined live cost/tokens/elapsed for the whole task, rendered in the
 // task-detail head row. Aggregates persisted per-phase costs from runs[]
@@ -17,7 +17,8 @@ export function TaskCostStrip({
   initialRuns: Run[];
   liveRunId: string | null;
 }) {
-  const { events: liveEvents } = useEvents(liveRunId, "task-cost");
+  const live = useOptionalRunLiveEvents();
+  const liveEvents = liveRunId ? live?.events ?? [] : [];
 
   const liveUsage = useMemo(() => latestUsage(liveEvents), [liveEvents]);
 

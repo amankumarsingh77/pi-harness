@@ -4,6 +4,7 @@ import type { LogFormat, LogLevel } from "./domain/logger.js";
 export type OrchestratorConfig = {
   port: number;
   databaseUrl: string;
+  stateDir: string;
   runsDir: string;
   worktreesDir: string;
   baseBranch: string;
@@ -49,6 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
     databaseUrl:
       env.DATABASE_URL ??
       "postgresql://piharness:piharness@localhost:54330/piharness",
+    stateDir: env.HARNESS_STATE_DIR ?? ".harness",
     runsDir: env.HARNESS_RUNS_DIR ?? ".harness/runs",
     worktreesDir: env.HARNESS_WORKTREES_DIR ?? ".harness/worktrees",
     baseBranch: env.HARNESS_BASE_BRANCH ?? "main",

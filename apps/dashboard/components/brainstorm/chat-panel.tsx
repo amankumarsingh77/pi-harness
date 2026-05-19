@@ -17,7 +17,7 @@ import { createTimelineMocks } from "./use-brainstorm-timeline";
 
 // Renders the brainstorm transcript from JSONL events. Live updates: the
 // page passes the server-rendered snapshot as `initialEvents`, and we
-// subscribe to /api/sse/:runId to append new
+// subscribe to /api/live/stream?runId=:runId to append new
 // brainstorm_* events as the agent emits them.
 //
 // Questions are paired with their answers so the UI shows a clean Q/A

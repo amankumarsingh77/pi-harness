@@ -7,6 +7,10 @@ import type {
   Artifact,
   BrainstormMock,
   BrainstormMockManifest,
+  Claim,
+  ClaimEvent,
+  MissionEvent,
+  MissionPacket,
 } from "@pi-harness/shared";
 
 // "awaiting_user" exactly when the artifacts on disk are status: ready AND
@@ -98,6 +102,13 @@ export type PlanDiff = {
   kind: "plan";
   baseline: { commit: string; body: string } | null;
   current: { body: string } | null;
+};
+
+export type MissionBundle = {
+  mission: MissionPacket;
+  claims: Claim[];
+  events: MissionEvent[];
+  claimEvents: ClaimEvent[];
 };
 
 // JSONL events as written by the orchestrator (mirrors AgentEvent's
@@ -277,6 +288,7 @@ export type Api = {
     mockId: string,
   ) => Promise<{ ok: true; mockId: string }>;
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
+  getMission: (taskId: string) => Promise<MissionBundle>;
   getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
   submitPlanArtifactEdit: (
     taskId: string,
@@ -406,6 +418,7 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
         },
       ),
     getPlanBundle: (taskId) => send<PlanBundle>(`/api/tasks/${taskId}/plan`),
+    getMission: (taskId) => send<MissionBundle>(`/api/tasks/${taskId}/mission`),
     getPlanDiff: (taskId, kind) =>
       send<PlanDiff>(`/api/tasks/${taskId}/plan/diff?kind=${kind}`),
     submitPlanArtifactEdit: (taskId, payload) =>

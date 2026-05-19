@@ -1,6 +1,7 @@
 import { eq, asc, desc } from "drizzle-orm";
 import { events as eventsTable, type DbClient } from "@pi-harness/db";
 import type { AgentEvent } from "@pi-harness/shared";
+import type { LiveEventStore } from "./live-event-store.js";
 
 type Subscriber = (e: AgentEvent) => void;
 
@@ -13,7 +14,10 @@ type Subscriber = (e: AgentEvent) => void;
 export class EventStore {
   private readonly subs = new Map<string, Set<Subscriber>>(); // runId → subs
 
-  constructor(private readonly db: DbClient) {}
+  constructor(
+    private readonly db: DbClient,
+    private readonly liveEvents?: LiveEventStore,
+  ) {}
 
   async append(e: AgentEvent): Promise<void> {
     // Map AgentEvent → row. The row stores `kind` and stuffs the rest into
@@ -32,6 +36,7 @@ export class EventStore {
     if (subs) {
       for (const sub of subs) sub(e);
     }
+    await this.liveEvents?.publishAgentEvent(e);
   }
 
   async listForRun(runId: string): Promise<AgentEvent[]> {

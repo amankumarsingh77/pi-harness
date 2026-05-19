@@ -17,6 +17,7 @@ import {
   TaskInterventionStrip,
 } from "@/components/task-detail/task-intervention";
 import { queries } from "@/lib/client/queries";
+import { RunLiveProvider } from "@/lib/run-live-provider";
 import type { RunFile } from "@/lib/api";
 
 type TaskDetailData = {
@@ -59,7 +60,7 @@ export function TaskDetailLive({
   const artifactSummaries = buildArtifactSummaries(data.task, data.runs);
 
   return (
-    <>
+    <RunLiveProvider runId={liveRun?.id ?? null} initialEvents={initialEvents}>
       <Topbar runningCount={liveRun ? 1 : 0} blockedCount={0} doneTodayCount={0} branch="main" />
 
       <TaskDetailShell
@@ -92,7 +93,7 @@ export function TaskDetailLive({
           />
         </section>
       </TaskDetailShell>
-    </>
+    </RunLiveProvider>
   );
 }
 

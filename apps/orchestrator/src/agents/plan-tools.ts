@@ -7,9 +7,15 @@ import {
   ExecutionDagSchema,
   ScenarioFileSchema,
   type Artifact,
+  type ClaimsUpdatedPayload,
 } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
+import type {
+  ClaimLedgerMutationResult,
+  ClaimLedgerStore,
+  PlannedClaimInput,
+} from "../adapters/mission-store.js";
 
 // Mirrors the SDK's AgentToolResult shape — same as brainstorm-tools.ts.
 type ToolResult<T> = {
@@ -72,6 +78,13 @@ export type ClaimVerifierResult = {
 
 export type DispatchClaimVerifier = (planBody: string) => Promise<ClaimVerifierResult>;
 
+export type ClaimPublisher = {
+  publishClaimsUpdated: (
+    taskId: string,
+    payload: ClaimsUpdatedPayload,
+  ) => Promise<unknown>;
+};
+
 export function makeMarkReadyTool(deps: {
   store: ArtifactsStore;
   bus: PlanEventBus;
@@ -79,8 +92,19 @@ export function makeMarkReadyTool(deps: {
   taskId: string;
   dispatchClaimVerifier: DispatchClaimVerifier;
   claimVerifierState: ClaimVerifierState;
+  claimLedger?: ClaimLedgerStore;
+  claimPublisher?: ClaimPublisher;
 }): ToolLike<typeof MarkReadyParams, MarkReadyDetails> {
-  const { store, bus, cwd, taskId, dispatchClaimVerifier, claimVerifierState } = deps;
+  const {
+    store,
+    bus,
+    cwd,
+    taskId,
+    dispatchClaimVerifier,
+    claimVerifierState,
+    claimLedger,
+    claimPublisher,
+  } = deps;
 
   function reject(missing: string): ToolResult<MarkReadyDetails> {
     return {
@@ -157,6 +181,14 @@ export function makeMarkReadyTool(deps: {
         );
       }
 
+      await syncPlanClaims({
+        taskId,
+        claimLedger,
+        claimPublisher,
+        executionDagBody: executionDag.body,
+        scenariosBody: scenarios.body,
+      });
+
       // Already-ready: skip the status flip but still terminate.
       const alreadyReady =
         plan.fm.status === "ready" &&
@@ -199,6 +231,44 @@ export function makeMarkReadyTool(deps: {
       };
     },
   };
+}
+
+async function syncPlanClaims(args: {
+  taskId: string;
+  claimLedger: ClaimLedgerStore | undefined;
+  claimPublisher: ClaimPublisher | undefined;
+  executionDagBody: string;
+  scenariosBody: string;
+}): Promise<void> {
+  if (!args.claimLedger) return;
+  const result: ClaimLedgerMutationResult = await args.claimLedger.syncPlannedClaims(args.taskId, [
+    ...plannedClaimsFromExecutionDag(args.executionDagBody),
+    ...plannedClaimsFromScenarios(args.scenariosBody),
+  ]);
+  if (result.events.length === 0) return;
+  await args.claimPublisher?.publishClaimsUpdated(args.taskId, {
+    taskId: args.taskId,
+    claims: result.claims,
+    claimEvents: result.events,
+  });
+}
+
+function plannedClaimsFromExecutionDag(body: string): PlannedClaimInput[] {
+  const parsed = ExecutionDagSchema.parse(yaml.load(body));
+  return parsed.nodes.map((node) => ({
+    sourceKey: `execution-dag:${node.id}`,
+    text: node.assertion,
+    owner: "planner",
+  }));
+}
+
+function plannedClaimsFromScenarios(body: string): PlannedClaimInput[] {
+  const parsed = ScenarioFileSchema.parse(yaml.load(body));
+  return parsed.scenarios.map((scenario) => ({
+    sourceKey: `scenario:${scenario.id}`,
+    text: `Scenario ${scenario.name} must pass`,
+    owner: "planner",
+  }));
 }
 
 // Returns the first missing-section error string for plan.md, or null if all

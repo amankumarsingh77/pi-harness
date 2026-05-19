@@ -58,4 +58,49 @@ describe("api", () => {
       }),
     );
   });
+
+  it("getMission returns the mission packet and folded claims", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        mission: {
+          taskId: "task-1",
+          goal: "Mission goal",
+          successCriteria: ["Proof exists"],
+          constraints: [],
+          riskLevel: "medium",
+          workflowIntent: "backend-feature",
+          affectedAreas: ["orchestrator"],
+          policyProfile: "medium",
+          createdAt: "2026-05-19T00:00:00.000Z",
+          updatedAt: "2026-05-19T00:00:00.000Z",
+        },
+        claims: [
+          {
+            id: "claim-1",
+            taskId: "task-1",
+            sourceKey: "scenario:s1",
+            text: "Scenario smoke must pass",
+            owner: "planner",
+            status: "challenged",
+            evidence: [{ kind: "scenario", ref: "s1", note: "red path" }],
+            source: "plan",
+            verifierNote: "Needs proof",
+            createdAt: "2026-05-19T00:00:00.000Z",
+            updatedAt: "2026-05-19T00:01:00.000Z",
+          },
+        ],
+        events: [],
+        claimEvents: [],
+      }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    const bundle = await a.getMission("task-1");
+
+    expect(bundle.mission.goal).toBe("Mission goal");
+    expect(bundle.claims[0]?.status).toBe("challenged");
+    expect(bundle.claims[0]?.evidence[0]?.ref).toBe("s1");
+    expect(bundle.claimEvents).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledWith("http://x/api/tasks/task-1/mission", expect.any(Object));
+  });
 });

@@ -5,7 +5,8 @@ import { createDb } from "@pi-harness/db";
 import { loadConfig } from "./config.js";
 import { RunStore } from "./adapters/run-store.js";
 import { EventStore } from "./adapters/event-store.js";
-import { DashboardEventBus } from "./adapters/dashboard-event-bus.js";
+import { LiveEventStore } from "./adapters/live-event-store.js";
+import { ClaimLedgerStore, MissionStore } from "./adapters/mission-store.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
 import { deriveBrainstormGate } from "./agents/brainstorm-gate.js";
@@ -30,18 +31,24 @@ async function main(): Promise<void> {
   });
   const log = fromPino(pinoRoot);
   log.info(
-    { port: config.port, level: config.logLevel, format: config.logFormat },
+    { port: config.port, stateDir: config.stateDir, level: config.logLevel, format: config.logFormat },
     "boot",
   );
 
   const { db } = createDb(config.databaseUrl);
 
-  const dashboardEvents = new DashboardEventBus();
+  const liveEvents = new LiveEventStore(db);
   const runs = new RunStore(db, {
-    onTaskChanged: (task) => dashboardEvents.publishTask(task),
-    onRunChanged: (run) => dashboardEvents.publishRun(run),
+    onTaskChanged: async (task) => {
+      await liveEvents.publishTask(task);
+    },
+    onRunChanged: async (run) => {
+      await liveEvents.publishRun(run);
+    },
   });
-  const events = new EventStore(db);
+  const events = new EventStore(db, liveEvents);
+  const missionStore = new MissionStore({ stateDir: config.stateDir });
+  const claimLedger = new ClaimLedgerStore({ stateDir: config.stateDir });
   const worktrees = new WorktreeManager({
     repoRoot: config.repoRoot,
     worktreesDir: config.worktreesDir,
@@ -66,6 +73,8 @@ async function main(): Promise<void> {
     createAgentSession,
     store: artifacts,
     eventStore: events,
+    claimLedger,
+    claimPublisher: liveEvents,
     exec: async (cmd, args, opts) => {
       try {
         const r = await execFileAsync(cmd, args, opts ?? {});
@@ -107,10 +116,13 @@ async function main(): Promise<void> {
     runs,
     events,
     runsDir: config.runsDir,
+    stateDir: config.stateDir,
+    missionStore,
+    claimLedger,
     scheduler,
     cancellation,
     pinoLogger: pinoRoot,
-    dashboardEvents,
+    liveEvents,
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   log.info({ port: config.port }, "orchestrator listening");

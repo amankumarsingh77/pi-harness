@@ -43,6 +43,13 @@
       "when": 1789411500000,
       "tag": "0005_board_task_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789588800000,
+      "tag": "0006_unified_live_events",
+      "breakpoints": true
     }
   ]
 }
