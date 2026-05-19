@@ -103,4 +103,29 @@ describe("api", () => {
     expect(bundle.claimEvents).toEqual([]);
     expect(fetchSpy).toHaveBeenCalledWith("http://x/api/tasks/task-1/mission", expect.any(Object));
   });
+
+  it("runVerifier POSTs the verifier request", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        ok: true,
+        taskId: "task-1",
+        runId: "manual-verifier-1",
+        mode: "all",
+        verified: [],
+        skipped: [],
+      }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    const result = await a.runVerifier("task-1", { mode: "all", claimIds: ["claim-1"] });
+
+    expect(result.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://x/api/tasks/task-1/verifier/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ mode: "all", claimIds: ["claim-1"] }),
+      }),
+    );
+  });
 });

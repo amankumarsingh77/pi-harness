@@ -65,4 +65,8 @@ export const mutations = {
     mutationFn: (action: Parameters<Api["transitionTask"]>[1]) =>
       proxied.transitionTask(id, action),
   }),
+  runVerifier: (id: string) => ({
+    mutationFn: (input?: Parameters<Api["runVerifier"]>[1]) =>
+      proxied.runVerifier(id, input),
+  }),
 };

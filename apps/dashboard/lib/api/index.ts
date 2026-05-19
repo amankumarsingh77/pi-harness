@@ -111,6 +111,31 @@ export type MissionBundle = {
   claimEvents: ClaimEvent[];
 };
 
+export type VerifierRunRequest = {
+  readonly claimIds?: readonly string[];
+  readonly mode?: "pending" | "all";
+};
+
+export type VerifierRunResult = {
+  readonly ok: boolean;
+  readonly taskId: string;
+  readonly runId: string;
+  readonly mode: "pending" | "all";
+  readonly verified: readonly {
+    readonly claimId: string;
+    readonly sourceKey: string;
+    readonly scenarioId: string;
+    readonly status: "proven" | "challenged";
+    readonly ok: boolean;
+    readonly verifierNote: string;
+  }[];
+  readonly skipped: readonly {
+    readonly claimId: string;
+    readonly sourceKey: string;
+    readonly reason: string;
+  }[];
+};
+
 // JSONL events as written by the orchestrator (mirrors AgentEvent's
 // brainstorm_* kinds, but tagged with `kind` directly — no AgentEventBase
 // envelope on disk).
@@ -289,6 +314,7 @@ export type Api = {
   ) => Promise<{ ok: true; mockId: string }>;
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
   getMission: (taskId: string) => Promise<MissionBundle>;
+  runVerifier: (taskId: string, payload?: VerifierRunRequest) => Promise<VerifierRunResult>;
   getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
   submitPlanArtifactEdit: (
     taskId: string,
@@ -419,6 +445,11 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       ),
     getPlanBundle: (taskId) => send<PlanBundle>(`/api/tasks/${taskId}/plan`),
     getMission: (taskId) => send<MissionBundle>(`/api/tasks/${taskId}/mission`),
+    runVerifier: (taskId, payload = {}) =>
+      send<VerifierRunResult>(`/api/tasks/${taskId}/verifier/run`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
     getPlanDiff: (taskId, kind) =>
       send<PlanDiff>(`/api/tasks/${taskId}/plan/diff?kind=${kind}`),
     submitPlanArtifactEdit: (taskId, payload) =>
