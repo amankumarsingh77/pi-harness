@@ -13,6 +13,8 @@ describe("MissionCommandShell", () => {
         missionEvents={[]}
         claimEvents={[]}
         runs={[]}
+        onRunVerifier={() => {}}
+        verifierPending={false}
       />,
     );
 
@@ -20,6 +22,7 @@ describe("MissionCommandShell", () => {
     expect(screen.getByText("Ship durable mission state")).toBeInTheDocument();
     expect(screen.getByText("No claims yet")).toBeInTheDocument();
     expect(screen.getByText("No mission transcript events")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run verifier" })).toBeInTheDocument();
   });
 
   it("renders challenged claims with verifier notes and evidence", () => {
@@ -44,6 +47,9 @@ describe("MissionCommandShell", () => {
         ]}
         claimEvents={[claimCreatedEvent()]}
         runs={[run({ phase: "plan", status: "running" })]}
+        onRunVerifier={() => {}}
+        verifierPending={false}
+        verifierError="verifier unavailable"
       />,
     );
 
@@ -53,6 +59,7 @@ describe("MissionCommandShell", () => {
     expect(screen.getByText("Mission updated")).toBeInTheDocument();
     expect(screen.getByText("Claim seeded from scenario:smoke")).toBeInTheDocument();
     expect(screen.getByText("plan running")).toBeInTheDocument();
+    expect(screen.getByText("verifier unavailable")).toBeInTheDocument();
   });
 });
 

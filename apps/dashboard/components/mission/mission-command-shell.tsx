@@ -15,6 +15,9 @@ export function MissionCommandShell({
   missionEvents,
   claimEvents,
   runs,
+  onRunVerifier,
+  verifierPending,
+  verifierError,
 }: {
   readonly task: Task;
   readonly mission: MissionPacket;
@@ -22,6 +25,9 @@ export function MissionCommandShell({
   readonly missionEvents: readonly MissionEvent[];
   readonly claimEvents: readonly ClaimEvent[];
   readonly runs: readonly Run[];
+  readonly onRunVerifier: () => void;
+  readonly verifierPending: boolean;
+  readonly verifierError?: string;
 }) {
   const counts = countClaims(claims);
   const latestRun = runs.at(-1) ?? null;
@@ -54,6 +60,26 @@ export function MissionCommandShell({
       </Panel>
 
       <Panel title="Claim Ledger" eyebrow={`${claims.length} claims`}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-line bg-white/[0.02] p-3">
+          <div>
+            <div className="text-[13px] font-medium text-fg">Verifier sidecar</div>
+            <p className="mt-1 mb-0 text-[12px] leading-5 text-fg-mute">
+              Runs pending scenario claims and streams proof transitions back here.
+            </p>
+            {verifierError && (
+              <p className="mt-2 mb-0 text-[12px] leading-5 text-red-fg2">{verifierError}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onRunVerifier}
+            disabled={verifierPending}
+            className="h-9 shrink-0 rounded-[6px] border border-line bg-fg px-3 text-[12px] font-medium text-bg transition hover:bg-fg/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {verifierPending ? "Running..." : "Run verifier"}
+          </button>
+        </div>
+
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 lg:grid-cols-2 xl:grid-cols-5">
           {CLAIM_STATUS_ORDER.map((status) => (
             <Metric key={status} label={statusLabel(status)} value={String(counts[status] ?? 0)} tone={statusTone(status)} />

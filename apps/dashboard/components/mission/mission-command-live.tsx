@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ClaimEvent, LiveEventEnvelope, Run, Task } from "@pi-harness/shared";
 import { MissionCommandShell } from "./mission-command-shell";
-import { queries, queryKeys } from "@/lib/client/queries";
+import { mutations, queries, queryKeys } from "@/lib/client/queries";
 import type { MissionBundle } from "@/lib/api";
 
 type TaskDetailData = {
@@ -29,6 +29,12 @@ export function MissionCommandLive({
   const missionQuery = useQuery({
     ...queries.getMission(taskId),
     initialData: initialMission,
+  });
+  const verifierMutation = useMutation({
+    ...mutations.runVerifier(taskId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mission(taskId) });
+    },
   });
 
   useEffect(() => {
@@ -107,8 +113,15 @@ export function MissionCommandLive({
       claims={missionQuery.data.claims}
       missionEvents={missionQuery.data.events}
       claimEvents={missionQuery.data.claimEvents}
+      onRunVerifier={() => verifierMutation.mutate({ mode: "pending" })}
+      verifierPending={verifierMutation.isPending}
+      {...(verifierMutation.error ? { verifierError: errorMessage(verifierMutation.error) } : {})}
     />
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Verifier run failed";
 }
 
 function parseLiveEvent<K extends LiveEventEnvelope["kind"]>(

@@ -13,16 +13,16 @@ import { runBrainstorm } from "../agents/brainstorm.js";
 import { PlanEventBus } from "../agents/plan-event-bus.js";
 import { runPlan } from "../agents/plan.js";
 import { runCode } from "../agents/code.js";
+import { runVerifierSidecar } from "../agents/verifier-sidecar.js";
+import { runApiScenario, runUiScenario, runUiVisualScenario } from "../agents/verify-runner.js";
 import type { ClaimLedgerStore } from "../adapters/mission-store.js";
 import type { ClaimPublisher } from "../agents/plan-tools.js";
 
 // Common deps every phase needs. The orchestrator constructs this once and
 // passes it into runPhase.
 //
-// Brainstorm, plan, and code have real drivers. verify / pr return a
-// structured `not_implemented` until each migrates to `createAgentSession`.
-// The legacy `createSession` / `runSubagent` plumbing was removed — its
-// runtime stubs always threw, so it had no production callers anyway.
+// Brainstorm, plan, code, and verify have real drivers. pr returns a
+// structured `not_implemented` until it migrates.
 export type PhaseDeps = {
   cwd: string;
   onEvent: (e: PiBridgeEvent) => void;
@@ -210,7 +210,40 @@ export async function runPhase(
         ...(r.cancelled ? { cancelled: true } : {}),
       };
     }
-    case "verify":
+    case "verify": {
+      if (!deps.claimLedger) {
+        return {
+          ok: false,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          error: "verify phase requires claimLedger",
+        };
+      }
+      const result = await runVerifierSidecar({
+        taskId: input.taskId,
+        runId: input.runId,
+        cwd: deps.cwd,
+        store: deps.store,
+        claimLedger: deps.claimLedger,
+        ...(deps.claimPublisher !== undefined
+          ? { publishClaimsUpdated: deps.claimPublisher.publishClaimsUpdated }
+          : {}),
+        runApiScenario,
+        runUiScenario,
+        runUiVisualScenario,
+      });
+      const challengedCount = result.verified.filter((item) => !item.ok).length;
+      return {
+        ok: result.ok,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        ...(result.ok
+          ? {}
+          : { error: result.error ?? `verifier sidecar challenged ${challengedCount} claim(s)` }),
+      };
+    }
     case "pr":
       return NOT_IMPLEMENTED(phase);
   }

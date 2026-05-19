@@ -20,6 +20,7 @@ import { registerBrainstormRoutes } from "./routes/brainstorm.js";
 import { registerPlanRoutes } from "./routes/plan.js";
 import { registerLiveEventStream } from "./routes/live.js";
 import { registerMissionRoutes } from "./routes/mission.js";
+import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/verifier.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -42,6 +43,7 @@ export type ServerDeps = {
   liveEvents?: LiveEventStore;
   missionStore?: MissionStoreType;
   claimLedger?: ClaimLedgerStoreType;
+  verifierRunners?: VerifierRouteRunners;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -94,6 +96,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     missionStore,
     claimLedger,
     ...(deps.liveEvents ? { liveEvents: deps.liveEvents } : {}),
+  });
+  registerVerifierRoutes(app, {
+    runs: deps.runs,
+    artifacts,
+    claimLedger,
+    ...(deps.liveEvents ? { liveEvents: deps.liveEvents } : {}),
+    ...(deps.verifierRunners ? { runners: deps.verifierRunners } : {}),
   });
   if (deps.liveEvents) {
     registerLiveEventStream(app, {

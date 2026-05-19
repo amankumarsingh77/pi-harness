@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MissionCommandLive } from "@/components/mission/mission-command-live";
 import type { Claim, MissionPacket, Task } from "@pi-harness/shared";
@@ -37,6 +37,16 @@ beforeEach(() => {
   globalThis.EventSource = MockEventSource;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes("/verifier/run")) {
+      return Response.json({
+        ok: true,
+        taskId: "T-1",
+        runId: "manual-verifier-1",
+        mode: "pending",
+        verified: [],
+        skipped: [],
+      });
+    }
     if (url.includes("/mission")) {
       return Response.json({ mission: mission(), claims: [claim()], events: [], claimEvents: [] });
     }
@@ -132,6 +142,20 @@ describe("MissionCommandLive", () => {
     });
 
     await waitFor(() => expect(invalidate).toHaveBeenCalled());
+  });
+
+  it("posts a verifier run request from Mission Command", async () => {
+    const fetchSpy = vi.mocked(fetch);
+    renderLive();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run verifier" }));
+
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/api/proxy/tasks/T-1/verifier/run",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
   });
 });
 
