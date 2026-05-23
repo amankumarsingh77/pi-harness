@@ -17,6 +17,7 @@ import { runVerifierSidecar } from "../agents/verifier-sidecar.js";
 import { runApiScenario, runUiScenario, runUiVisualScenario } from "../agents/verify-runner.js";
 import type { ClaimLedgerStore } from "../adapters/mission-store.js";
 import type { ClaimPublisher } from "../agents/plan-tools.js";
+import type { GraphifyLifecycle } from "../agents/graphify-manager.js";
 
 // Common deps every phase needs. The orchestrator constructs this once and
 // passes it into runPhase.
@@ -33,6 +34,7 @@ export type PhaseDeps = {
   eventStore: EventStore;
   claimLedger?: ClaimLedgerStore;
   claimPublisher?: ClaimPublisher;
+  graphify?: GraphifyLifecycle;
   exec: (cmd: string, args: string[], opts?: { cwd?: string }) => Promise<{ ok: boolean; stdout: string; stderr?: string }>;
 };
 
@@ -114,6 +116,7 @@ export async function runPhase(
         phaseModel: input.phaseModel,
         sessionPath: input.sessionPath,
         createAgentSession: deps.createAgentSession,
+        ...(deps.graphify !== undefined ? { graphify: deps.graphify } : {}),
         ...(input.ticketTitle !== undefined ? { ticketTitle: input.ticketTitle } : {}),
         ...(input.ticketDescription !== undefined
           ? { ticketDescription: input.ticketDescription }
@@ -158,6 +161,7 @@ export async function runPhase(
         phaseModel: input.phaseModel,
         sessionPath: input.sessionPath,
         createAgentSession: deps.createAgentSession,
+        ...(deps.graphify !== undefined ? { graphify: deps.graphify } : {}),
         ticketTitle: input.ticketTitle,
         ticketDescription: input.ticketDescription,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
@@ -195,6 +199,7 @@ export async function runPhase(
         eventStore: deps.eventStore,
         phaseModel: input.phaseModel,
         createAgentSession: deps.createAgentSession,
+        ...(deps.graphify !== undefined ? { graphify: deps.graphify } : {}),
         ...(input.ticketTitle !== undefined ? { ticketTitle: input.ticketTitle } : {}),
         ...(input.ticketDescription !== undefined
           ? { ticketDescription: input.ticketDescription }

@@ -28,6 +28,11 @@ import {
   makeWriteBrainstormResearchFindingsTool,
   shouldRunWebResearch,
 } from "./web-research-tools.js";
+import {
+  GRAPHIFY_QUERY_TOOL_NAMES,
+  makeGraphifyQueryTools,
+} from "./graphify-tools.js";
+import type { GraphifyLifecycle } from "./graphify-manager.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -44,6 +49,7 @@ export type BrainstormOpts = {
   ticketTitle?: string;
   ticketDescription?: string;
   signal?: AbortSignal;
+  graphify?: GraphifyLifecycle;
 };
 export type BrainstormResult = {
   ok: boolean;
@@ -265,7 +271,7 @@ async function runTurn(
         : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
-      tools: [...brainstormDef.allowedTools],
+      tools: [...brainstormDef.allowedTools, ...GRAPHIFY_QUERY_TOOL_NAMES],
       customTools: [
         submitQuestionsTool,
         submitMockChoicesTool,
@@ -274,6 +280,7 @@ async function runTurn(
         replyToUserTool,
         makePiWebSearchTool(),
         makePiWebFetchTool(),
+        ...makeGraphifyQueryTools({ cwd: opts.cwd }),
       ],
       onEvent: handleEvent,
     });

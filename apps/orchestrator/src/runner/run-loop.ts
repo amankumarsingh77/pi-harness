@@ -4,6 +4,7 @@ import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { WorktreeManager, WorktreeInfo } from "../adapters/worktree.js";
 import { transition } from "../domain/state-machine.js";
+import { mkEvent } from "../domain/events.js";
 import { phasesFor } from "../domain/phase-chain.js";
 import { runPhase, type PhaseDeps, type PhaseInput, type PhaseOutput } from "./phase-prompts.js";
 import { scaffoldBrainstorm } from "./scaffold-brainstorm.js";
@@ -11,6 +12,7 @@ import { scaffoldPlan } from "./scaffold-plan.js";
 import { deriveBrainstormGate } from "../agents/brainstorm-gate.js";
 import { derivePlanGate } from "../agents/plan-gate.js";
 import type { CancellationRegistry } from "./cancellation.js";
+import type { GraphifyLifecycle } from "../agents/graphify-manager.js";
 
 export type RunLoopOpts = {
   task: Task;
@@ -23,6 +25,7 @@ export type RunLoopOpts = {
   worktrees: WorktreeManager;
   retryCap: number;
   cancellation: CancellationRegistry;
+  graphify?: GraphifyLifecycle;
   // Optional: re-enqueue this task on the scheduler. Plan uses it to chain
   // preflight → planner across two ticks without waiting on a user action,
   // since the scheduler is otherwise event-driven (it only ticks on enqueue).
@@ -78,6 +81,17 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     });
   }
 
+  const graphified = await ensureGraphifyReady({
+    task,
+    phase,
+    runs,
+    events,
+    retryCap,
+    cwd: worktree.path,
+    ...(opts.graphify !== undefined ? { graphify: opts.graphify } : {}),
+  });
+  if (!graphified.ok) return graphified.task;
+
   if (phase === "brainstorm") {
     return dispatchBrainstorm({ task, branch, worktree, runs, events, phaseDeps, retryCap, cancellation });
   }
@@ -88,6 +102,61 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     });
   }
   return dispatchGenericPhase({ task, phase, worktree, runs, events, phaseDeps, retryCap, cancellation });
+}
+
+async function ensureGraphifyReady(args: {
+  readonly task: Task;
+  readonly phase: Phase;
+  readonly runs: RunStore;
+  readonly events: EventStore;
+  readonly retryCap: number;
+  readonly cwd: string;
+  readonly graphify?: GraphifyLifecycle;
+}): Promise<{ readonly ok: true } | { readonly ok: false; readonly task: Task }> {
+  if (!args.graphify) return { ok: true };
+  try {
+    const result = await args.graphify.ensureInitialized(args.cwd);
+    if (result.ok) return { ok: true };
+    return blockForGraphifyFailure(args, result.message);
+  } catch (err) {
+    return blockForGraphifyFailure(args, (err as Error).message);
+  }
+}
+
+async function blockForGraphifyFailure(
+  args: {
+    readonly task: Task;
+    readonly phase: Phase;
+    readonly runs: RunStore;
+    readonly events: EventStore;
+    readonly retryCap: number;
+  },
+  message: string,
+): Promise<{ readonly ok: false; readonly task: Task }> {
+  const run = await args.runs.createRun({ taskId: args.task.id, phase: args.phase });
+  await args.events.append(mkEvent({
+    runId: run.id,
+    taskId: args.task.id,
+    kind: "log",
+    level: "error",
+    text: `graphify initialization failed: ${message}`,
+  }));
+  await args.runs.updateRun(run.id, {
+    endedAt: new Date(),
+    status: "failed",
+    error: `graphify initialization failed: ${message}`,
+  });
+  const transitioned = transition(args.task, {
+    type: "agent_phase_failed",
+    phase: args.phase,
+    retryCap: args.retryCap,
+  });
+  if (!transitioned.ok) return { ok: false, task: args.task };
+  const updated = await args.runs.updateTask(args.task.id, {
+    status: transitioned.task.status,
+    retryCount: transitioned.task.retryCount,
+  });
+  return { ok: false, task: updated };
 }
 
 type DispatchOpts = {

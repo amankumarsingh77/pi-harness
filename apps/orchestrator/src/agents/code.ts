@@ -20,6 +20,13 @@ import { getSubagent } from "@pi-harness/subagents";
 import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
+import type { GraphifyLifecycle } from "./graphify-manager.js";
+import {
+  GRAPHIFY_QUERY_TOOL_NAMES,
+  GRAPHIFY_REFRESH_TOOL_NAME,
+  makeGraphifyQueryTools,
+  makeGraphifyRefreshTool,
+} from "./graphify-tools.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -34,6 +41,7 @@ export type CodeOpts = {
   ticketTitle?: string;
   ticketDescription?: string;
   signal?: AbortSignal;
+  graphify?: GraphifyLifecycle;
 };
 
 export type CodeResult = {
@@ -125,6 +133,9 @@ export async function runCode(opts: CodeOpts): Promise<CodeResult> {
       }
       try {
         const commitSha = await commitNodeChanges(opts.cwd, nodeById(parsed.dag, result.nodeId));
+        if (commitSha) {
+          await refreshGraphAfterCommit(opts, result.nodeId);
+        }
         results.push({ ...result, ...(commitSha ? { commitSha } : {}) });
       } catch (err) {
         results.push({
@@ -317,7 +328,18 @@ async function runOneNode(args: {
         : {}),
       systemPrompt,
       sessionPath: join(opts.cwd, ".harness", opts.taskId, "code-sessions", `${node.id}.jsonl`),
-      tools: [...def.allowedTools],
+      tools: [
+        ...def.allowedTools,
+        ...GRAPHIFY_QUERY_TOOL_NAMES,
+        GRAPHIFY_REFRESH_TOOL_NAME,
+      ],
+      customTools: [
+        ...makeGraphifyQueryTools({ cwd: opts.cwd }),
+        makeGraphifyRefreshTool({
+          cwd: opts.cwd,
+          ...(opts.graphify !== undefined ? { graphify: opts.graphify } : {}),
+        }),
+      ],
       onEvent: (event) => {
         if (event.kind === "message_delta") transcript += event.text;
         forwardCodeBridgeEvent(opts, node.id, event);
@@ -393,6 +415,32 @@ async function commitNodeChanges(cwd: string, node: ExecutionDagNode): Promise<s
   if (staged.length === 0) return null;
   const result = await git.commit(`feat(code): complete ${node.id}`);
   return result.commit || null;
+}
+
+async function refreshGraphAfterCommit(opts: CodeOpts, nodeId: string): Promise<void> {
+  if (!opts.graphify) return;
+  try {
+    const result = await opts.graphify.update(opts.cwd, "code_commit");
+    if (result.ok) return;
+    await publishGraphifyWarning(opts, nodeId, result.message);
+  } catch (err) {
+    await publishGraphifyWarning(opts, nodeId, (err as Error).message);
+  }
+}
+
+async function publishGraphifyWarning(
+  opts: CodeOpts,
+  nodeId: string,
+  message: string,
+): Promise<void> {
+  await opts.eventStore.append(mkEvent({
+    runId: opts.runId,
+    taskId: opts.taskId,
+    kind: "log",
+    level: "warn",
+    text: `graphify update failed after ${nodeId}: ${message}`,
+    subagent: nodeId,
+  }));
 }
 
 function nodeById(dag: ExecutionDag, nodeId: string): ExecutionDagNode {

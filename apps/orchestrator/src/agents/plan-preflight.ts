@@ -20,6 +20,10 @@ import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { makeSubagentFooter } from "./subagent-footer.js";
 import { buildTicketDigest } from "./ticket-digest.js";
 import { ArtifactsStore } from "./artifacts-store.js";
+import {
+  GRAPHIFY_QUERY_TOOL_NAMES,
+  makeGraphifyQueryTools,
+} from "./graphify-tools.js";
 
 export { PREFLIGHT_SUBAGENTS };
 export type PreflightSubagent = string;
@@ -213,6 +217,7 @@ async function runOneSubagent(args: {
   const customTools = [
     ...(hasGitHistory ? [makeGitHistoryTool({ cwd: opts.cwd })] : []),
     makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
+    ...makeGraphifyQueryTools({ cwd: opts.cwd }),
   ];
 
   let session: AgentSession;
@@ -224,7 +229,12 @@ async function runOneSubagent(args: {
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
       systemPrompt,
-      tools: [...def.allowedTools, ...(hasGitHistory ? ["git_history"] : []), "write_findings"],
+      tools: [
+        ...def.allowedTools,
+        ...(hasGitHistory ? ["git_history"] : []),
+        "write_findings",
+        ...GRAPHIFY_QUERY_TOOL_NAMES,
+      ],
       customTools,
       onEvent: (e) => opts.onSubagentBridgeEvent?.(subagent, e),
     });

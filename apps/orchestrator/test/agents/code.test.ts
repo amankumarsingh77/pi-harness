@@ -7,6 +7,7 @@ import type { AgentEvent, Artifact, ExecutionDagNode } from "@pi-harness/shared"
 import type { AgentSessionOptions, PromptUsage } from "@pi-harness/pi-bridge";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { runCode } from "../../src/agents/code.js";
+import type { GraphifyLifecycle, GraphifyStatus } from "../../src/agents/graphify-manager.js";
 
 class InMemoryEventStore {
   readonly events: AgentEvent[] = [];
@@ -146,6 +147,54 @@ describe("runCode", () => {
     expect(state.nodes["C-001"]?.status).toBe("failed");
     expect(state.nodes["C-002"]?.status).toBe("blocked");
   });
+
+  it("exposes graphify tools to code agents and refreshes after committed node changes", async () => {
+    await writeDag([
+      node({ id: "C-001", writes: ["src/a.ts"] }),
+    ]);
+    const updates: string[] = [];
+    let createOpts: AgentSessionOptions | null = null;
+    const graphify = fakeGraphify({
+      async update(updateCwd) {
+        updates.push(updateCwd);
+        return {
+          ok: true,
+          action: "update",
+          cwd: updateCwd,
+          status: graphifyStatus(updateCwd),
+          stdout: "",
+          stderr: "",
+          skipped: false,
+        };
+      },
+    });
+
+    const result = await runCode({
+      ...baseOpts(),
+      graphify,
+      createAgentSession: async (opts) => {
+        createOpts = opts;
+        return fakeSession(async (prompt) => {
+          await writeAssignedFiles(extractAssignedNode(prompt));
+          return usage;
+        });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createOpts?.tools).toEqual(expect.arrayContaining([
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+      "graphify_refresh",
+    ]));
+    expect(createOpts?.customTools?.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      "graphify_query",
+      "graphify_refresh",
+    ]));
+    expect(updates).toEqual([cwd]);
+  });
 });
 
 function baseOpts() {
@@ -170,6 +219,16 @@ function fakeCreateAgentSession(behavior: NodeBehavior) {
     async abort() {},
     async close() {},
   });
+}
+
+function fakeSession(promptBehavior: (prompt: string) => Promise<PromptUsage>) {
+  return {
+    async prompt(prompt: string) {
+      return promptBehavior(prompt);
+    },
+    async abort() {},
+    async close() {},
+  };
 }
 
 function extractAssignedNode(prompt: string): ExecutionDagNode {
@@ -247,4 +306,45 @@ function node(overrides: Partial<ExecutionDagNode> & { id: string; writes: strin
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function fakeGraphify(overrides: Partial<GraphifyLifecycle>): GraphifyLifecycle {
+  return {
+    async ensureInitialized(cwdForGraph) {
+      return {
+        ok: true,
+        action: "initialize",
+        cwd: cwdForGraph,
+        status: graphifyStatus(cwdForGraph),
+        stdout: "",
+        stderr: "",
+        skipped: true,
+      };
+    },
+    async update(cwdForGraph) {
+      return {
+        ok: true,
+        action: "update",
+        cwd: cwdForGraph,
+        status: graphifyStatus(cwdForGraph),
+        stdout: "",
+        stderr: "",
+        skipped: false,
+      };
+    },
+    async status(cwdForGraph) {
+      return graphifyStatus(cwdForGraph);
+    },
+    ...overrides,
+  };
+}
+
+function graphifyStatus(cwdForGraph: string): GraphifyStatus {
+  return {
+    graphPath: join(cwdForGraph, "graphify-out", "graph.json"),
+    exists: true,
+    valid: true,
+    nodeCount: 1,
+    edgeCount: 0,
+  };
 }

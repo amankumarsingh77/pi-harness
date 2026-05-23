@@ -97,9 +97,17 @@ describe("runPlan", () => {
       "find",
       "write",
       "mark_ready",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
     ]);
     expect(createOpts[0]!.customTools?.map((tool) => tool.name)).toEqual([
       "mark_ready",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
     ]);
   });
 
