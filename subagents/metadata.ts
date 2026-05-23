@@ -30,7 +30,12 @@ export type CustomTool =
   | "pi_web_search"
   | "pi_web_fetch"
   | "write_findings"
-  | "git_history";
+  | "git_history"
+  | "graphify_query"
+  | "graphify_path"
+  | "graphify_explain"
+  | "graphify_stats"
+  | "graphify_refresh";
 
 export type SubagentMeta = {
   name: string;
@@ -61,6 +66,10 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
       "reply_to_user",
       "pi_web_search",
       "pi_web_fetch",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
     ],
     invokedBy: ["brainstorm"],
     framing: "",
@@ -72,7 +81,13 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "phase",
     promptFile: "plan.md",
     allowedTools: ["read", "grep", "find", "write"],
-    customTools: ["mark_ready"],
+    customTools: [
+      "mark_ready",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+    ],
     invokedBy: ["plan"],
     framing: "",
     description: "Reads research findings, authors plan.md + scenarios.yaml",
@@ -83,6 +98,13 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "phase",
     promptFile: "code.md",
     allowedTools: ["read", "grep", "find", "ls", "bash", "edit"],
+    customTools: [
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+      "graphify_refresh",
+    ],
     invokedBy: ["code"],
     framing: "",
     description: "Executes one execution DAG node without committing",
@@ -93,7 +115,13 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "research",
     promptFile: "codebase-scout.md",
     allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["write_findings"],
+    customTools: [
+      "write_findings",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+    ],
     invokedBy: ["plan"],
     framing:
       "Scout the codebase end-to-end for this ticket. Produce a single findings doc with three sections: Files (every file to be read or modified), Patterns (analogous code with file:line cites), Call paths (how the relevant flows work today).",
@@ -105,7 +133,15 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "research",
     promptFile: "web-search-researcher.md",
     allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["pi_web_search", "pi_web_fetch", "write_findings"],
+    customTools: [
+      "pi_web_search",
+      "pi_web_fetch",
+      "write_findings",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+    ],
     invokedBy: ["brainstorm"],
     framing:
       "Research external libraries, APIs, pricing, recent approaches, and source-backed alternatives before brainstorm asks the user questions.",
@@ -117,7 +153,13 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "research",
     promptFile: "integration-scanner.md",
     allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["write_findings"],
+    customTools: [
+      "write_findings",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+    ],
     invokedBy: ["plan"],
     framing:
       "Identify inbound and outbound system edges affected by this ticket.",
@@ -129,7 +171,14 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "research",
     promptFile: "precedent-locator.md",
     allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["git_history", "write_findings"],
+    customTools: [
+      "git_history",
+      "write_findings",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+    ],
     invokedBy: ["plan"],
     framing:
       "Find past similar changes from git history and what went wrong with each one.",
@@ -141,7 +190,14 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "audit",
     promptFile: "claim-verifier.md",
     allowedTools: ["read", "grep", "find", "ls"],
-    customTools: ["git_history", "write_findings"],
+    customTools: [
+      "git_history",
+      "write_findings",
+      "graphify_query",
+      "graphify_path",
+      "graphify_explain",
+      "graphify_stats",
+    ],
     invokedBy: ["plan"],
     framing: "",
     description: "Audits the planner's draft plan.md, tags claims",

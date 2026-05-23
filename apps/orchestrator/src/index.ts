@@ -10,6 +10,7 @@ import { ClaimLedgerStore, MissionStore } from "./adapters/mission-store.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
 import { deriveBrainstormGate } from "./agents/brainstorm-gate.js";
+import { GraphifyManager } from "./agents/graphify-manager.js";
 import { createPinoLogger, fromPino } from "./domain/logger.js";
 import { reconcileWorktrees } from "./runner/janitor.js";
 import { TaskScheduler } from "./runner/scheduler.js";
@@ -55,6 +56,30 @@ async function main(): Promise<void> {
     baseBranch: config.baseBranch,
   });
   const artifacts = new ArtifactsStore();
+  const graphify = new GraphifyManager();
+
+  void graphify.ensureInitialized(config.repoRoot)
+    .then((result) => {
+      if (result.ok) {
+        log.info(
+          {
+            graphPath: result.status.graphPath,
+            nodeCount: result.status.nodeCount,
+            edgeCount: result.status.edgeCount,
+            skipped: result.skipped,
+          },
+          "graphify repo graph ready",
+        );
+        return;
+      }
+      log.warn(
+        { code: result.code, message: result.message },
+        "graphify repo graph initialization failed",
+      );
+    })
+    .catch((err) => {
+      log.warn({ err }, "graphify repo graph initialization crashed");
+    });
 
   const allTasks = await runs.listTasks();
   const activeTasks = allTasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
@@ -75,6 +100,7 @@ async function main(): Promise<void> {
     eventStore: events,
     claimLedger,
     claimPublisher: liveEvents,
+    graphify,
     exec: async (cmd, args, opts) => {
       try {
         const r = await execFileAsync(cmd, args, opts ?? {});
@@ -94,6 +120,7 @@ async function main(): Promise<void> {
     worktrees,
     retryCap: config.retryCap,
     cancellation,
+    graphify,
     logger: log.child({ component: "scheduler" }),
   });
 

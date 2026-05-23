@@ -17,6 +17,7 @@ import { runLoop } from "../src/runner/run-loop.js";
 import { runPhase, type PhaseDeps } from "../src/runner/phase-prompts.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
 import type { ArtifactsStore } from "../src/agents/artifacts-store.js";
+import type { GraphifyLifecycle, GraphifyStatus } from "../src/agents/graphify-manager.js";
 
 const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 
@@ -228,6 +229,81 @@ describe("runLoop", () => {
     expect(passedDeps.cwd).toContain(t.id);
   });
 
+  it("initializes Graphify before dispatching the phase agent", async () => {
+    const t = await runs.createTask({ title: "graphify-first" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+    const ordering: string[] = [];
+    const graphify = fakeGraphify({
+      async ensureInitialized(cwd) {
+        ordering.push(`graphify:${cwd.includes(t.id)}`);
+        return {
+          ok: true,
+          action: "initialize",
+          cwd,
+          status: graphifyStatus(cwd),
+          stdout: "",
+          stderr: "",
+          skipped: false,
+        };
+      },
+    });
+
+    vi.mocked(runPhase).mockImplementation(async () => {
+      ordering.push("runPhase");
+      return {
+        ok: true,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    });
+
+    await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+      graphify,
+    });
+
+    expect(ordering).toEqual(["graphify:true", "runPhase"]);
+  });
+
+  it("fails the current phase when Graphify initialization fails", async () => {
+    const t = await runs.createTask({ title: "graphify-missing" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+    const graphify = fakeGraphify({
+      async ensureInitialized(cwd) {
+        return {
+          ok: false,
+          action: "initialize",
+          cwd,
+          code: "missing_cli",
+          message: "Graphify CLI not found",
+          stdout: "",
+          stderr: "",
+        };
+      },
+    });
+
+    const after = await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+      graphify,
+    });
+
+    expect(after.status).toBe("brainstorm_failed");
+    expect(runPhase).not.toHaveBeenCalled();
+  });
+
   it("re-dispatch reuses the same worktree (idempotent ensure)", async () => {
     const t = await runs.createTask({ title: "reentry" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
@@ -295,3 +371,46 @@ describe("runLoop", () => {
     expect(after.retryCount).toBe(1);
   });
 });
+
+function fakeGraphify(
+  overrides: Partial<GraphifyLifecycle>,
+): GraphifyLifecycle {
+  return {
+    async ensureInitialized(cwd) {
+      return {
+        ok: true,
+        action: "initialize",
+        cwd,
+        status: graphifyStatus(cwd),
+        stdout: "",
+        stderr: "",
+        skipped: true,
+      };
+    },
+    async update(cwd) {
+      return {
+        ok: true,
+        action: "update",
+        cwd,
+        status: graphifyStatus(cwd),
+        stdout: "",
+        stderr: "",
+        skipped: false,
+      };
+    },
+    async status(cwd) {
+      return graphifyStatus(cwd);
+    },
+    ...overrides,
+  };
+}
+
+function graphifyStatus(cwd: string): GraphifyStatus {
+  return {
+    graphPath: join(cwd, "graphify-out", "graph.json"),
+    exists: true,
+    valid: true,
+    nodeCount: 1,
+    edgeCount: 0,
+  };
+}

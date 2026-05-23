@@ -35,7 +35,11 @@
     "infra:down": "podman compose down",
     "db:migrate": "pnpm --filter @pi-harness/db migrate",
     "db:generate": "pnpm --filter @pi-harness/db generate",
-    "cli:link-local": "pnpm --filter @pi-harness/cli build && node scripts/link-local-cli.mjs"
+    "cli:link-local": "pnpm --filter @pi-harness/cli build && node scripts/link-local-cli.mjs",
+    "graphify:build": "graphify . --wiki --no-viz",
+    "graphify:update": "graphify update .",
+    "graphify:query": "graphify query --graph graphify-out/graph.json",
+    "graphify:mcp": "python -m graphify.serve graphify-out/graph.json"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.42.2",
