@@ -1,1 +1,0 @@
-ALTER TABLE "runs" ADD COLUMN "pi_session_path" text;

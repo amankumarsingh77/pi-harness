@@ -22,13 +22,15 @@ import { RunLiveProvider, useRunLiveEvents } from "./run-live-provider";
 
 export function BrainstormEventsProvider({
   runId,
+  initialEvents = [],
   children,
 }: {
   runId: string | null;
+  initialEvents?: readonly AgentEvent[];
   children: ReactNode;
 }) {
   return (
-    <RunLiveProvider runId={runId}>
+    <RunLiveProvider runId={runId} initialEvents={initialEvents}>
       <BrainstormBundleInvalidator>{children}</BrainstormBundleInvalidator>
     </RunLiveProvider>
   );

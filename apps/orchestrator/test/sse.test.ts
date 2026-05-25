@@ -1,42 +1,47 @@
-import "dotenv/config";
-import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
-import { createDb } from "@pi-harness/db";
-import { RunStore } from "../src/adapters/run-store.js";
-import { EventStore } from "../src/adapters/event-store.js";
-import { LiveEventStore } from "../src/adapters/live-event-store.js";
+import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { mkEvent } from "../src/domain/events.js";
+import { createTestStores } from "./helpers/stores.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: TextDecoder,
+  expected: string,
+  timeoutMs = 2000,
+): Promise<string> {
+  let buf = "";
+  const start = Date.now();
+  while (!buf.includes(expected) && Date.now() - start < timeoutMs) {
+    const next = await reader.read();
+    if (next.value) buf += decoder.decode(next.value);
+    if (next.done) break;
+  }
+  return buf;
+}
 
 describe("SSE /api/live/stream", () => {
-  const { db, client } = createDb(url);
-  const liveEvents = new LiveEventStore(db);
-  const runs = new RunStore(db, {
-    onTaskChanged: (task) => liveEvents.publishTask(task),
-    onRunChanged: (run) => liveEvents.publishRun(run),
-  });
-  const events = new EventStore(db, liveEvents);
+  const { liveEvents, runs, events } = createTestStores();
   const app = buildServer({ runs, events, liveEvents, runsDir: tmpdir() });
   let port = 0;
+  let canListen = true;
 
   beforeAll(async () => {
-    await app.listen({ port: 0 });
-    port = (app.server.address() as { port: number }).port;
+    try {
+      await app.listen({ port: 0, host: "127.0.0.1" });
+      port = (app.server.address() as { port: number }).port;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      canListen = false;
+    }
   });
 
   afterAll(async () => {
-    await app.close();
-    await client.end();
-  });
-
-  beforeEach(async () => {
-    await db.execute("delete from live_events");
-    await db.execute("delete from tasks");
+    if (canListen) await app.close();
   });
 
   it("streams existing + new run events, ends on close", async () => {
+    if (!canListen) return;
     const t = await runs.createTask({ title: "sse" });
     const r = await runs.createRun({ taskId: t.id, phase: "code" });
     await events.append(mkEvent({ runId: r.id, taskId: t.id, kind: "phase_started", phase: "code" }));
@@ -46,28 +51,21 @@ describe("SSE /api/live/stream", () => {
 
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
-    let buf = "";
-
-    const first = await reader.read();
-    buf += decoder.decode(first.value);
+    let buf = await readUntil(reader, decoder, "event: agent.event.appended");
     expect(buf).toContain("event: agent.event.appended");
     expect(buf).toContain('"kind":"phase_started"');
     expect(buf).toContain("id: ");
 
     await events.append(mkEvent({ runId: r.id, taskId: t.id, kind: "log", level: "info", text: "hi" }));
 
-    const start = Date.now();
-    while (!buf.includes('"text":"hi"') && Date.now() - start < 2000) {
-      const next = await reader.read();
-      if (next.value) buf += decoder.decode(next.value);
-      if (next.done) break;
-    }
+    buf += await readUntil(reader, decoder, '"text":"hi"');
     expect(buf).toContain('"text":"hi"');
 
     await reader.cancel();
   });
 
   it("honors Last-Event-ID replay cursor as a live sequence", async () => {
+    if (!canListen) return;
     const t = await runs.createTask({ title: "sse-cursor" });
     const r = await runs.createRun({ taskId: t.id, phase: "code" });
     await events.append(mkEvent({ runId: r.id, taskId: t.id, kind: "phase_started", phase: "code" }));
@@ -81,8 +79,7 @@ describe("SSE /api/live/stream", () => {
 
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
-    const chunk = await reader.read();
-    const text = decoder.decode(chunk.value);
+    const text = await readUntil(reader, decoder, '"text":"after"');
 
     expect(text).not.toContain('"phase_started"');
     expect(text).toContain('"text":"after"');
@@ -90,26 +87,74 @@ describe("SSE /api/live/stream", () => {
     await reader.cancel();
   });
 
+  it("honors the after query replay cursor as a live sequence", async () => {
+    if (!canListen) return;
+    const t = await runs.createTask({ title: "sse-after" });
+    const r = await runs.createRun({ taskId: t.id, phase: "code" });
+    await events.append(mkEvent({ runId: r.id, taskId: t.id, kind: "phase_started", phase: "code" }));
+    await events.append(mkEvent({ runId: r.id, taskId: t.id, kind: "log", level: "info", text: "after-query" }));
+    const stored = await liveEvents.listAfter({ runId: r.id }, 0);
+    const firstSequence = stored.find((event) => event.kind === "agent.event.appended")!.sequence;
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/live/stream?runId=${r.id}&after=${firstSequence}`,
+    );
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const text = await readUntil(reader, decoder, '"text":"after-query"');
+
+    expect(text).not.toContain('"phase_started"');
+    expect(text).toContain('"text":"after-query"');
+
+    await reader.cancel();
+  });
+
+  it("returns the latest live sequence cursor", async () => {
+    if (!canListen) return;
+    const before = await fetch(`http://127.0.0.1:${port}/api/live/cursor`).then((res) => res.json() as Promise<{ sequence: number }>);
+    const t = await runs.createTask({ title: "cursor" });
+    const after = await fetch(`http://127.0.0.1:${port}/api/live/cursor`).then((res) => res.json() as Promise<{ sequence: number }>);
+
+    expect(after.sequence).toBeGreaterThan(before.sequence);
+    expect(t.id).toBeTruthy();
+  });
+
+  it("flushes a connected comment before waiting for future tail events", async () => {
+    if (!canListen) return;
+    const t = await runs.createTask({ title: "sse-tail" });
+    const r = await runs.createRun({ taskId: t.id, phase: "code" });
+    const cursor = await liveEvents.latestSequence();
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/live/stream?runId=${r.id}&after=${cursor}`,
+    );
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = decoder.decode((await reader.read()).value);
+
+    expect(buf).toContain(": connected");
+
+    await events.append(mkEvent({ runId: r.id, taskId: t.id, kind: "log", level: "info", text: "tail" }));
+    buf += await readUntil(reader, decoder, '"text":"tail"');
+    expect(buf).toContain('"text":"tail"');
+
+    await reader.cancel();
+  });
+
   it("streams dashboard snapshot and task updates", async () => {
+    if (!canListen) return;
     const task = await runs.createTask({ title: "dashboard" });
     const res = await fetch(`http://127.0.0.1:${port}/api/live/stream?scope=dashboard`);
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
-    let buf = "";
-
-    const first = await reader.read();
-    buf += decoder.decode(first.value);
+    let buf = await readUntil(reader, decoder, "event: dashboard.snapshot");
     expect(buf).toContain("event: dashboard.snapshot");
     expect(buf).toContain(task.id);
 
     await runs.updateTask(task.id, { status: "brainstorming" });
 
-    const start = Date.now();
-    while (!buf.includes("event: task.updated") && Date.now() - start < 2000) {
-      const next = await reader.read();
-      if (next.value) buf += decoder.decode(next.value);
-      if (next.done) break;
-    }
+    buf += await readUntil(reader, decoder, "event: task.updated");
     expect(buf).toContain("event: task.updated");
     expect(buf).toContain('"status":"brainstorming"');
 
@@ -117,6 +162,7 @@ describe("SSE /api/live/stream", () => {
   });
 
   it("replays task-scoped mission and claim updates", async () => {
+    if (!canListen) return;
     const task = await runs.createTask({ title: "mission-sse" });
     const claim = {
       id: "claim-1",
@@ -150,8 +196,7 @@ describe("SSE /api/live/stream", () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/live/stream?taskId=${task.id}`);
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
-    const chunk = await reader.read();
-    const text = decoder.decode(chunk.value);
+    const text = await readUntil(reader, decoder, "event: claims.updated");
 
     expect(text).toContain("event: claims.updated");
     expect(text).toContain('"claimEvents"');

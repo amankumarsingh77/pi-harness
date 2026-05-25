@@ -42,6 +42,10 @@ export type PlanBundle = {
   executionDag: Artifact | null;
   research: Record<string, string | null>;
   events: PlanJsonlEvent[];
+  // Most recent unresolved `plan_system blocked` event — the reason the plan
+  // phase stalled. Null when no block is in effect (the plan is healthy, or a
+  // later ready/session_reset cleared the prior block).
+  lastBlocked: { reason: string; ts: string } | null;
 };
 
 export type PlanJsonlEvent =
@@ -471,8 +475,8 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
   };
 }
 
-// Postgres → Fastify → JSON serializes Date as ISO string. The shared types
-// declare Date, so callers (kanban card, etc.) get a Date back.
+// Fastify JSON serializes Date as ISO string. The shared types declare Date,
+// so callers (kanban card, etc.) get a Date back.
 function toDate(v: unknown): Date {
   return v instanceof Date ? v : new Date(v as string);
 }

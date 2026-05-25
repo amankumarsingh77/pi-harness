@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
-import { runMigrations as migrateDb } from "@pi-harness/db";
 import type { HarnessProjectConfig } from "@pi-harness/shared";
 import { runDoctor } from "./doctor.js";
 import type { ExecFile } from "./exec.js";
@@ -27,8 +26,6 @@ export async function runDev(opts: {
 
   const infra = await startInfra({ config: doctor.config, execFile: opts.execFile });
   if (!infra.ok) return infra;
-  const migrated = await runMigrations({ config: doctor.config });
-  if (!migrated.ok) return migrated;
   startServices({ config: doctor.config, env: opts.env });
   return new Promise(() => undefined);
 }
@@ -37,52 +34,18 @@ async function startInfra(opts: {
   readonly config: HarnessProjectConfig;
   readonly execFile: ExecFile;
 }): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
+  if (opts.config.webProvider !== "searxng") return { ok: true };
   const composeFile = join(opts.config.stateDir, "runtime", "compose.yml");
-  const services = opts.config.webProvider === "searxng" ? ["postgres", "searxng"] : ["postgres"];
   const up = await opts.execFile(opts.config.containerRuntime, [
     "compose",
     "-f",
     composeFile,
     "up",
     "-d",
-    ...services,
+    "searxng",
   ]);
   if (!up.ok) return { ok: false, message: up.stderr };
-  return waitForPostgres({ config: opts.config, composeFile, execFile: opts.execFile });
-}
-
-async function waitForPostgres(opts: {
-  readonly config: HarnessProjectConfig;
-  readonly composeFile: string;
-  readonly execFile: ExecFile;
-}): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
-  for (const _attempt of Array.from({ length: 20 })) {
-    const ready = await opts.execFile(opts.config.containerRuntime, [
-      "compose",
-      "-f",
-      opts.composeFile,
-      "exec",
-      "-T",
-      "postgres",
-      "pg_isready",
-      "-U",
-      "piharness",
-    ]);
-    if (ready.ok) return { ok: true };
-    await sleep(500);
-  }
-  return { ok: false, message: "Postgres did not become ready in time." };
-}
-
-async function runMigrations(opts: {
-  readonly config: HarnessProjectConfig;
-}): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
-  try {
-    await migrateDb(opts.config.databaseUrl);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
+  return { ok: true };
 }
 
 function startServices(opts: {
@@ -119,7 +82,6 @@ function startServices(opts: {
 function serviceEnv(config: HarnessProjectConfig, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
     ...env,
-    DATABASE_URL: config.databaseUrl,
     HARNESS_REPO_ROOT: config.repoRoot,
     HARNESS_BASE_BRANCH: config.baseBranch,
     HARNESS_STATE_DIR: config.stateDir,
@@ -190,14 +152,9 @@ function resolvePackageEntry(require: NodeJS.Require, packageName: string): stri
 function fallbackWorkspacePackagePath(packageName: string): string {
   if (packageName === "@pi-harness/dashboard") return join(process.cwd(), "apps", "dashboard", "package.json");
   if (packageName === "@pi-harness/orchestrator") return join(process.cwd(), "apps", "orchestrator", "package.json");
-  if (packageName === "@pi-harness/db") return join(process.cwd(), "packages", "db", "package.json");
   return "";
 }
 
 function isPackage(value: unknown, packageName: string): boolean {
   return typeof value === "object" && value !== null && "name" in value && value.name === packageName;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

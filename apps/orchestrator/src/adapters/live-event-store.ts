@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gt } from "drizzle-orm";
-import { liveEvents as liveEventsTable, type DbClient } from "@pi-harness/db";
+import { join } from "node:path";
+import { TASK_STATUSES } from "@pi-harness/shared";
 import type {
   AgentEvent,
   ArtifactUpdatedPayload,
   GateUpdatedPayload,
   ClaimsUpdatedPayload,
+  DashboardSummary,
   LiveEventEnvelope,
   LiveEventKind,
   LiveEventPayloadByKind,
@@ -14,19 +15,33 @@ import type {
   Run,
   Task,
   UsageUpdatedPayload,
+  TaskStatus,
 } from "@pi-harness/shared";
+import { appendJsonl, readJsonl } from "./jsonl-writer.js";
 
 export type LiveEventFilter =
   | { readonly scope: "dashboard"; readonly taskId?: never; readonly runId?: never }
   | { readonly taskId: string; readonly scope?: never; readonly runId?: never }
   | { readonly runId: string; readonly scope?: never; readonly taskId?: never };
 
+export type LiveEventStoreOpts = {
+  readonly stateDir: string;
+};
+
 type Subscriber = (event: LiveEventEnvelope) => void;
+
+type SerializedLiveEventEnvelope = Omit<LiveEventEnvelope, "ts"> & {
+  readonly ts: string;
+};
 
 export class LiveEventStore {
   private readonly subs = new Set<{ readonly filter: LiveEventFilter; readonly sub: Subscriber }>();
+  private readonly liveEventLogPath: string;
+  private sequenceChain: Promise<void> = Promise.resolve();
 
-  constructor(private readonly db: DbClient) {}
+  constructor(opts: LiveEventStoreOpts) {
+    this.liveEventLogPath = join(opts.stateDir, "store", "live-events.jsonl");
+  }
 
   publishTask(task: Task): Promise<LiveEventEnvelope<"task.updated">> {
     return this.publish({
@@ -90,21 +105,13 @@ export class LiveEventStore {
     filter: LiveEventFilter,
     afterSequence: number,
   ): Promise<LiveEventEnvelope[]> {
-    const rows = await this.db
-      .select()
-      .from(liveEventsTable)
-      .where(filterWhere(filter, afterSequence))
-      .orderBy(asc(liveEventsTable.sequence));
-    return rows.map(rowToEnvelope);
+    return (await this.listAll())
+      .filter((event) => event.sequence > afterSequence && matchesFilter(event, filter))
+      .sort((a, b) => a.sequence - b.sequence);
   }
 
   async latestSequence(): Promise<number> {
-    const [row] = await this.db
-      .select({ sequence: liveEventsTable.sequence })
-      .from(liveEventsTable)
-      .orderBy(desc(liveEventsTable.sequence))
-      .limit(1);
-    return row?.sequence ?? 0;
+    return Math.max(0, ...(await this.listAll()).map((event) => event.sequence));
   }
 
   subscribe(filter: LiveEventFilter, sub: Subscriber): () => void {
@@ -115,33 +122,46 @@ export class LiveEventStore {
     };
   }
 
-  private async publish<K extends LiveEventKind>(
+  private publish<K extends LiveEventKind>(
     input: PublishInput<K>,
   ): Promise<LiveEventEnvelope<K>> {
-    const id = randomUUID();
-    const ts = new Date();
-    const [row] = await this.db
-      .insert(liveEventsTable)
-      .values({
-        id,
+    return this.runSequential(async () => {
+      const event: LiveEventEnvelope<K> = {
+        id: randomUUID(),
+        sequence: (await this.latestSequence()) + 1,
+        ts: new Date(),
         scope: input.scope,
-        kind: input.kind,
-        ts,
-        payload: input.payload,
         ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
         ...(input.runId !== undefined ? { runId: input.runId } : {}),
-      })
-      .returning();
-    if (!row) throw new Error("live event insert returned no row");
-    const event = rowToEnvelope(row) as LiveEventEnvelope<K>;
-    this.emit(event);
-    return event;
+        kind: input.kind,
+        payload: input.payload,
+      };
+      await appendJsonl(this.liveEventLogPath, serializeLiveEvent(event));
+      this.emit(event);
+      return event;
+    });
+  }
+
+  private runSequential<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.sequenceChain.then(fn, fn);
+    this.sequenceChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   private emit(event: LiveEventEnvelope): void {
     for (const entry of this.subs) {
       if (matchesFilter(event, entry.filter)) entry.sub(event);
     }
+  }
+
+  private async listAll(): Promise<LiveEventEnvelope[]> {
+    return (await readJsonl<unknown>(this.liveEventLogPath))
+      .map(parseLiveEvent)
+      .filter((event): event is LiveEventEnvelope => event !== null)
+      .sort((a, b) => a.sequence - b.sequence);
   }
 }
 
@@ -153,30 +173,119 @@ type PublishInput<K extends LiveEventKind> = {
   readonly runId?: string;
 };
 
-function filterWhere(filter: LiveEventFilter, afterSequence: number) {
-  const cursor = gt(liveEventsTable.sequence, afterSequence);
-  if ("runId" in filter) return and(eq(liveEventsTable.runId, filter.runId), cursor);
-  if ("taskId" in filter) return and(eq(liveEventsTable.taskId, filter.taskId), cursor);
-  return and(eq(liveEventsTable.scope, filter.scope), cursor);
-}
-
 function matchesFilter(event: LiveEventEnvelope, filter: LiveEventFilter): boolean {
   if ("runId" in filter) return event.runId === filter.runId;
   if ("taskId" in filter) return event.taskId === filter.taskId;
   return event.scope === filter.scope;
 }
 
-function rowToEnvelope(row: typeof liveEventsTable.$inferSelect): LiveEventEnvelope {
+function serializeLiveEvent(event: LiveEventEnvelope): SerializedLiveEventEnvelope {
   return {
-    id: row.id,
-    sequence: row.sequence,
-    ts: row.ts,
-    scope: row.scope as LiveEventScope,
-    ...(row.taskId !== null ? { taskId: row.taskId } : {}),
-    ...(row.runId !== null ? { runId: row.runId } : {}),
-    kind: row.kind as LiveEventKind,
-    payload: row.payload as LiveEventPayloadByKind[LiveEventKind],
+    ...event,
+    ts: event.ts.toISOString(),
   };
+}
+
+function parseLiveEvent(value: unknown): LiveEventEnvelope | null {
+  if (!isRecord(value)) return null;
+  const ts = parseDate(value["ts"]);
+  if (
+    !ts ||
+    typeof value["id"] !== "string" ||
+    typeof value["sequence"] !== "number" ||
+    typeof value["scope"] !== "string" ||
+    typeof value["kind"] !== "string" ||
+    !("payload" in value)
+  ) {
+    return null;
+  }
+  return {
+    id: value["id"],
+    sequence: value["sequence"],
+    ts,
+    scope: value["scope"] as LiveEventScope,
+    ...(typeof value["taskId"] === "string" ? { taskId: value["taskId"] } : {}),
+    ...(typeof value["runId"] === "string" ? { runId: value["runId"] } : {}),
+    kind: value["kind"] as LiveEventKind,
+    payload: decodePayload(value["kind"], value["payload"]),
+  };
+}
+
+function decodePayload(kind: string, payload: unknown): LiveEventPayloadByKind[LiveEventKind] {
+  if (kind === "task.updated") return decodeTaskPayload(payload);
+  if (kind === "run.updated") return decodeRunPayload(payload);
+  if (kind === "agent.event.appended") return decodeAgentEventPayload(payload);
+  if (kind === "dashboard.snapshot") return decodeDashboardPayload(payload);
+  return payload as LiveEventPayloadByKind[LiveEventKind];
+}
+
+function decodeDashboardPayload(payload: unknown): LiveEventPayloadByKind["dashboard.snapshot"] {
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload["tasks"]) ||
+    !Array.isArray(payload["runs"]) ||
+    !isRecord(payload["counts"]) ||
+    !isRecord(payload["summary"]) ||
+    !Array.isArray(payload["humanInterventionTaskIds"])
+  ) {
+    return payload as LiveEventPayloadByKind["dashboard.snapshot"];
+  }
+  return {
+    counts: parseCounts(payload["counts"]),
+    summary: parseSummary(payload["summary"]),
+    humanInterventionTaskIds: payload["humanInterventionTaskIds"],
+    tasks: payload["tasks"].map(decodeTaskPayload),
+    runs: payload["runs"].map(decodeRunPayload),
+  };
+}
+
+function parseCounts(value: Readonly<Record<string, unknown>>): Record<TaskStatus, number> {
+  return Object.fromEntries(
+    TASK_STATUSES.map((status) => [
+      status,
+      typeof value[status] === "number" ? value[status] : 0,
+    ]),
+  ) as Record<TaskStatus, number>;
+}
+
+function parseSummary(value: Readonly<Record<string, unknown>>): DashboardSummary {
+  return {
+    runningCount: typeof value["runningCount"] === "number" ? value["runningCount"] : 0,
+    reviewCount: typeof value["reviewCount"] === "number" ? value["reviewCount"] : 0,
+    blockedCount: typeof value["blockedCount"] === "number" ? value["blockedCount"] : 0,
+    costUsd: typeof value["costUsd"] === "number" ? value["costUsd"] : 0,
+    costCapUsd: typeof value["costCapUsd"] === "number" ? value["costCapUsd"] : 10,
+    lastEventAt: value["lastEventAt"] === null ? null : parseDate(value["lastEventAt"]),
+    activeRunIds: Array.isArray(value["activeRunIds"])
+      ? value["activeRunIds"].filter((id): id is string => typeof id === "string")
+      : [],
+  };
+}
+
+function decodeTaskPayload(payload: unknown): Task {
+  if (!isRecord(payload)) return payload as Task;
+  return {
+    ...payload,
+    createdAt: parseDate(payload["createdAt"]) ?? new Date(0),
+    updatedAt: parseDate(payload["updatedAt"]) ?? new Date(0),
+  } as Task;
+}
+
+function decodeRunPayload(payload: unknown): Run {
+  if (!isRecord(payload)) return payload as Run;
+  return {
+    ...payload,
+    startedAt: parseDate(payload["startedAt"]) ?? new Date(0),
+    endedAt: payload["endedAt"] === null ? null : parseDate(payload["endedAt"]) ?? null,
+  } as Run;
+}
+
+function decodeAgentEventPayload(payload: unknown): AgentEvent {
+  if (!isRecord(payload)) return payload as AgentEvent;
+  return {
+    ...payload,
+    ts: parseDate(payload["ts"]) ?? new Date(0),
+  } as AgentEvent;
 }
 
 function derivedEvents(event: AgentEvent): readonly PublishInput<LiveEventKind>[] {
@@ -249,4 +358,14 @@ function isGateRelevantEvent(event: AgentEvent): boolean {
     (event.kind === "plan_system" &&
       (event.systemKind === "status_changed" || event.systemKind === "blocked"))
   );
+}
+
+function parseDate(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

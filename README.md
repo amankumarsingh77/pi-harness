@@ -69,9 +69,9 @@ Start the local runtime:
 pi-harness dev
 ```
 
-`pi-harness dev` runs `doctor`, starts local Postgres through the generated
-compose file, applies migrations, starts the orchestrator, and opens the
-dashboard at `http://localhost:3000`.
+`pi-harness dev` runs `doctor`, starts optional local search infrastructure
+when configured, starts the orchestrator, and opens the dashboard at
+`http://localhost:3000`.
 
 You can also run without a global install:
 
@@ -127,10 +127,14 @@ the board for human triage instead of disappearing into terminal scrollback.
 | `@pi-harness/cli` | Bootstraps a repo, checks local prerequisites, starts the dev runtime. |
 | `apps/dashboard` | Next.js dashboard for the board, task details, phase artifacts, and evidence. |
 | `apps/orchestrator` | Fastify service that owns tasks, phase transitions, runs, SSE, and worktrees. |
-| `@pi-harness/db` | Drizzle schema and migrations for Postgres. |
 | `@pi-harness/pi-bridge` | Provider/model registration and pi agent-session integration. |
 | `@pi-harness/subagents` | Prompt registry and phase-agent definitions. |
 | `@pi-harness/shared` | Shared schemas, config, and TypeScript domain types. |
+
+Runtime control-plane state is stored as append-only JSONL ledgers under
+`.harness/store/` in the configured harness state directory. Phase transcripts
+remain in the existing per-task `.harness/<taskId>/*.jsonl` logs and archived
+run folders.
 
 ## Local Development
 
@@ -139,8 +143,6 @@ For contributors working on this monorepo:
 ```bash
 corepack enable
 pnpm install
-pnpm db:up
-pnpm db:migrate
 pnpm dev
 ```
 
@@ -180,8 +182,8 @@ available. Agent work runs in `.harness/worktrees/<taskId>` on branches named
   `pi-harness init`.
 - **Missing API key:** copy `.env.harness.example` to `.env.harness` and fill
   `CROFAI_API_KEY`, or configure another provider.
-- **Port conflict:** set `dashboardPort`, `orchestratorPort`, or `databaseUrl`
-  in `harness.config.ts`.
+- **Port conflict:** set `dashboardPort` or `orchestratorPort` in
+  `harness.config.ts`.
 - **Non-main base branch:** edit `baseBranch` in `harness.config.ts`; worktrees
   are created from that branch.
 - **Dry setup check:** run `pi-harness dev --check-only` to validate config

@@ -66,6 +66,7 @@ export function PlanPageLive({
         scenarios={bundle.scenarios}
         executionDag={bundle.executionDag}
         plannerLogDefaultOpen={task.status === "planning"}
+        lastBlocked={bundle.lastBlocked}
       />
       <PlanApprovalGate taskId={task.id} gate={bundle.gate} taskStatus={task.status} />
     </div>

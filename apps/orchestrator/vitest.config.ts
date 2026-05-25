@@ -17,12 +17,8 @@ export default defineConfig({
       // and re-runs the dashboard's tests through every leftover worktree.
       "**/.harness/**",
     ],
-    // DB-backed tests share a single Postgres; running test files in parallel
-    // causes cross-file truncates to wipe in-flight rows. Serialize.
-    pool: "forks",
-    poolOptions: {
-      forks: { singleFork: true },
-    },
+    // SSE and Playwright verifier tests bind local listeners / browser
+    // resources; keep files serial without coupling the suite to a DB.
     fileParallelism: false,
   },
 });

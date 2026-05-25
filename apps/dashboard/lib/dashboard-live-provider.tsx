@@ -3,13 +3,13 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   DashboardSnapshotPayload,
-  LiveEventEnvelope,
   Run,
   Task,
   TaskStatus,
 } from "@pi-harness/shared";
 import { TASK_STATUSES } from "@pi-harness/shared";
 import { queryKeys } from "./client/queries";
+import { buildLiveStreamUrl, parseLiveEnvelope } from "./live-event-client";
 import type { Api } from "./api";
 
 type TaskListData = Awaited<ReturnType<Api["listTasks"]>>;
@@ -19,17 +19,17 @@ export function DashboardLiveProvider({ children }: { children: React.ReactNode 
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const es = new EventSource("/api/live/stream?scope=dashboard");
+    const es = new EventSource(buildLiveStreamUrl({ scope: "dashboard" }));
     const onSnapshot = (ev: MessageEvent<string>) => {
-      const parsed = parseLiveEvent(ev.data, "dashboard.snapshot");
+      const parsed = parseLiveEnvelope(ev.data, "dashboard.snapshot");
       if (parsed) applySnapshot(queryClient, parsed.payload);
     };
     const onTaskUpdated = (ev: MessageEvent<string>) => {
-      const parsed = parseLiveEvent(ev.data, "task.updated");
+      const parsed = parseLiveEnvelope(ev.data, "task.updated");
       if (parsed) applyTaskUpdated(queryClient, parsed.payload);
     };
     const onRunUpdated = (ev: MessageEvent<string>) => {
-      const parsed = parseLiveEvent(ev.data, "run.updated");
+      const parsed = parseLiveEnvelope(ev.data, "run.updated");
       if (parsed) applyRunUpdated(queryClient, parsed.payload);
     };
     es.addEventListener("dashboard.snapshot", onSnapshot);
@@ -81,18 +81,6 @@ function applyRunUpdated(
   queryClient.setQueryData<TaskDetailData>(queryKeys.task(run.taskId), (curr) =>
     curr ? { ...curr, runs: mergeRuns(curr.runs, [run]) } : curr,
   );
-}
-
-function parseLiveEvent<K extends LiveEventEnvelope["kind"]>(
-  raw: string,
-  kind: K,
-): LiveEventEnvelope<K> | null {
-  try {
-    const parsed = JSON.parse(raw) as LiveEventEnvelope;
-    return parsed.kind === kind ? parsed as LiveEventEnvelope<K> : null;
-  } catch {
-    return null;
-  }
 }
 
 function upsertTaskList(curr: TaskListData, task: Task): TaskListData {

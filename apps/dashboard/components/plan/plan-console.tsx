@@ -26,6 +26,7 @@ export function PlanConsole({
   liveEvents,
   connected,
   plannerLogDefaultOpen,
+  lastBlocked,
 }: {
   readonly task: Task;
   readonly runs: readonly Run[];
@@ -42,6 +43,7 @@ export function PlanConsole({
   readonly liveEvents: readonly AgentEvent[];
   readonly connected: boolean;
   readonly plannerLogDefaultOpen: boolean;
+  readonly lastBlocked: { reason: string; ts: string } | null;
 }) {
   const planRun = [...runs].reverse().find((run) => run.phase === "plan") ?? null;
   const canRestart =
@@ -96,6 +98,29 @@ export function PlanConsole({
           </div>
         </section>
 
+        {lastBlocked && (
+          <section
+            role="alert"
+            aria-label="Plan phase blocked"
+            data-testid="plan-blocked-banner"
+            className="mb-3 flex items-start gap-3 rounded-[10px] border border-st-blocked/40 bg-st-blocked/[0.07] px-4 py-3"
+          >
+            <StatusIcon kind="blocked" size={14} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.08em] text-st-blocked">
+                plan blocked
+                <span className="text-fg-mute">·</span>
+                <time className="text-fg-mute" dateTime={lastBlocked.ts}>
+                  {formatBlockedTs(lastBlocked.ts)}
+                </time>
+              </div>
+              <p className="m-0 mt-1 break-words font-mono text-[12.5px] text-fg-body">
+                {lastBlocked.reason || "no reason recorded"}
+              </p>
+            </div>
+          </section>
+        )}
+
         <PreflightAgentConsole
           taskId={task.id}
           canCancelRun={canCancelRun}
@@ -115,6 +140,17 @@ export function PlanConsole({
       </div>
     </main>
   );
+}
+
+function formatBlockedTs(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function MetaPill({

@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { join } from "node:path";
 import { ZodError } from "zod";
 import type { AgentEvent, DashboardSummary, Phase, PhaseModelConfig, Task, TaskStatus } from "@pi-harness/shared";
 import type { RunStore } from "../../adapters/run-store.js";
@@ -12,7 +11,7 @@ import type { MissionStore } from "../../adapters/mission-store.js";
 import { transition } from "../../domain/state-machine.js";
 import { CreateTaskSchema, TransitionSchema, UpdateTaskSchema } from "../schemas.js";
 import { ValidationError } from "../../domain/errors.js";
-import { JsonlWriter } from "../../adapters/jsonl-writer.js";
+import { PhaseEventLogStore } from "../../adapters/phase-event-log-store.js";
 import { deriveBrainstormGate } from "../../agents/brainstorm-gate.js";
 import { derivePlanGate } from "../../agents/plan-gate.js";
 
@@ -29,6 +28,7 @@ export function registerTaskRoutes(
   },
 ): void {
   const { runs, events: eventStore, artifacts, missionStore, scheduler, cancellation, mutationLock } = deps;
+  const phaseEvents = new PhaseEventLogStore({ events: eventStore, runs });
 
   app.get("/api/tasks", async () => {
     return buildDashboardTaskList({ runs, eventStore, artifacts });
@@ -177,28 +177,19 @@ export function registerTaskRoutes(
       //      live SSE stream surfaces the event without a manual refetch.
       if (action.type === "user_request_brainstorm_changes") {
         const cwd = task.worktreePath!; // gate-check above guarantees this
-        const ts = new Date();
-        const path = join(cwd, ".harness", task.id, "brainstorm.jsonl");
-        await new JsonlWriter(path).append({
-          ts: ts.toISOString(),
-          kind: "brainstorm_revision_requested",
-          comment: action.comment,
+        await phaseEvents.publish({
+          phase: "brainstorm",
+          worktreePath: cwd,
+          taskId: task.id,
+          input: {
+            kind: "brainstorm_revision_requested",
+            comment: action.comment,
+          },
         });
         // Serialize: setArtifactStatus commits via simple-git, and the
         // git index lock is per-worktree — running both in parallel races.
         await artifacts.setArtifactStatus(cwd, task.id, "design", "draft", "user-revision");
         await artifacts.setArtifactStatus(cwd, task.id, "spec", "draft", "user-revision");
-        const activeRun = await runs.findActiveRun(task.id, "brainstorm");
-        if (activeRun) {
-          await eventStore.append({
-            id: crypto.randomUUID(),
-            runId: activeRun.id,
-            taskId: task.id,
-            ts,
-            kind: "brainstorm_revision_requested",
-            comment: action.comment,
-          });
-        }
       }
 
       // Plan-side mirror of brainstorm's revision flow: append the revision
@@ -208,27 +199,18 @@ export function registerTaskRoutes(
       // intact — only the planner re-runs (see runPlan's revision branch).
       if (action.type === "user_request_plan_changes") {
         const cwd = task.worktreePath!;
-        const ts = new Date();
-        const path = join(cwd, ".harness", task.id, "plan.jsonl");
-        await new JsonlWriter(path).append({
-          ts: ts.toISOString(),
-          kind: "plan_revision_requested",
-          comment: action.comment,
+        await phaseEvents.publish({
+          phase: "plan",
+          worktreePath: cwd,
+          taskId: task.id,
+          input: {
+            kind: "plan_revision_requested",
+            comment: action.comment,
+          },
         });
         await artifacts.setArtifactStatus(cwd, task.id, "plan", "draft", "user-revision");
         await artifacts.setArtifactStatus(cwd, task.id, "scenarios", "draft", "user-revision");
         await artifacts.setArtifactStatus(cwd, task.id, "execution-dag", "draft", "user-revision");
-        const activeRun = await runs.findActiveRun(task.id, "plan");
-        if (activeRun) {
-          await eventStore.append({
-            id: crypto.randomUUID(),
-            runId: activeRun.id,
-            taskId: task.id,
-            ts,
-            kind: "plan_revision_requested",
-            comment: action.comment,
-          });
-        }
       }
 
       // user_cancel: signal any in-flight phase driver to abort (so its pi

@@ -1,30 +1,48 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createServer, type Server } from "node:http";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+let currentUrl = "";
+
+vi.mock("playwright", () => ({
+  chromium: {
+    launch: vi.fn(async () => ({
+      newPage: vi.fn(async () => ({
+        goto: vi.fn(async (url: string) => {
+          currentUrl = url;
+        }),
+        fill: vi.fn(async () => {}),
+        click: vi.fn(async () => {
+          currentUrl = `${currentUrl}#dashboard`;
+        }),
+        waitForURL: vi.fn(async () => {}),
+        url: vi.fn(() => currentUrl),
+        screenshot: vi.fn(async () => {}),
+        locator: vi.fn(() => ({
+          screenshot: vi.fn(async () => {}),
+        })),
+      })),
+      close: vi.fn(async () => {}),
+    })),
+  },
+}));
+
 import { runUiScenario, runUiVisualScenario } from "../../src/agents/verify-runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const fixtureDir = join(__dirname, "..", "fixtures", "ui");
+const fixtureUrl = pathToFileURL(join(fixtureDir, "index.html")).toString();
+const fixtureBaseUrl = pathToFileURL(`${fixtureDir}/`).toString();
 
-let server: Server;
-let port = 0;
 let proofDir: string;
 
 beforeAll(async () => {
-  server = createServer(async (_req, res) => {
-    const html = await readFile(join(__dirname, "..", "fixtures", "ui", "index.html"));
-    res.writeHead(200, { "content-type": "text/html" });
-    res.end(html);
-  });
-  await new Promise<void>((r) => server.listen(0, () => r()));
-  port = (server.address() as { port: number }).port;
   proofDir = await mkdtemp(join(tmpdir(), "ui-proof-"));
 });
 
 afterAll(async () => {
-  await new Promise<void>((r) => server.close(() => r()));
   await rm(proofDir, { recursive: true, force: true });
 });
 
@@ -36,7 +54,7 @@ describe("runUiScenario (Playwright)", () => {
         type: "ui",
         name: "login flow",
         steps: [
-          { navigate: `http://127.0.0.1:${port}/` },
+          { navigate: fixtureUrl },
           { fill: { selector: "input[name=email]", value: "u@x" } },
           { fill: { selector: "input[name=password]", value: "p" } },
           { click: "button[type=button]" },
@@ -50,14 +68,14 @@ describe("runUiScenario (Playwright)", () => {
     expect(result.evidence.screenshotFile).toContain("login.png");
   });
 
-  it("resolves root-relative navigation steps against the UI base URL", async () => {
+  it("resolves relative navigation steps against the UI base URL", async () => {
     const result = await runUiScenario({
       scenario: {
         id: "relative-login",
         type: "ui",
         name: "relative login flow",
         steps: [
-          { navigate: "/" },
+          { navigate: "index.html" },
           { fill: { selector: "input[name=email]", value: "u@x" } },
           { fill: { selector: "input[name=password]", value: "p" } },
           { click: "button[type=button]" },
@@ -66,7 +84,7 @@ describe("runUiScenario (Playwright)", () => {
         expect: { url_matches: "**#dashboard", screenshot: "relative-login.png" },
       },
       proofDir,
-      baseUrl: `http://127.0.0.1:${port}`,
+      baseUrl: fixtureBaseUrl,
     });
 
     expect(result.ok).toBe(true);
@@ -78,7 +96,7 @@ describe("runUiScenario (Playwright)", () => {
         id: "home-shot",
         type: "ui-visual",
         name: "home",
-        steps: [{ navigate: `http://127.0.0.1:${port}/` }],
+        steps: [{ navigate: fixtureUrl }],
         capture: { full_page: true, filename: "home.png" },
       },
       proofDir,

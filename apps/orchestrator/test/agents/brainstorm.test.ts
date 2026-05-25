@@ -95,6 +95,27 @@ function wireAgentSession(adapter: FakeAgentSdkAdapter) {
     createAgentSession(opts, adapter);
 }
 
+type CustomToolForTest = {
+  name: string;
+  execute: (
+    id: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: undefined,
+    ctx: never,
+  ) => Promise<unknown>;
+};
+
+function customTools(adapter: FakeAgentSdkAdapter): CustomToolForTest[] {
+  return (adapter.state.createOpts?.customTools ?? []) as CustomToolForTest[];
+}
+
+function findCustomTool(adapter: FakeAgentSdkAdapter, name: string): CustomToolForTest {
+  const tool = customTools(adapter).find((t) => t.name === name);
+  if (!tool) throw new Error(`${name} tool not registered with adapter`);
+  return tool;
+}
+
 function assistantWithUsage(input: number, output: number, costTotal: number) {
   return {
     role: "assistant",
@@ -139,18 +160,7 @@ async function driveSubmitQuestions(
   questions: { questionId: string; prompt: string; options: { id: string; label: string; recommended: boolean; evidence: string[] }[]; sectionTarget: { artifact: "design" | "spec"; section: string } }[],
 ): Promise<void> {
   await waitForPrompt(adapter);
-  const tools = (adapter.state.createOpts?.customTools ?? []) as Array<{
-    name: string;
-    execute: (
-      id: string,
-      params: unknown,
-      signal: AbortSignal | undefined,
-      onUpdate: undefined,
-      ctx: never,
-    ) => Promise<unknown>;
-  }>;
-  const submit = tools.find((t) => t.name === "submit_questions");
-  if (!submit) throw new Error("submit_questions tool not registered with adapter");
+  const submit = findCustomTool(adapter, "submit_questions");
   const result = await submit.execute(
     "tc1",
     { questions },
@@ -173,18 +183,7 @@ async function driveSubmitQuestions(
 
 async function driveMarkReady(adapter: FakeAgentSdkAdapter): Promise<void> {
   await waitForPrompt(adapter);
-  const tools = (adapter.state.createOpts?.customTools ?? []) as Array<{
-    name: string;
-    execute: (
-      id: string,
-      params: unknown,
-      signal: AbortSignal | undefined,
-      onUpdate: undefined,
-      ctx: never,
-    ) => Promise<unknown>;
-  }>;
-  const ready = tools.find((t) => t.name === "mark_ready");
-  if (!ready) throw new Error("mark_ready tool not registered");
+  const ready = findCustomTool(adapter, "mark_ready");
   const result = await ready.execute("tc2", {}, undefined, undefined, undefined as never);
   adapter.emit({ type: "tool_execution_start", toolName: "mark_ready", args: {} } as AgentSessionEvent);
   adapter.emit({
@@ -243,9 +242,12 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter.state.promptCalls[0]!.text).toContain("Title: Add login");
     expect(adapter.state.promptCalls[0]!.text).toContain(`.harness/${TASK}/design.md`);
     const toolNames = (adapter.state.createOpts?.customTools ?? []).map((t) => t.name);
-    expect(adapter.state.createOpts?.tools).toEqual(expect.arrayContaining(["read", "write"]));
+    expect(adapter.state.createOpts?.tools).toContain("read");
+    expect(adapter.state.createOpts?.tools).not.toContain("write");
     expect(toolNames).toEqual(
       expect.arrayContaining([
+        "read_artifact",
+        "write_artifact",
         "submit_questions",
         "submit_mock_choices",
         "write_mock_revision",
@@ -672,6 +674,125 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(spec?.fm.status).toBe("ready");
   });
 
+  it("scoped artifact tools write the worktree artifacts and preserve frontmatter", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    await waitForPrompt(adapter);
+    const writeArtifact = findCustomTool(adapter, "write_artifact");
+    const readArtifact = findCustomTool(adapter, "read_artifact");
+    const designBody = "## Goals\nbuild login\n\n## Trade-offs\nslower release\n\n## Alternatives considered\nrolled own\n";
+    const specBody = "## Verification scenarios\nlog in via oauth\n\n## Acceptance criteria\nuser session set\n";
+
+    const designWrite = await writeArtifact.execute(
+      "wa1",
+      { kind: "design", body: designBody },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const specWrite = await writeArtifact.execute(
+      "wa2",
+      { kind: "spec", body: specBody },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const designRead = await readArtifact.execute(
+      "ra1",
+      { kind: "design" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    adapter.emit({ type: "tool_execution_start", toolName: "write_artifact", args: { kind: "design" } } as AgentSessionEvent);
+    adapter.emit({
+      type: "tool_execution_end",
+      toolName: "write_artifact",
+      isError: false,
+      result: designWrite,
+    } as AgentSessionEvent);
+    adapter.emit({ type: "tool_execution_start", toolName: "write_artifact", args: { kind: "spec" } } as AgentSessionEvent);
+    adapter.emit({
+      type: "tool_execution_end",
+      toolName: "write_artifact",
+      isError: false,
+      result: specWrite,
+    } as AgentSessionEvent);
+    await driveMarkReady(adapter);
+
+    const r = await promise;
+    expect(r.ok).toBe(true);
+    expect(r.ready).toBe(true);
+    expect(designRead).toMatchObject({
+      content: [{ type: "text", text: designBody }],
+      details: expect.objectContaining({ kind: "design", status: "draft" }),
+    });
+
+    const design = await store.readArtifact(scratch, TASK, "design");
+    const spec = await store.readArtifact(scratch, TASK, "spec");
+    expect(design?.fm.kind).toBe("design");
+    expect(design?.fm.status).toBe("ready");
+    expect(design?.body).toBe(designBody);
+    expect(spec?.fm.kind).toBe("spec");
+    expect(spec?.fm.status).toBe("ready");
+    expect(spec?.body).toBe(specBody);
+  });
+
+  it("write_artifact rejects pasted full artifacts with YAML frontmatter", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    await waitForPrompt(adapter);
+    const writeArtifact = findCustomTool(adapter, "write_artifact");
+    const result = await writeArtifact.execute(
+      "wa1",
+      { kind: "design", body: "---\nstatus: draft\n---\n\n## Goals\nx\n" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(1, 1, 0)],
+    } as AgentSessionEvent);
+
+    const r = await promise;
+    expect(r.ok).toBe(false);
+    expect(result).toMatchObject({
+      details: { ok: false, kind: "design" },
+    });
+  });
+
   it("resume: same sessionPath threaded into the SDK across ticks", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
     const { eventStore } = makeFakes();
@@ -730,7 +851,7 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter2.state.createOpts?.sessionPath).toBe(sessionPath());
   });
 
-  it("does not fail brainstorm when a legacy maxTurns override is present", async () => {
+  it("legacy maxTurns override does not hide a non-progress turn", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
     const { eventStore } = makeFakes();
     const bus = makeBus(eventStore);
@@ -759,7 +880,7 @@ describe("runBrainstorm (real-bridge)", () => {
     } as AgentSessionEvent);
 
     const r = await promise;
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe(false);
     expect(r.error).toBe("brainstorm: agent ended turn without questions or ready");
   });
 
@@ -839,10 +960,17 @@ describe("runBrainstorm (real-bridge)", () => {
     });
     // Wait for the failed-then-retried call to register createOpts.
     await new Promise((resolve) => setTimeout(resolve, 5));
-    adapter.emit({
-      type: "agent_end",
-      messages: [assistantWithUsage(1, 1, 0)],
-    } as AgentSessionEvent);
+    await driveSubmitQuestions(adapter, [
+      {
+        questionId: "q-after-reset",
+        prompt: "?",
+        options: [
+          { id: "a", label: "A", recommended: true, evidence: [] },
+          { id: "b", label: "B", recommended: false, evidence: [] },
+        ],
+        sectionTarget: { artifact: "design", section: "Goals" },
+      },
+    ]);
 
     const r = await promise;
     expect(r.ok).toBe(true);

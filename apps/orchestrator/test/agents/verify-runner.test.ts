@@ -1,36 +1,33 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createServer, type Server } from "node:http";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runApiScenario } from "../../src/agents/verify-runner.js";
 
-let server: Server;
-let port = 0;
 let proofDir: string;
 
 beforeAll(async () => {
-  server = createServer((req, res) => {
-    if (req.url === "/ok" && req.method === "POST") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ received: true }));
-      return;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/ok") && init?.method === "POST") {
+      return new Response(JSON.stringify({ received: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }
-    if (req.url === "/bad") {
-      res.writeHead(401, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "bad_signature" }));
-      return;
+    if (url.endsWith("/bad")) {
+      return new Response(JSON.stringify({ error: "bad_signature" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
     }
-    res.writeHead(404);
-    res.end();
+    return new Response("", { status: 404 });
   });
-  await new Promise<void>((r) => server.listen(0, () => r()));
-  port = (server.address() as { port: number }).port;
   proofDir = await mkdtemp(join(tmpdir(), "proof-"));
 });
 
 afterAll(async () => {
-  await new Promise<void>((r) => server.close(() => r()));
+  vi.restoreAllMocks();
   await rm(proofDir, { recursive: true, force: true });
 });
 
@@ -41,7 +38,7 @@ describe("runApiScenario", () => {
         id: "ok-200",
         type: "api",
         name: "ok",
-        request: { method: "POST", url: `http://127.0.0.1:${port}/ok`, body: {} },
+        request: { method: "POST", url: "https://example.test/ok", body: {} },
         expect: { status: 200, body_contains: ["received"] },
       },
       proofDir,
@@ -67,7 +64,7 @@ describe("runApiScenario", () => {
         expect: { status: 200, body_contains: ["received"] },
       },
       proofDir,
-      baseUrl: `http://127.0.0.1:${port}`,
+      baseUrl: "https://example.test",
     });
 
     expect(result.ok).toBe(true);
@@ -79,7 +76,7 @@ describe("runApiScenario", () => {
         id: "wrong-status",
         type: "api",
         name: "wrong",
-        request: { method: "POST", url: `http://127.0.0.1:${port}/ok`, body: {} },
+        request: { method: "POST", url: "https://example.test/ok", body: {} },
         expect: { status: 201 },
       },
       proofDir,
@@ -94,7 +91,7 @@ describe("runApiScenario", () => {
         id: "no-keyword",
         type: "api",
         name: "x",
-        request: { method: "POST", url: `http://127.0.0.1:${port}/ok`, body: {} },
+        request: { method: "POST", url: "https://example.test/ok", body: {} },
         expect: { status: 200, body_contains: ["nope"] },
       },
       proofDir,

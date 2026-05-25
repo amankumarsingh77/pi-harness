@@ -510,11 +510,22 @@ async function runPlannerStage(
     },
   });
 
+  // Inner abort controller for any claim-verifier dispatch fired during this
+  // planner turn. Fires when the planner timeout elapses or when the outer
+  // run signal aborts — so a slow audit can't run past the planner's budget
+  // (the original bug: 179s of audit work landed after a 300s timeout).
+  const innerAbort = new AbortController();
+  if (opts.signal?.aborted) innerAbort.abort();
+  opts.signal?.addEventListener("abort", () => innerAbort.abort(), { once: true });
+
   // Build claim-verifier dispatcher closure. It runs the vendored
   // claim-verifier subagent with plan.md as input, writes findings to
   // research/claim-verifier.md, and parses Falsified entries. Capped via
   // claimVerifierState; the tool itself enforces the cap.
   const dispatchClaimVerifier: DispatchClaimVerifier = async (planBody: string) => {
+    if (innerAbort.signal.aborted) {
+      return { falsifiedClaims: [], findingsWritten: false, aborted: true };
+    }
     const findingsPath = join(opts.cwd, ".harness", opts.taskId, "research", "claim-verifier.md");
     if (existsSync(findingsPath)) {
       // Re-dispatch: clear stale findings so the next attempt starts fresh.
@@ -571,8 +582,13 @@ async function runPlannerStage(
 
     let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
     let dispatchError: string | undefined;
+    let cvSession: AgentSession | null = null;
+    const onCvAbort = (): void => {
+      void cvSession?.abort().catch(() => {});
+    };
+    innerAbort.signal.addEventListener("abort", onCvAbort, { once: true });
     try {
-      const session = await opts.createAgentSession({
+      cvSession = await opts.createAgentSession({
         cwd: opts.cwd,
         model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
         ...(opts.phaseModel.thinkingLevel !== "off"
@@ -595,32 +611,45 @@ async function runPlannerStage(
         onEvent: cvForward,
       });
       try {
-        usage = await session.prompt(userPrompt);
+        usage = await cvSession.prompt(userPrompt);
       } finally {
-        await session.close().catch(() => {});
+        await cvSession.close().catch(() => {});
       }
     } catch (err) {
       dispatchError = (err as Error).message;
+    } finally {
+      innerAbort.signal.removeEventListener("abort", onCvAbort);
     }
 
+    const aborted = innerAbort.signal.aborted;
     const findingsWritten = existsSync(findingsPath);
     await opts.bus.publish({
       kind: "plan_subagent_ended",
       subagent: "claim-verifier",
       sessionId,
-      ok: findingsWritten && dispatchError === undefined,
+      ok: findingsWritten && dispatchError === undefined && !aborted,
       durationMs: Date.now() - startedAt,
       costUsd: usage.costUsd,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      ...(dispatchError !== undefined ? { error: dispatchError } : {}),
+      ...(dispatchError !== undefined
+        ? { error: dispatchError }
+        : aborted
+          ? { error: "claim-verifier aborted by planner timeout" }
+          : {}),
     });
 
+    if (aborted) {
+      return { falsifiedClaims: [], findingsWritten: false, aborted: true };
+    }
     if (!findingsWritten) {
       return { falsifiedClaims: [], findingsWritten: false };
     }
     const findings = readFileSync(findingsPath, "utf8");
-    return { falsifiedClaims: parseFalsifiedClaims(findings), findingsWritten: true };
+    return {
+      falsifiedClaims: parseFalsifiedClaims(findings),
+      findingsWritten: true,
+    };
   };
 
   const markReadyTool = makeMarkReadyTool({
@@ -630,6 +659,7 @@ async function runPlannerStage(
     taskId: opts.taskId,
     dispatchClaimVerifier,
     claimVerifierState: opts.claimVerifierState,
+    cancelSignal: innerAbort.signal,
     ...(opts.claimLedger !== undefined ? { claimLedger: opts.claimLedger } : {}),
     ...(opts.claimPublisher !== undefined ? { claimPublisher: opts.claimPublisher } : {}),
   });
@@ -729,9 +759,11 @@ async function runPlannerStage(
       session,
       promptText: input.prompt,
       timeoutMs: opts.plannerTimeoutMs ?? PLANNER_TIMEOUT_MS,
+      onTimeout: () => innerAbort.abort(),
     });
   } catch (err) {
     signal?.removeEventListener("abort", onAbort);
+    innerAbort.abort();
     await session.close().catch(() => {});
     const message = (err as Error).message;
     if (signal?.aborted || message === "aborted") {
@@ -815,6 +847,7 @@ async function promptWithTimeout(input: {
   readonly session: AgentSession;
   readonly promptText: string;
   readonly timeoutMs: number;
+  readonly onTimeout?: () => void;
 }): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -823,6 +856,7 @@ async function promptWithTimeout(input: {
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           void input.session.abort().catch(() => {});
+          input.onTimeout?.();
           reject(new Error(`planner timed out after ${input.timeoutMs}ms`));
         }, input.timeoutMs);
       }),

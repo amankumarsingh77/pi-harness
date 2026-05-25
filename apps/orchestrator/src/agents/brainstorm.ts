@@ -16,9 +16,11 @@ import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import {
   makeMarkReadyTool,
+  makeReadArtifactTool,
   makeReplyToUserTool,
   makeSubmitMockChoicesTool,
   makeSubmitQuestionsTool,
+  makeWriteArtifactTool,
   makeWriteMockRevisionTool,
 } from "./brainstorm-tools.js";
 import {
@@ -152,7 +154,18 @@ async function runTurn(
 ): Promise<BrainstormResult> {
   let haltReason: HaltReason = "exhausted";
   let lastWriteWasReady = false;
+  let madeProgress = false;
 
+  const readArtifactTool = makeReadArtifactTool({
+    store: opts.store,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
+  const writeArtifactTool = makeWriteArtifactTool({
+    store: opts.store,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
   const submitQuestionsTool = makeSubmitQuestionsTool({ bus: opts.bus });
   const submitMockChoicesTool = makeSubmitMockChoicesTool({
     store: opts.store,
@@ -183,8 +196,9 @@ async function runTurn(
   const forwardToEventStore = (e: PiBridgeEvent): void => {
     // Forward streaming pi-bridge events (assistant text, generic tool calls,
     // logs) to EventStore so the dashboard's live Agent Log surfaces them.
-    // Skip the two harness-internal control tools — brainstorm-tools already
-    // publishes richer brainstorm_* events for those.
+    // Skip transcript-owned tools where brainstorm-tools already publishes
+    // richer brainstorm_* events. Artifact tools still flow through the live
+    // log so path diagnostics are visible when writes or readiness checks fail.
     if (e.kind === "turn_end" || e.kind === "error") return;
     if (
       (e.kind === "tool_call" || e.kind === "tool_result") &&
@@ -236,11 +250,15 @@ async function runTurn(
       // The tool's details encodes whether mark_ready was accepted. We watch
       // for ok:true to flip haltReason; a rejection (missing section) leaves
       // the agent free to write more and re-call mark_ready in the same turn.
-      const out = e.output as { details?: { ok?: boolean } } | undefined;
-      if (out?.details?.ok === true) {
+      if (toolResultOk(e.output)) {
         haltReason = "ready";
         lastWriteWasReady = true;
+        madeProgress = true;
       }
+      return;
+    }
+    if (e.kind === "tool_result" && e.ok && isProgressTool(e.tool, e.output)) {
+      madeProgress = true;
       return;
     }
   };
@@ -271,8 +289,9 @@ async function runTurn(
         : {}),
       systemPrompt,
       ...(sessionPath !== undefined ? { sessionPath } : {}),
-      tools: [...brainstormDef.allowedTools, ...GRAPHIFY_QUERY_TOOL_NAMES],
       customTools: [
+        readArtifactTool,
+        writeArtifactTool,
         submitQuestionsTool,
         submitMockChoicesTool,
         writeMockRevisionTool,
@@ -282,6 +301,7 @@ async function runTurn(
         makePiWebFetchTool(),
         ...makeGraphifyQueryTools({ cwd: opts.cwd }),
       ],
+      tools: [...brainstormDef.allowedTools, ...GRAPHIFY_QUERY_TOOL_NAMES],
       onEvent: handleEvent,
     });
   } catch (err) {
@@ -398,20 +418,49 @@ async function runTurn(
     lastWriteWasReady ||
     (design?.fm.status === "ready" && spec?.fm.status === "ready");
 
-  // haltReason "exhausted" means the agent ended its turn without calling a
-  // brainstorm-completing tool. Not a hard failure — the next answers-delta
-  // tick (or user revision) will resume it. Surfaced via the result fields
-  // for the run-loop / dashboard to log; we don't fail the tick.
+  // haltReason "exhausted" means the agent ended its turn without a terminal
+  // brainstorm action. That is only acceptable if the turn still made durable
+  // progress, such as writing an artifact body or replying to a nudge.
+  if (haltReason === "exhausted" && !ready && !madeProgress) {
+    const error = "brainstorm: agent ended turn without questions or ready";
+    await opts.bus.publish({
+      kind: "brainstorm_system",
+      systemKind: "blocked",
+      data: { reason: error },
+    });
+    return {
+      ok: false,
+      ready: false,
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      error,
+    };
+  }
+
   return {
     ok: true,
     ready: Boolean(ready),
     costUsd: usage.costUsd,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
-    ...(haltReason === "exhausted" && !ready
-      ? { error: "brainstorm: agent ended turn without questions or ready" }
-      : {}),
   };
+}
+
+function toolResultOk(output: unknown): boolean {
+  if (typeof output !== "object" || output === null || !("details" in output)) return false;
+  const details = output.details;
+  return typeof details === "object" && details !== null && "ok" in details && details.ok === true;
+}
+
+function isProgressTool(tool: string, output: unknown): boolean {
+  if (tool === "write_artifact") return toolResultOk(output);
+  return (
+    tool === "submit_questions" ||
+    tool === "submit_mock_choices" ||
+    tool === "write_mock_revision" ||
+    tool === "reply_to_user"
+  );
 }
 
 function decide(events: JsonlEvent[]): Decision {
@@ -692,7 +741,7 @@ function buildInitialPrompt(opts: {
     parts.push(`Research digest:\n${opts.researchDigest}`);
   }
   parts.push(
-    `Use submit_questions to ask the user everything you need before you start writing. After they answer, fill the artifacts and call mark_ready.`,
+    `Use submit_questions only when unresolved choices would materially change the artifacts. If you already have enough context, write the artifacts with write_artifact and call mark_ready.`,
   );
   return parts.join("\n");
 }

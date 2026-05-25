@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
@@ -93,6 +93,38 @@ describe("WorktreeManager", () => {
     const wt = await wm.ensure("task-new", "pi/task-new");
     expect(wt.taskId).toBe("task-new");
     expect(wt.branch).toBe("pi/task-new");
+  });
+
+  it("ensure() recreates a missing worktree from an existing task branch", async () => {
+    const repo = join(scratch, "repo");
+    const wtDir = join(scratch, "worktrees");
+    const git = simpleGit(repo);
+    await git.raw(["branch", "pi/task-existing", "HEAD"]);
+    const wm = new WorktreeManager({ repoRoot: repo, worktreesDir: wtDir });
+
+    const wt = await wm.ensure("task-existing", "pi/task-existing");
+
+    expect(wt.path).toBe(join(wtDir, "task-existing"));
+    const wtGit = simpleGit(wt.path);
+    const head = await wtGit.revparse(["--abbrev-ref", "HEAD"]);
+    expect(head.trim()).toBe("pi/task-existing");
+  });
+
+  it("ensure() adopts an existing worktree when the task branch is checked out elsewhere", async () => {
+    const repo = join(scratch, "repo");
+    const wtDir = join(scratch, "worktrees");
+    const otherPath = join(scratch, "other-task-worktree");
+    const git = simpleGit(repo);
+    await git.raw(["worktree", "add", "-b", "pi/task-adopted", otherPath, "HEAD"]);
+    const wm = new WorktreeManager({ repoRoot: repo, worktreesDir: wtDir });
+
+    const wt = await wm.ensure("task-adopted", "pi/task-adopted");
+
+    expect(wt).toEqual({
+      taskId: "task-adopted",
+      path: await realpath(otherPath),
+      branch: "pi/task-adopted",
+    });
   });
 
   it("list() returns all known worktrees", async () => {

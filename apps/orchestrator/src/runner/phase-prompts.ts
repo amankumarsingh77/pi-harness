@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { Phase, PhaseModelConfig } from "@pi-harness/shared";
 import type {
   AgentSession,
@@ -7,7 +6,7 @@ import type {
 } from "@pi-harness/pi-bridge";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import type { EventStore } from "../adapters/event-store.js";
-import { JsonlWriter } from "../adapters/jsonl-writer.js";
+import { PhaseEventLogStore } from "../adapters/phase-event-log-store.js";
 import { BrainstormEventBus } from "../agents/brainstorm-event-bus.js";
 import { runBrainstorm } from "../agents/brainstorm.js";
 import { PlanEventBus } from "../agents/plan-event-bus.js";
@@ -96,12 +95,10 @@ export async function runPhase(
           error: "brainstorm phase requires phaseModel and sessionPath",
         };
       }
-      const jsonl = new JsonlWriter(
-        join(deps.cwd, ".harness", input.taskId, "brainstorm.jsonl"),
-      );
+      const phaseEvents = new PhaseEventLogStore({ events: deps.eventStore });
       const bus = new BrainstormEventBus({
-        eventStore: deps.eventStore,
-        jsonl,
+        phaseEvents,
+        worktreePath: deps.cwd,
         runId: input.runId,
         taskId: input.taskId,
       });
@@ -142,12 +139,10 @@ export async function runPhase(
           error: "plan phase requires phaseModel, sessionPath, ticketTitle, and ticketDescription",
         };
       }
-      const jsonl = new JsonlWriter(
-        join(deps.cwd, ".harness", input.taskId, "plan.jsonl"),
-      );
+      const phaseEvents = new PhaseEventLogStore({ events: deps.eventStore });
       const bus = new PlanEventBus({
-        eventStore: deps.eventStore,
-        jsonl,
+        phaseEvents,
+        worktreePath: deps.cwd,
         runId: input.runId,
         taskId: input.taskId,
       });

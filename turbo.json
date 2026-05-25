@@ -6,10 +6,10 @@
     "lint": {},
     "typecheck": { "dependsOn": ["^build"] },
     "@pi-harness/cli#typecheck": {
-      "dependsOn": ["@pi-harness/db#build", "@pi-harness/shared#build"]
+      "dependsOn": ["@pi-harness/shared#build"]
     },
     "@pi-harness/cli#test": {
-      "dependsOn": ["@pi-harness/db#build", "@pi-harness/shared#build"]
+      "dependsOn": ["@pi-harness/shared#build"]
     },
     "dev": { "dependsOn": ["^build"], "cache": false, "persistent": true }
   }
