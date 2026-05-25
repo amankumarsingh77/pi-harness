@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createAgentSession } from "@pi-harness/pi-bridge";
-import { createDb } from "@pi-harness/db";
 import { loadConfig } from "./config.js";
 import { RunStore } from "./adapters/run-store.js";
 import { EventStore } from "./adapters/event-store.js";
@@ -35,10 +34,8 @@ async function main(): Promise<void> {
     "boot",
   );
 
-  const { db } = createDb(config.databaseUrl);
-
-  const liveEvents = new LiveEventStore(db);
-  const runs = new RunStore(db, {
+  const liveEvents = new LiveEventStore({ stateDir: config.stateDir });
+  const runs = new RunStore({ stateDir: config.stateDir }, {
     onTaskChanged: async (task) => {
       await liveEvents.publishTask(task);
     },
@@ -46,7 +43,7 @@ async function main(): Promise<void> {
       await liveEvents.publishRun(run);
     },
   });
-  const events = new EventStore(db, liveEvents);
+  const events = new EventStore({ stateDir: config.stateDir }, liveEvents);
   const missionStore = new MissionStore({ stateDir: config.stateDir });
   const claimLedger = new ClaimLedgerStore({ stateDir: config.stateDir });
   const worktrees = new WorktreeManager({

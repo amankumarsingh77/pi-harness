@@ -9,7 +9,7 @@ pi-harness dev
 ```
 
 `init` writes local harness config, example environment files, and a generated
-compose file. `dev` runs doctor checks, starts local infrastructure, applies
-migrations, starts the orchestrator, and serves the dashboard.
+compose file. `dev` runs doctor checks, starts optional local infrastructure,
+starts the orchestrator, and serves the dashboard.
 
 See the root README for the full workflow and architecture.

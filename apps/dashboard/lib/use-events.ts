@@ -8,7 +8,12 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import type { AgentEvent, LiveEventEnvelope } from "@pi-harness/shared";
+import type { AgentEvent } from "@pi-harness/shared";
+import {
+  buildLiveStreamUrl,
+  hydrateAgentEvent,
+  parseLiveEnvelope,
+} from "./live-event-client";
 
 export type UseEventsResult = {
   events: AgentEvent[];
@@ -62,36 +67,32 @@ export function useEvents(
 
     const open = (): void => {
       if (cancelled) return;
-      const es = new EventSource(`/api/live/stream?runId=${encodeURIComponent(runId)}`);
+      const es = new EventSource(buildLiveStreamUrl({ runId }));
       esRef.current = es;
       es.onopen = () => {
         setConnected(true);
       };
       const onAgentEvent = (ev: MessageEvent<string>) => {
-        try {
-          const envelope = parseAgentEventEnvelope(ev.data);
-          if (!envelope) {
-            setGapDetected(true);
-            return;
-          }
-          const parsed = hydrateEvent(envelope.payload);
-          setLastEventId(String(envelope.sequence));
-          setEvents((curr) => {
-            if (seenRef.current.has(parsed.id)) return curr;
-            seenRef.current.add(parsed.id);
-            return [...curr, parsed].sort(
-              (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
-            );
-          });
-          publishLastEventAtThrottled(parsed.ts, {
-            lastPublishedAtRef,
-            pendingLastEventAtRef,
-            pendingTimerRef,
-            setLastEventAt,
-          });
-        } catch {
+        const envelope = parseLiveEnvelope(ev.data, "agent.event.appended");
+        if (!envelope) {
           setGapDetected(true);
+          return;
         }
+        const parsed = hydrateAgentEvent(envelope.payload);
+        if (seenRef.current.has(parsed.id)) return;
+        seenRef.current.add(parsed.id);
+        setLastEventId(String(envelope.sequence));
+        setEvents((curr) =>
+          [...curr, parsed].sort(
+            (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+          ),
+        );
+        publishLastEventAtThrottled(parsed.ts, {
+          lastPublishedAtRef,
+          pendingLastEventAtRef,
+          pendingTimerRef,
+          setLastEventAt,
+        });
       };
       es.addEventListener("agent.event.appended", onAgentEvent);
       es.onerror = () => {
@@ -140,19 +141,4 @@ function publishLastEventAtThrottled(
     throttle.setLastEventAt(throttle.pendingLastEventAtRef.current);
     throttle.pendingLastEventAtRef.current = null;
   }, 1000 - elapsed);
-}
-
-function toEventDate(value: Date | string): Date {
-  return value instanceof Date ? value : new Date(value);
-}
-
-function hydrateEvent(event: AgentEvent): AgentEvent {
-  return { ...event, ts: toEventDate(event.ts) };
-}
-
-function parseAgentEventEnvelope(raw: string): LiveEventEnvelope<"agent.event.appended"> | null {
-  const value = JSON.parse(raw) as LiveEventEnvelope;
-  return value.kind === "agent.event.appended"
-    ? value as LiveEventEnvelope<"agent.event.appended">
-    : null;
 }

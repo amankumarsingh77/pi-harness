@@ -1,9 +1,6 @@
 import "dotenv/config";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import simpleGit from "simple-git";
-import { createDb } from "@pi-harness/db";
-import { RunStore } from "../src/adapters/run-store.js";
-import { EventStore } from "../src/adapters/event-store.js";
 import { ArtifactsStore } from "../src/agents/artifacts-store.js";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,6 +9,7 @@ import { buildServer } from "../src/http/server.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
 import { mkEvent } from "../src/domain/events.js";
 import { scaffoldPlan } from "../src/runner/scaffold-plan.js";
+import { createBareTestStores, resetTestStore } from "./helpers/stores.js";
 
 // Build a real git worktree with both artifacts in `status: ready`. Used by
 // tests that exercise the brainstorm approval gate — the route enforces the
@@ -104,12 +102,8 @@ async function makeReadyWorktree(taskId: string): Promise<string> {
   return wt;
 }
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
-
 describe("http", () => {
-  const { db, client } = createDb(url);
-  const runs = new RunStore(db);
-  const events = new EventStore(db);
+  const { stateDir, runs, events } = createBareTestStores();
   const cancellation = new CancellationRegistry();
   const app = buildServer({ runs, events, runsDir: tmpdir(), cancellation });
 
@@ -118,12 +112,11 @@ describe("http", () => {
   });
 
   beforeEach(async () => {
-    await db.execute("delete from tasks");
+    await resetTestStore(stateDir);
   });
 
   afterAll(async () => {
     await app.close();
-    await client.end();
   });
 
   it("GET /healthz returns 200", async () => {
@@ -505,6 +498,7 @@ describe("http", () => {
       workflow: "backend-feature",
       worktreePath: worktree,
     });
+    const run = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
     const res = await app.inject({
       method: "POST",
       url: `/api/tasks/${t.id}/brainstorm/nudge`,
@@ -520,11 +514,11 @@ describe("http", () => {
       join(worktree, ".harness", t.id, "brainstorm.jsonl"),
       "utf8",
     );
-    const events = jsonl
+    const jsonlEvents = jsonl
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l) as Record<string, unknown>);
-    const nudges = events.filter((e) => e.kind === "brainstorm_user_nudge");
+    const nudges = jsonlEvents.filter((e) => e.kind === "brainstorm_user_nudge");
     expect(nudges).toHaveLength(1);
     expect(nudges[0]).toMatchObject({
       kind: "brainstorm_user_nudge",
@@ -532,6 +526,38 @@ describe("http", () => {
       consumed: false,
     });
     expect(typeof nudges[0]!["nudgeId"]).toBe("string");
+
+    const stored = await events.listForRun(run.id);
+    expect(stored).toContainEqual(expect.objectContaining({
+      kind: "brainstorm_user_nudge",
+      comment: "ignore the auth angle, deprecated",
+      consumed: false,
+    }));
+  });
+
+  it("POST /api/tasks/:id/brainstorm/answers publishes answers to the run event stream", async () => {
+    const t = await runs.createTask({ title: "answer-live" });
+    const worktree = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+    });
+    const run = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/answers`,
+      payload: { answers: [{ questionId: "q1", optionId: "ship" }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const stored = await events.listForRun(run.id);
+    expect(stored).toContainEqual(expect.objectContaining({
+      kind: "brainstorm_answer",
+      questionId: "q1",
+      optionId: "ship",
+    }));
   });
 
   it("POST /api/tasks/:id/brainstorm/nudge rejects empty comment with 400", async () => {

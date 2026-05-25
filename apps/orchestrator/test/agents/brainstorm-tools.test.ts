@@ -200,7 +200,12 @@ describe("makeMarkReadyTool", () => {
     const store = makeStore();
     const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
-    expect(result.details).toEqual({ ok: false, missing: "design.md not found" });
+    expect(result.details).toEqual({
+      ok: false,
+      missing: "design.md not found",
+      kind: "design",
+      path: expect.stringContaining("/.harness/T-1/design.md"),
+    });
     expect(result.terminate).toBeUndefined();
     expect(eventAppends).toHaveLength(0);
   });
@@ -211,7 +216,12 @@ describe("makeMarkReadyTool", () => {
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
     const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
-    expect(result.details).toEqual({ ok: false, missing: "spec.md not found" });
+    expect(result.details).toEqual({
+      ok: false,
+      missing: "spec.md not found",
+      kind: "spec",
+      path: expect.stringContaining("/.harness/T-1/spec.md"),
+    });
     expect(eventAppends).toHaveLength(0);
   });
 
@@ -222,7 +232,12 @@ describe("makeMarkReadyTool", () => {
     await writeArtifactFile(store, "spec", "## Verification scenarios\nfoo\n");
     const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
-    expect(result.details).toEqual({ ok: false, missing: "spec.md missing: ## Acceptance criteria" });
+    expect(result.details).toEqual({
+      ok: false,
+      missing: "spec.md missing: ## Acceptance criteria",
+      kind: "spec",
+      path: expect.stringContaining("/.harness/T-1/spec.md"),
+    });
     expect(result.terminate).toBeUndefined();
   });
 
@@ -238,7 +253,12 @@ describe("makeMarkReadyTool", () => {
 
     const result = await fakeExecute(tool, {});
 
-    expect(result.details).toEqual({ ok: false, missing: "design.md missing: ## External research" });
+    expect(result.details).toEqual({
+      ok: false,
+      missing: "design.md missing: ## External research",
+      kind: "design",
+      path: expect.stringContaining("/.harness/T-1/design.md"),
+    });
   });
 
   it("reports missing when section heading is present but body is whitespace-only", async () => {
@@ -259,7 +279,12 @@ describe("makeMarkReadyTool", () => {
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
     const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
-    expect(result.details).toEqual({ ok: false, missing: "design.md missing: ## Trade-offs (empty)" });
+    expect(result.details).toEqual({
+      ok: false,
+      missing: "design.md missing: ## Trade-offs (empty)",
+      kind: "design",
+      path: expect.stringContaining("/.harness/T-1/design.md"),
+    });
   });
 
   it("happy path flips both files to ready, publishes status_changed, terminates", async () => {
@@ -325,6 +350,8 @@ describe("makeMarkReadyTool", () => {
     expect(result.details).toEqual({
       ok: false,
       missing: "design.md frontmatter status invalid (got: approved)",
+      kind: "design",
+      path: expect.stringContaining("/.harness/T-1/design.md"),
     });
     expect(eventAppends).toHaveLength(0);
   });

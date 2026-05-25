@@ -7,8 +7,11 @@ import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
 import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import type { EventStore } from "../../adapters/event-store.js";
-import { JsonlWriter, readJsonl } from "../../adapters/jsonl-writer.js";
-import { PlanEventBus } from "../../agents/plan-event-bus.js";
+import { readJsonl } from "../../adapters/jsonl-writer.js";
+import {
+  PhaseEventLogStore,
+  type PlanPhaseEventInput,
+} from "../../adapters/phase-event-log-store.js";
 import { ValidationError } from "../../domain/errors.js";
 import { derivePlanGate } from "../../agents/plan-gate.js";
 import { scaffoldPlan } from "../../runner/scaffold-plan.js";
@@ -42,6 +45,11 @@ export function registerPlanRoutes(
     mutationLock: TaskMutationLock;
   },
 ): void {
+  const phaseEvents = new PhaseEventLogStore({
+    ...(deps.events !== undefined ? { events: deps.events } : {}),
+    runs: deps.runs,
+  });
+
   app.get<{ Params: { id: string } }>("/api/tasks/:id/plan", async (req) => {
     const task = await deps.runs.getTask(req.params.id);
     const cwd = task.worktreePath;
@@ -55,6 +63,7 @@ export function registerPlanRoutes(
         executionDag: null,
         research: emptyResearch(),
         events: [],
+        lastBlocked: null,
       };
     }
 
@@ -77,6 +86,7 @@ export function registerPlanRoutes(
       executionDag,
       research,
       events,
+      lastBlocked: deriveLastBlocked(events),
     };
   });
 
@@ -174,37 +184,17 @@ export function registerPlanRoutes(
         parsed.body,
       );
 
-      const activeRun = deps.events
-        ? await deps.runs.findActiveRun(task.id, "plan")
-        : null;
-      if (activeRun && deps.events) {
-        const jsonl = new JsonlWriter(
-          join(task.worktreePath, ".harness", task.id, "plan.jsonl"),
-        );
-        const bus = new PlanEventBus({
-          eventStore: deps.events,
-          jsonl,
-          runId: activeRun.id,
-          taskId: task.id,
-        });
-        await bus.publish({
+      await phaseEvents.publish({
+        phase: "plan",
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        input: {
           kind: "plan_artifact_edited",
           artifact: parsed.kind,
           commitSha,
           sizeDelta,
-        });
-      } else {
-        const jsonl = new JsonlWriter(
-          join(task.worktreePath, ".harness", task.id, "plan.jsonl"),
-        );
-        await jsonl.append({
-          ts: new Date().toISOString(),
-          kind: "plan_artifact_edited",
-          artifact: parsed.kind,
-          commitSha,
-          sizeDelta,
-        });
-      }
+        },
+      });
 
       deps.scheduler?.enqueue(task.id);
       return { ok: true, commitSha };
@@ -273,20 +263,25 @@ export function registerPlanRoutes(
         branch,
       });
 
-      const newJsonlPath = join(task.worktreePath, ".harness", task.id, "plan.jsonl");
-      const w = new JsonlWriter(newJsonlPath);
-      const note = parsed.note?.trim();
-      await w.append({
-        ts: new Date().toISOString(),
-        kind: "plan_system",
-        systemKind: "session_reset",
-        data: {
-          archivedRunId: restartRun.id,
-          ...(note ? { note } : {}),
-        },
-      });
-
       const newRun = await deps.runs.createRun({ taskId: task.id, phase: "plan" });
+      const note = parsed.note?.trim();
+      const inputs: PlanPhaseEventInput[] = [
+        {
+          kind: "plan_system",
+          systemKind: "session_reset",
+          data: {
+            archivedRunId: restartRun.id,
+            ...(note ? { note } : {}),
+          },
+        },
+      ];
+      await phaseEvents.publishMany({
+        phase: "plan",
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        runId: newRun.id,
+        inputs,
+      });
       deps.scheduler?.enqueue(task.id);
 
       return {
@@ -296,6 +291,43 @@ export function registerPlanRoutes(
       };
     });
   });
+}
+
+// Most recent blocked event that isn't superseded by a later status_changed:
+// ready. Surfaces a stable, top-level "why the plan stalled" string for the
+// dashboard so users don't have to scrub raw event logs to find a timeout
+// or claim-verifier failure.
+export function deriveLastBlocked(
+  events: readonly unknown[],
+): { reason: string; ts: string } | null {
+  let blocked: { reason: string; ts: string } | null = null;
+  for (const raw of events) {
+    if (!isRecord(raw)) continue;
+    const kind = raw["kind"];
+    const ts = typeof raw["ts"] === "string" ? raw["ts"] : null;
+    if (!ts) continue;
+    if (kind === "plan_system" && raw["systemKind"] === "blocked") {
+      const data = raw["data"];
+      const reason =
+        isRecord(data) && typeof data["reason"] === "string" ? data["reason"] : "";
+      blocked = { reason, ts };
+    }
+    // A later ready or session_reset clears the blocked banner: the plan
+    // recovered or the user restarted the phase, so the stale reason is no
+    // longer the active failure.
+    if (kind === "plan_system" && raw["systemKind"] === "status_changed") {
+      const data = raw["data"];
+      if (isRecord(data) && data["status"] === "ready") blocked = null;
+    }
+    if (kind === "plan_system" && raw["systemKind"] === "session_reset") {
+      blocked = null;
+    }
+  }
+  return blocked;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function emptyResearch(): Record<string, null> {

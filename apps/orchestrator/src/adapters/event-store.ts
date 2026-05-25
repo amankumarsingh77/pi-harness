@@ -1,38 +1,33 @@
-import { eq, asc, desc } from "drizzle-orm";
-import { events as eventsTable, type DbClient } from "@pi-harness/db";
+import { join } from "node:path";
 import type { AgentEvent } from "@pi-harness/shared";
+import { appendJsonl, readJsonl } from "./jsonl-writer.js";
 import type { LiveEventStore } from "./live-event-store.js";
 
 type Subscriber = (e: AgentEvent) => void;
 
-// Persists every AgentEvent to Postgres and pushes a copy to in-process
-// subscribers. The SSE handler subscribes here; the dashboard "live log" is
-// just a tail of these.
-//
-// Note: in-process pub/sub means a multi-instance deployment would miss events
-// across replicas. v1 runs a single orchestrator. v2: pg LISTEN/NOTIFY or Redis.
+export type EventStoreOpts = {
+  readonly stateDir: string;
+};
+
+type SerializedAgentEvent = Omit<AgentEvent, "ts"> & {
+  readonly ts: string;
+};
+
 export class EventStore {
-  private readonly subs = new Map<string, Set<Subscriber>>(); // runId → subs
+  private readonly subs = new Map<string, Set<Subscriber>>();
+  private readonly eventLogPath: string;
 
   constructor(
-    private readonly db: DbClient,
+    opts: EventStoreOpts,
     private readonly liveEvents?: LiveEventStore,
-  ) {}
+  ) {
+    this.eventLogPath = join(opts.stateDir, "store", "agent-events.jsonl");
+  }
 
   async append(e: AgentEvent): Promise<void> {
-    // Map AgentEvent → row. The row stores `kind` and stuffs the rest into
-    // `payload` JSONB so we don't need a column per event variant.
-    const { id, runId, taskId, ts, kind, ...rest } = e as AgentEvent & Record<string, unknown>;
-    await this.db.insert(eventsTable).values({
-      id,
-      runId,
-      taskId,
-      ts,
-      kind,
-      payload: rest,
-    });
+    await appendJsonl(this.eventLogPath, serializeAgentEvent(e));
 
-    const subs = this.subs.get(runId);
+    const subs = this.subs.get(e.runId);
     if (subs) {
       for (const sub of subs) sub(e);
     }
@@ -40,19 +35,7 @@ export class EventStore {
   }
 
   async listForRun(runId: string): Promise<AgentEvent[]> {
-    const rows = await this.db
-      .select()
-      .from(eventsTable)
-      .where(eq(eventsTable.runId, runId))
-      .orderBy(asc(eventsTable.ts));
-    return rows.map((r) => ({
-      id: r.id,
-      runId: r.runId,
-      taskId: r.taskId,
-      ts: r.ts,
-      kind: r.kind,
-      ...(r.payload as Record<string, unknown>),
-    })) as AgentEvent[];
+    return (await this.listAll()).filter((event) => event.runId === runId);
   }
 
   async listForRunAfter(runId: string, afterId: string | null): Promise<AgentEvent[]> {
@@ -63,12 +46,7 @@ export class EventStore {
   }
 
   async latestEventAt(): Promise<Date | null> {
-    const [row] = await this.db
-      .select({ ts: eventsTable.ts })
-      .from(eventsTable)
-      .orderBy(desc(eventsTable.ts))
-      .limit(1);
-    return row?.ts ?? null;
+    return [...(await this.listAll())].sort((a, b) => b.ts.getTime() - a.ts.getTime())[0]?.ts ?? null;
   }
 
   subscribe(runId: string, sub: Subscriber): () => void {
@@ -83,4 +61,50 @@ export class EventStore {
       if (set!.size === 0) this.subs.delete(runId);
     };
   }
+
+  private async listAll(): Promise<AgentEvent[]> {
+    return (await readJsonl<unknown>(this.eventLogPath))
+      .map(parseAgentEvent)
+      .filter((event): event is AgentEvent => event !== null)
+      .sort((a, b) => a.ts.getTime() - b.ts.getTime());
+  }
+}
+
+function serializeAgentEvent(event: AgentEvent): SerializedAgentEvent {
+  return {
+    ...event,
+    ts: event.ts.toISOString(),
+  };
+}
+
+function parseAgentEvent(value: unknown): AgentEvent | null {
+  if (!isRecord(value)) return null;
+  const ts = parseDate(value["ts"]);
+  if (
+    !ts ||
+    typeof value["id"] !== "string" ||
+    typeof value["runId"] !== "string" ||
+    typeof value["taskId"] !== "string" ||
+    typeof value["kind"] !== "string"
+  ) {
+    return null;
+  }
+  return {
+    ...value,
+    id: value["id"],
+    runId: value["runId"],
+    taskId: value["taskId"],
+    kind: value["kind"],
+    ts,
+  } as AgentEvent;
+}
+
+function parseDate(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

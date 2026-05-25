@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import type { AgentEvent } from "@pi-harness/shared";
 import { Topbar } from "@/components/topbar";
 import { BrainstormShell } from "@/components/brainstorm/shell";
 import { ApiError } from "@/lib/api";
@@ -38,15 +39,19 @@ export default async function BrainstormPage({ params }: { params: Promise<{ id:
   const brainstormRunActive =
     brainstormRun?.status === "pending" || brainstormRun?.status === "running";
   // waterfall: the run id comes from the task detail response.
-  const initialAgentEvents = brainstormRunId
-    ? (await orchestrator.listEvents(brainstormRunId)).events
-    : [];
+  let initialAgentEvents: AgentEvent[] = [];
+  if (brainstormRunId) {
+    initialAgentEvents = (await orchestrator.listEvents(brainstormRunId)).events;
+  }
 
   return (
     <>
       <Topbar runningCount={1} blockedCount={1} doneTodayCount={12} branch="main" />
 
-      <BrainstormEventsProvider runId={brainstormRunId}>
+      <BrainstormEventsProvider
+        runId={brainstormRunId}
+        initialEvents={initialAgentEvents}
+      >
         <BrainstormShell
           task={task}
           runId={brainstormRunId}

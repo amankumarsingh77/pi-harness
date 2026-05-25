@@ -1,9 +1,10 @@
 import "dotenv/config";
+import { execFileSync } from "node:child_process";
+import { isAbsolute, join, resolve } from "node:path";
 import type { LogFormat, LogLevel } from "./domain/logger.js";
 
 export type OrchestratorConfig = {
   port: number;
-  databaseUrl: string;
   stateDir: string;
   runsDir: string;
   worktreesDir: string;
@@ -43,23 +44,44 @@ function parseLogFormat(raw: string | undefined, fallback: LogFormat): LogFormat
   return fallback;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorConfig {
+export function loadConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  cwd: string = process.cwd(),
+): OrchestratorConfig {
   const isProd = env.NODE_ENV === "production";
+  const repoRoot = resolveRepoRoot(env.HARNESS_REPO_ROOT, cwd);
+  const stateDir = resolveConfigPath(repoRoot, env.HARNESS_STATE_DIR ?? ".harness");
   return {
     port: parseInt(env.PORT ?? "4000", 10),
-    databaseUrl:
-      env.DATABASE_URL ??
-      "postgresql://piharness:piharness@localhost:54330/piharness",
-    stateDir: env.HARNESS_STATE_DIR ?? ".harness",
-    runsDir: env.HARNESS_RUNS_DIR ?? ".harness/runs",
-    worktreesDir: env.HARNESS_WORKTREES_DIR ?? ".harness/worktrees",
+    stateDir,
+    runsDir: env.HARNESS_RUNS_DIR ? resolveConfigPath(repoRoot, env.HARNESS_RUNS_DIR) : join(stateDir, "runs"),
+    worktreesDir: env.HARNESS_WORKTREES_DIR
+      ? resolveConfigPath(repoRoot, env.HARNESS_WORKTREES_DIR)
+      : join(stateDir, "worktrees"),
     baseBranch: env.HARNESS_BASE_BRANCH ?? "main",
     retryCap: parseInt(env.HARNESS_RETRY_CAP ?? "2", 10),
     executingConcurrency: parseInt(env.HARNESS_EXECUTING_CONCURRENCY ?? "2", 10),
-    repoRoot: env.HARNESS_REPO_ROOT ?? process.cwd(),
+    repoRoot,
     // Default level: info in prod, debug elsewhere. LOG_LEVEL overrides.
     logLevel: parseLogLevel(env.LOG_LEVEL, isProd ? "info" : "debug"),
     // Default format: json in prod, pretty in dev. LOG_FORMAT overrides.
     logFormat: parseLogFormat(env.LOG_FORMAT, isProd ? "json" : "pretty"),
   };
+}
+
+function resolveRepoRoot(raw: string | undefined, cwd: string): string {
+  if (raw) return resolveConfigPath(cwd, raw);
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return resolve(cwd);
+  }
+}
+
+function resolveConfigPath(base: string, path: string): string {
+  return isAbsolute(path) ? path : resolve(base, path);
 }

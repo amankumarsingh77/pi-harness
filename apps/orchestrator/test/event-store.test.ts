@@ -1,26 +1,12 @@
-import "dotenv/config";
-import { describe, it, expect, afterAll, beforeEach } from "vitest";
-import { createDb } from "@pi-harness/db";
+import { describe, it, expect } from "vitest";
 import { EventStore } from "../src/adapters/event-store.js";
 import { mkEvent } from "../src/domain/events.js";
 import { RunStore } from "../src/adapters/run-store.js";
-
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
+import { createBareTestStores } from "./helpers/stores.js";
 
 describe("EventStore", () => {
-  const { db, client } = createDb(url);
-  const events = new EventStore(db);
-  const runs = new RunStore(db);
-
-  afterAll(async () => {
-    await client.end();
-  });
-
-  beforeEach(async () => {
-    await db.execute("delete from tasks");
-  });
-
   it("persists and lists events for a run", async () => {
+    const { runs, events } = createBareTestStores();
     const t = await runs.createTask({ title: "events" });
     const r = await runs.createRun({ taskId: t.id, phase: "code" });
 
@@ -35,6 +21,9 @@ describe("EventStore", () => {
   });
 
   it("notifies subscribers on append", async () => {
+    const { stateDir } = createBareTestStores();
+    const events = new EventStore({ stateDir });
+    const runs = new RunStore({ stateDir });
     const t = await runs.createTask({ title: "sub" });
     const r = await runs.createRun({ taskId: t.id, phase: "code" });
 
@@ -51,6 +40,7 @@ describe("EventStore", () => {
   });
 
   it("subscribers for one run do not see events from another", async () => {
+    const { runs, events } = createBareTestStores();
     const t = await runs.createTask({ title: "iso" });
     const r1 = await runs.createRun({ taskId: t.id, phase: "code" });
     const r2 = await runs.createRun({ taskId: t.id, phase: "verify" });
@@ -66,6 +56,7 @@ describe("EventStore", () => {
   });
 
   it("returns the latest event timestamp across runs", async () => {
+    const { runs, events } = createBareTestStores();
     const t = await runs.createTask({ title: "latest" });
     const r1 = await runs.createRun({ taskId: t.id, phase: "code" });
     const r2 = await runs.createRun({ taskId: t.id, phase: "verify" });

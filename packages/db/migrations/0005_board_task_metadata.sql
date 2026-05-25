@@ -1,2 +1,0 @@
-ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "priority" text DEFAULT 'none' NOT NULL;
-ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "tags" jsonb DEFAULT '[]'::jsonb NOT NULL;

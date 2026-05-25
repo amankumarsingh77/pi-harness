@@ -24,6 +24,7 @@ export function PlanBody({
   scenarios,
   executionDag,
   plannerLogDefaultOpen,
+  lastBlocked,
 }: {
   task: Task;
   runs: readonly Run[];
@@ -38,6 +39,7 @@ export function PlanBody({
   scenarios: Artifact | null;
   executionDag: Artifact | null;
   plannerLogDefaultOpen: boolean;
+  lastBlocked: { reason: string; ts: string } | null;
 }) {
   const { events: liveEvents, connected } = usePlanEvents();
 
@@ -58,6 +60,7 @@ export function PlanBody({
       liveEvents={liveEvents}
       connected={connected}
       plannerLogDefaultOpen={plannerLogDefaultOpen}
+      lastBlocked={lastBlocked}
     />
   );
 }

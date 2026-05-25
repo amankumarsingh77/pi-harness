@@ -87,6 +87,23 @@ export class WorktreeManager {
       // matches because git won't let two worktrees share a branch anyway.
       return { taskId, path, branch };
     }
+    const existing = await this.findByBranch(branch);
+    if (existing) {
+      return { taskId, path: existing.path, branch };
+    }
+    if (await this.branchExists(branch)) {
+      await mkdir(this.opts.worktreesDir, { recursive: true });
+      try {
+        await this.git.raw(["worktree", "add", path, branch]);
+      } catch (e) {
+        throw new WorktreeError(`git worktree add failed: ${(e as Error).message}`, {
+          taskId,
+          branch,
+          path,
+        });
+      }
+      return { taskId, path, branch };
+    }
     return this.create(taskId, branch);
   }
 
@@ -104,8 +121,7 @@ export class WorktreeManager {
   }
 
   async list(): Promise<WorktreeInfo[]> {
-    const raw = await this.git.raw(["worktree", "list", "--porcelain"]);
-    const blocks = raw.split("\n\n").filter((b) => b.trim().length > 0);
+    const all = await this.allWorktrees();
     // Re-resolve managed dir now that it likely exists post-create(); git
     // emits canonical paths (e.g. /private/var/... on macOS) so a non-canonical
     // prefix would fail the startsWith check.
@@ -115,20 +131,43 @@ export class WorktreeManager {
     } catch {
       // dir doesn't exist yet — keep the resolved absolute path
     }
-    const out: WorktreeInfo[] = [];
+    return all
+      .filter((wt) => wt.path !== this.opts.repoRoot)
+      .filter((wt) => wt.path.startsWith(managedDir))
+      .map((wt) => ({
+        taskId: wt.path.slice(managedDir.length + 1),
+        path: wt.path,
+        branch: wt.branch,
+      }));
+  }
+
+  private async branchExists(branch: string): Promise<boolean> {
+    try {
+      await this.git.raw(["rev-parse", "--verify", `refs/heads/${branch}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async findByBranch(branch: string): Promise<{ path: string; branch: string } | null> {
+    return (await this.allWorktrees()).find((wt) => wt.branch === branch) ?? null;
+  }
+
+  private async allWorktrees(): Promise<Array<{ path: string; branch: string }>> {
+    const raw = await this.git.raw(["worktree", "list", "--porcelain"]);
+    const blocks = raw.split("\n\n").filter((b) => b.trim().length > 0);
+    const out: Array<{ path: string; branch: string }> = [];
     for (const block of blocks) {
       const lines = block.split("\n");
       const wtPathLine = lines.find((l) => l.startsWith("worktree "));
       const branchLine = lines.find((l) => l.startsWith("branch "));
       if (!wtPathLine) continue;
       const path = wtPathLine.slice("worktree ".length);
-      // Skip the main repo's own worktree.
-      if (path === this.opts.repoRoot) continue;
-      // Only include worktrees under our managed dir.
-      if (!path.startsWith(managedDir)) continue;
-      const branch = branchLine ? branchLine.slice("branch refs/heads/".length) : "(detached)";
-      const taskId = path.slice(managedDir.length + 1);
-      out.push({ taskId, path, branch });
+      const branch = branchLine?.startsWith("branch refs/heads/")
+        ? branchLine.slice("branch refs/heads/".length)
+        : "(detached)";
+      out.push({ path, branch });
     }
     return out;
   }

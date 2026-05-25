@@ -1,21 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: pi-harness-postgres
-    environment:
-      POSTGRES_USER: piharness
-      POSTGRES_PASSWORD: piharness
-      POSTGRES_DB: piharness
-    ports:
-      - "54330:5432"
-    volumes:
-      - pi-harness-pg:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U piharness"]
-      interval: 2s
-      timeout: 2s
-      retries: 10
-
   searxng:
     image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
     container_name: pi-harness-searxng
@@ -48,6 +31,5 @@ services:
       retries: 10
 
 volumes:
-  pi-harness-pg:
   pi-harness-searxng-cache:
   pi-harness-searxng-valkey:

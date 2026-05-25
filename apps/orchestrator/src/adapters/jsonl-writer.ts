@@ -30,6 +30,20 @@ export async function readJsonl<T = Record<string, unknown>>(path: string): Prom
 // expected to be written by exactly one process at a time (one orchestrator,
 // one brainstorm session per task) — we don't try to coordinate across
 // processes.
+const writerCache = new Map<string, JsonlWriter>();
+
+export function writerForPath(path: string): JsonlWriter {
+  const existing = writerCache.get(path);
+  if (existing) return existing;
+  const writer = new JsonlWriter(path);
+  writerCache.set(path, writer);
+  return writer;
+}
+
+export async function appendJsonl(path: string, value: unknown): Promise<void> {
+  await writerForPath(path).append(value);
+}
+
 export class JsonlWriter {
   private readonly path: string;
   private chain: Promise<void> = Promise.resolve();
@@ -42,7 +56,7 @@ export class JsonlWriter {
     return this.path;
   }
 
-  async append(event: Record<string, unknown>): Promise<void> {
+  async append(event: unknown): Promise<void> {
     // Chain on the previous append so concurrent calls serialize. We capture
     // the current tail before assigning a new one to avoid awaiting our own
     // promise (which would deadlock).

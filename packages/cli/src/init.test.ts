@@ -110,14 +110,14 @@ describe("createInitPlan", () => {
       stateDir: "/repo/.harness",
       worktreesDir: "/repo/.harness/worktrees",
       containerRuntime: "podman" as const,
-      databaseUrl: "postgresql://piharness:piharness@localhost:54330/piharness",
       dashboardPort: 3000,
       orchestratorPort: 4000,
       webProvider: "tinyfish" as const,
     };
     expect(renderHarnessConfig(config)).not.toContain("@pi-harness/shared");
+    expect(renderHarnessConfig(config)).not.toContain("databaseUrl");
     expect(renderHarnessConfig(config)).toContain("export default {");
     expect(renderHarnessConfig(config)).toContain("baseBranch: \"trunk\"");
-    expect(renderComposeFile(config)).toContain("54330:5432");
+    expect(renderComposeFile(config)).not.toContain("postgres");
   });
 });

@@ -51,6 +51,17 @@ const SubmitQuestionsParams = Type.Object({
   questions: Type.Array(Question, { minItems: 1 }),
 });
 
+const BrainstormArtifactKindParam = Type.Union([Type.Literal("design"), Type.Literal("spec")]);
+
+const ReadArtifactParams = Type.Object({
+  kind: BrainstormArtifactKindParam,
+});
+
+const WriteArtifactParams = Type.Object({
+  kind: BrainstormArtifactKindParam,
+  body: Type.String({ minLength: 1, maxLength: 250_000 }),
+});
+
 const MarkReadyParams = Type.Object({});
 
 const ReplyToUserParams = Type.Object({
@@ -131,7 +142,29 @@ const WriteMockRevisionParams = Type.Object({
 });
 
 export type SubmitQuestionsDetails = { awaiting: string[] };
-export type MarkReadyDetails = { ok: boolean; missing?: string };
+// Brainstorm writes only `design` and `spec`. Plan/scenarios are owned by
+// the plan phase and have their own required-section check there.
+type BrainstormArtifactKind = Extract<ArtifactKind, "design" | "spec">;
+
+export type ReadArtifactDetails = {
+  found: boolean;
+  kind: BrainstormArtifactKind;
+  path?: string;
+  status?: string;
+};
+export type WriteArtifactDetails = {
+  ok: boolean;
+  kind: BrainstormArtifactKind;
+  path?: string;
+  bytes?: number;
+  error?: string;
+};
+export type MarkReadyDetails = {
+  ok: boolean;
+  missing?: string;
+  kind?: BrainstormArtifactKind;
+  path?: string;
+};
 export type ReplyToUserDetails = { replyId: string };
 export type SubmitMockChoicesDetails = { proposed: string[] };
 export type WriteMockRevisionDetails = { revised: string };
@@ -191,9 +224,81 @@ export function makeSubmitQuestionsTool(deps: {
   };
 }
 
-// Brainstorm writes only `design` and `spec`. Plan/scenarios are owned by
-// the plan phase and have their own required-section check there.
-type BrainstormArtifactKind = Extract<ArtifactKind, "design" | "spec">;
+function startsWithYamlFrontmatter(body: string): boolean {
+  return body.trimStart().startsWith("---\n") || body.trimStart() === "---";
+}
+
+export function makeReadArtifactTool(deps: {
+  store: ArtifactsStore;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof ReadArtifactParams, ReadArtifactDetails> {
+  const { store, cwd, taskId } = deps;
+  return {
+    name: "read_artifact",
+    label: "Read brainstorm artifact",
+    description:
+      "Read the current body of design.md or spec.md from the task artifact store. The path is owned by the harness; pass only kind.",
+    parameters: ReadArtifactParams,
+    async execute(_id, params) {
+      const path = store.artifactPath(cwd, taskId, params.kind);
+      const art = await store.readArtifact(cwd, taskId, params.kind);
+      if (!art) {
+        return {
+          content: [{ type: "text", text: `${params.kind}.md not found` }],
+          details: { found: false, kind: params.kind, path },
+        };
+      }
+      return {
+        content: [{ type: "text", text: art.body }],
+        details: { found: true, kind: params.kind, status: art.fm.status },
+      };
+    },
+  };
+}
+
+export function makeWriteArtifactTool(deps: {
+  store: ArtifactsStore;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof WriteArtifactParams, WriteArtifactDetails> {
+  const { store, cwd, taskId } = deps;
+  return {
+    name: "write_artifact",
+    label: "Write brainstorm artifact body",
+    description:
+      "Replace the body of design.md or spec.md while preserving harness-owned frontmatter. Pass only kind and markdown body; do not include YAML frontmatter.",
+    parameters: WriteArtifactParams,
+    async execute(_id, params) {
+      const path = store.artifactPath(cwd, taskId, params.kind);
+      if (startsWithYamlFrontmatter(params.body)) {
+        const error = "artifact body must not include YAML frontmatter";
+        return {
+          content: [{ type: "text", text: error }],
+          details: { ok: false, kind: params.kind, path, error },
+        };
+      }
+
+      const current = await store.readArtifact(cwd, taskId, params.kind);
+      if (!current) {
+        const error = `${params.kind}.md not found`;
+        return {
+          content: [{ type: "text", text: error }],
+          details: { ok: false, kind: params.kind, path, error },
+        };
+      }
+
+      await store.writeArtifact(cwd, taskId, {
+        fm: current.fm,
+        body: params.body,
+      });
+      return {
+        content: [{ type: "text", text: `wrote ${params.kind}.md body` }],
+        details: { ok: true, kind: params.kind, bytes: params.body.length },
+      };
+    },
+  };
+}
 
 const REQUIRED_SECTIONS: Record<BrainstormArtifactKind, string[]> = {
   design: ["## Goals", "## Trade-offs", "## Alternatives considered"],
@@ -248,10 +353,14 @@ export function makeMarkReadyTool(deps: {
 }): ToolLike<typeof MarkReadyParams, MarkReadyDetails> {
   const { store, bus, cwd, taskId, countPendingNudges } = deps;
 
-  function reject(missing: string): ToolResult<MarkReadyDetails> {
+  function reject(
+    missing: string,
+    detail: { kind?: BrainstormArtifactKind; path?: string } = {},
+  ): ToolResult<MarkReadyDetails> {
+    const location = detail.path ? ` (${detail.path})` : "";
     return {
-      content: [{ type: "text", text: missing }],
-      details: { ok: false, missing },
+      content: [{ type: "text", text: `${missing}${location}` }],
+      details: { ok: false, missing, ...detail },
     };
   }
 
@@ -263,12 +372,12 @@ export function makeMarkReadyTool(deps: {
     parameters: MarkReadyParams,
     async execute() {
       // Refuse mark_ready while the user has un-addressed nudges. The agent
-      // must reply / write / submit_questions for each pending nudge before
+      // must reply / write_artifact / submit_questions for each pending nudge before
       // it can flip the artifacts to ready — otherwise the user's most recent
       // input is silently dropped on the floor when the gate flips.
       const pending = await countPendingNudges();
       if (pending > 0) {
-        const msg = `${pending} pending user nudge(s) — address them via reply_to_user / write / submit_questions before mark_ready`;
+        const msg = `${pending} pending user nudge(s) — address them via reply_to_user / write_artifact / submit_questions before mark_ready`;
         return reject(msg);
       }
 
@@ -279,21 +388,28 @@ export function makeMarkReadyTool(deps: {
       >;
 
       for (const kind of kinds) {
+        const path = store.artifactPath(cwd, taskId, kind);
         const art = await store.readArtifact(cwd, taskId, kind);
-        if (!art) return reject(`${kind}.md not found`);
+        if (!art) return reject(`${kind}.md not found`, { kind, path });
         if (art.fm.status !== "draft" && art.fm.status !== "ready") {
-          return reject(`${kind}.md frontmatter status invalid (got: ${art.fm.status})`);
+          return reject(`${kind}.md frontmatter status invalid (got: ${art.fm.status})`, {
+            kind,
+            path,
+          });
         }
         loaded[kind] = art;
       }
 
       for (const kind of kinds) {
         const missing = findMissingSection(kind, loaded[kind].body);
-        if (missing) return reject(missing);
+        if (missing) return reject(missing, { kind, path: store.artifactPath(cwd, taskId, kind) });
       }
 
       if (hasWebResearch(cwd, taskId) && !loaded.design.body.includes("## External research")) {
-        return reject("design.md missing: ## External research");
+        return reject("design.md missing: ## External research", {
+          kind: "design",
+          path: store.artifactPath(cwd, taskId, "design"),
+        });
       }
 
       const mockManifest = await store.readBrainstormMockManifest(cwd, taskId);

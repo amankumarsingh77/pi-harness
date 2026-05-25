@@ -2,9 +2,10 @@
 
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ClaimEvent, LiveEventEnvelope, Run, Task } from "@pi-harness/shared";
+import type { ClaimEvent, Run, Task } from "@pi-harness/shared";
 import { MissionCommandShell } from "./mission-command-shell";
 import { mutations, queries, queryKeys } from "@/lib/client/queries";
+import { buildLiveStreamUrl, parseLiveEnvelope } from "@/lib/live-event-client";
 import type { MissionBundle } from "@/lib/api";
 
 type TaskDetailData = {
@@ -38,13 +39,13 @@ export function MissionCommandLive({
   });
 
   useEffect(() => {
-    const es = new EventSource(`/api/live/stream?taskId=${encodeURIComponent(taskId)}`);
+    const es = new EventSource(buildLiveStreamUrl({ taskId }));
     const invalidate = (): void => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.task(taskId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.mission(taskId) });
     };
     const handleTask = (ev: MessageEvent<string>): void => {
-      const parsed = parseLiveEvent(ev.data, "task.updated");
+      const parsed = parseLiveEnvelope(ev.data, "task.updated");
       if (!parsed) {
         invalidate();
         return;
@@ -54,7 +55,7 @@ export function MissionCommandLive({
       );
     };
     const handleRun = (ev: MessageEvent<string>): void => {
-      const parsed = parseLiveEvent(ev.data, "run.updated");
+      const parsed = parseLiveEnvelope(ev.data, "run.updated");
       if (!parsed) {
         invalidate();
         return;
@@ -65,7 +66,7 @@ export function MissionCommandLive({
       );
     };
     const handleMission = (ev: MessageEvent<string>): void => {
-      const parsed = parseLiveEvent(ev.data, "mission.updated");
+      const parsed = parseLiveEnvelope(ev.data, "mission.updated");
       if (!parsed) {
         invalidate();
         return;
@@ -81,7 +82,7 @@ export function MissionCommandLive({
       );
     };
     const handleClaims = (ev: MessageEvent<string>): void => {
-      const parsed = parseLiveEvent(ev.data, "claims.updated");
+      const parsed = parseLiveEnvelope(ev.data, "claims.updated");
       if (!parsed) {
         invalidate();
         return;
@@ -122,18 +123,6 @@ export function MissionCommandLive({
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Verifier run failed";
-}
-
-function parseLiveEvent<K extends LiveEventEnvelope["kind"]>(
-  raw: string,
-  kind: K,
-): LiveEventEnvelope<K> | null {
-  try {
-    const parsed = JSON.parse(raw) as LiveEventEnvelope;
-    return parsed.kind === kind ? parsed as LiveEventEnvelope<K> : null;
-  } catch {
-    return null;
-  }
 }
 
 function hydrateTask(task: Task): Task {

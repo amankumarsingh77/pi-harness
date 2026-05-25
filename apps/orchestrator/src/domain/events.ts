@@ -13,3 +13,7 @@ export type MkEventInput = DistributiveOmit<AgentEvent, "id" | "ts">;
 export function mkEvent(input: MkEventInput): AgentEvent {
   return { id: randomUUID(), ts: new Date(), ...input } as AgentEvent;
 }
+
+export function mkEventAt(input: MkEventInput, ts: Date): AgentEvent {
+  return { id: randomUUID(), ts, ...input } as AgentEvent;
+}

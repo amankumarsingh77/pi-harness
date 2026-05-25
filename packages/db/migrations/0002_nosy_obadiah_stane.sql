@@ -1,1 +1,0 @@
-ALTER TABLE "tasks" ADD COLUMN "phase_models" jsonb DEFAULT '{}'::jsonb NOT NULL;

@@ -12,7 +12,6 @@ export const HarnessProjectConfigSchema = z.object({
   stateDir: z.string().min(1),
   worktreesDir: z.string().min(1),
   containerRuntime: ContainerRuntimeSchema,
-  databaseUrl: z.string().min(1),
   dashboardPort: z.number().int().min(1).max(65535),
   orchestratorPort: z.number().int().min(1).max(65535),
   webProvider: WebProviderSchema,
@@ -25,7 +24,6 @@ export type HarnessProjectConfigInput = {
   readonly stateDir?: string;
   readonly worktreesDir?: string;
   readonly containerRuntime?: ContainerRuntime;
-  readonly databaseUrl?: string;
   readonly dashboardPort?: number;
   readonly orchestratorPort?: number;
   readonly webProvider?: WebProvider;
@@ -37,7 +35,6 @@ export const DEFAULT_HARNESS_PROJECT_CONFIG: HarnessProjectConfig = {
   stateDir: ".harness",
   worktreesDir: ".harness/worktrees",
   containerRuntime: "podman",
-  databaseUrl: "postgresql://piharness:piharness@localhost:54330/piharness",
   dashboardPort: 3000,
   orchestratorPort: 4000,
   webProvider: "tinyfish",
@@ -67,7 +64,6 @@ export function parseHarnessProjectEnv(
     ...(env["HARNESS_STATE_DIR"] ? { stateDir: env["HARNESS_STATE_DIR"] } : {}),
     ...(env["HARNESS_WORKTREES_DIR"] ? { worktreesDir: env["HARNESS_WORKTREES_DIR"] } : {}),
     ...(parseContainerRuntime(env["HARNESS_CONTAINER_RUNTIME"])),
-    ...(env["DATABASE_URL"] ? { databaseUrl: env["DATABASE_URL"] } : {}),
     ...(parsePort("dashboardPort", env["DASHBOARD_PORT"])),
     ...(parsePort("orchestratorPort", env["ORCHESTRATOR_PORT"] ?? env["PORT"])),
     ...(parseWebProvider(env["PI_WEB_PROVIDER"])),

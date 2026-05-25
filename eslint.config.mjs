@@ -62,7 +62,6 @@ export default tseslint.config(
       "**/*.tsbuildinfo",
       "pnpm-lock.yaml",
       "subagents/_vendored/**",
-      "packages/db/migrations/**",
     ],
   },
   js.configs.recommended,

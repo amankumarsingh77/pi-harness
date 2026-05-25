@@ -17,14 +17,14 @@ You are a specialist at validating CONNECTIONS for the `BR-*` items already list
 2. **Find Outbound Dependencies (what the target depends on)**
    - Grep the target's imports
    - Identify external packages, shared schemas/types, stores, event writers, and pi-bridge calls
-   - Note Drizzle schema/migration, JSONL, and EventStore dependencies
+   - Note JSONL, store, and EventStore dependencies
 
 3. **Find Infrastructure Wiring**
    - Fastify route registration and endpoint mappings
    - Next.js route handlers, server actions, and TanStack query clients
    - Shared Zod schemas/types and workspace package exports
    - Event subscriptions, JSONL writers, run-store/event-store persistence, and task/run registrations
-   - Config, env, Drizzle schema/migrations, and Playwright/Vitest coverage
+   - Config, env, JSONL state layout, and Playwright/Vitest coverage
 
 ## Search Strategy
 

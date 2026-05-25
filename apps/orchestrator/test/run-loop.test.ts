@@ -1,11 +1,8 @@
-import "dotenv/config";
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
-import { createDb } from "@pi-harness/db";
-import { RunStore } from "../src/adapters/run-store.js";
 import { EventStore } from "../src/adapters/event-store.js";
 import { WorktreeManager } from "../src/adapters/worktree.js";
 
@@ -17,8 +14,7 @@ import { runLoop } from "../src/runner/run-loop.js";
 import { runPhase, type PhaseDeps } from "../src/runner/phase-prompts.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
 import type { ArtifactsStore } from "../src/agents/artifacts-store.js";
-
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
+import { createBareTestStores, resetTestStore } from "./helpers/stores.js";
 
 const phaseDepsBase: PhaseDeps = {
   cwd: "/tmp",
@@ -34,19 +30,13 @@ const phaseDepsBase: PhaseDeps = {
 };
 
 describe("runLoop", () => {
-  const { db, client } = createDb(url);
-  const runs = new RunStore(db);
-  const events = new EventStore(db);
+  const { stateDir, runs, events } = createBareTestStores();
   let scratch: string;
   let repo: string;
   let worktrees: WorktreeManager;
 
-  afterAll(async () => {
-    await client.end();
-  });
-
   beforeEach(async () => {
-    await db.execute("delete from tasks");
+    await resetTestStore(stateDir);
     vi.mocked(runPhase).mockReset();
     scratch = await mkdtemp(join(tmpdir(), "rl-test-"));
     repo = join(scratch, "repo");
@@ -92,6 +82,36 @@ describe("runLoop", () => {
     // facts on read; we only assert the persisted status here.
     expect(after.status).toBe("brainstorming");
     expect(runPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it("brainstorm non-progress failure ends the run and moves task to brainstorm_failed", async () => {
+    const t = await runs.createTask({ title: "stuck-brainstorm" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+
+    vi.mocked(runPhase).mockResolvedValue({
+      ok: false,
+      costUsd: 0.0001,
+      inputTokens: 1,
+      outputTokens: 1,
+      error: "brainstorm: agent ended turn without questions or ready",
+    });
+
+    const after = await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+
+    expect(after.status).toBe("brainstorm_failed");
+    const list = await runs.listRuns(t.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.status).toBe("failed");
+    expect(list[0]!.endedAt).not.toBeNull();
+    expect(list[0]!.error).toBe("brainstorm: agent ended turn without questions or ready");
   });
 
   it("brainstorm phase succeeded with both artifacts ready → gate awaits user", async () => {
@@ -267,6 +287,50 @@ describe("runLoop", () => {
 
     const list = await worktrees.list();
     expect(list.filter((w) => w.taskId === t.id)).toHaveLength(1);
+  });
+
+  it("does not restart a cancelled brainstorm phase during recovery", async () => {
+    const t = await runs.createTask({ title: "paused-brainstorm" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+    const run = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    await runs.updateRun(run.id, { status: "cancelled", endedAt: new Date() });
+
+    const after = await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+
+    expect(after.status).toBe("brainstorming");
+    expect(runPhase).not.toHaveBeenCalled();
+    expect(await runs.listRuns(t.id)).toHaveLength(1);
+    expect(await worktrees.list()).toHaveLength(0);
+  });
+
+  it("does not restart a cancelled plan phase during recovery", async () => {
+    const t = await runs.createTask({ title: "paused-plan" });
+    await runs.updateTask(t.id, { status: "planning", workflow: "backend-feature" });
+    const run = await runs.createRun({ taskId: t.id, phase: "plan" });
+    await runs.updateRun(run.id, { status: "cancelled", endedAt: new Date() });
+
+    const after = await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+
+    expect(after.status).toBe("planning");
+    expect(runPhase).not.toHaveBeenCalled();
+    expect(await runs.listRuns(t.id)).toHaveLength(1);
+    expect(await worktrees.list()).toHaveLength(0);
   });
 
   it("verify failure with retries left → executing, retryCount++", async () => {

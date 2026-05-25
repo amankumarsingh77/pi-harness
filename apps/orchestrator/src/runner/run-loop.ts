@@ -48,6 +48,12 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
 
   const phase = STATUS_TO_PHASE[task.status];
   if (!phase) return task;
+  if (
+    (phase === "brainstorm" || phase === "plan") &&
+    (await runs.isPhasePausedByCancellation(task.id, phase))
+  ) {
+    return task;
+  }
 
   // Brainstorm approval gate: if artifacts are ready AND no revision was
   // filed since the last ready event, we're waiting on the user — do not

@@ -1,8 +1,9 @@
-import { eq, asc, desc, and, inArray } from "drizzle-orm";
-import { tasks, runs, type DbClient } from "@pi-harness/db";
-import type { Task, TaskStatus, Run, Phase, TaskPriority } from "@pi-harness/shared";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import type { Phase, Run, Task, TaskPriority, TaskStatus } from "@pi-harness/shared";
 import { TASK_STATUSES } from "@pi-harness/shared";
 import { NotFoundError } from "../domain/errors.js";
+import { appendJsonl, readJsonl } from "./jsonl-writer.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -11,11 +12,41 @@ export type RunStoreObserver = {
   onRunChanged?: (run: Run) => void | Promise<void>;
 };
 
+export type RunStoreOpts = {
+  readonly stateDir: string;
+};
+
+type TaskEntry = {
+  readonly type: "task.upsert";
+  readonly task: SerializedTask;
+};
+
+type RunEntry = {
+  readonly type: "run.upsert";
+  readonly run: SerializedRun;
+};
+
+type SerializedTask = Omit<Task, "createdAt" | "updatedAt"> & {
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+type SerializedRun = Omit<Run, "startedAt" | "endedAt"> & {
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+};
+
 export class RunStore {
+  private readonly taskLogPath: string;
+  private readonly runLogPath: string;
+
   constructor(
-    private readonly db: DbClient,
+    opts: RunStoreOpts,
     private readonly observer: RunStoreObserver = {},
-  ) {}
+  ) {
+    this.taskLogPath = join(opts.stateDir, "store", "tasks.jsonl");
+    this.runLogPath = join(opts.stateDir, "store", "runs.jsonl");
+  }
 
   async createTask(input: {
     title: string;
@@ -23,46 +54,43 @@ export class RunStore {
     priority?: TaskPriority;
     tags?: readonly string[];
   }): Promise<Task> {
-    const [row] = await this.db
-      .insert(tasks)
-      .values({
-        title: input.title,
-        description: input.description ?? "",
-        ...(input.priority !== undefined ? { priority: input.priority } : {}),
-        ...(input.tags !== undefined ? { tags: [...input.tags] } : {}),
-      })
-      .returning();
-    const task = row as Task;
-    await this.observer.onTaskChanged?.(task);
+    const now = new Date();
+    const task: Task = {
+      id: randomUUID(),
+      title: input.title,
+      description: input.description ?? "",
+      status: "backlog",
+      workflow: null,
+      worktreePath: null,
+      branchName: null,
+      retryCount: 0,
+      priority: input.priority ?? "none",
+      tags: [...(input.tags ?? [])],
+      phaseModels: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.writeTask(task);
     return task;
   }
 
   async getTask(id: string): Promise<Task> {
-    // Reject non-UUID ids before they hit Postgres — otherwise pg throws a
-    // 22P02 "invalid input syntax for type uuid" which surfaces as a 500.
-    // Treat malformed ids as not-found so the dashboard hits its 404 path
-    // (e.g., when a stale URL or fixture id like "T-093" is opened).
     if (!UUID_RE.test(id)) throw new NotFoundError("task", id);
-    const [row] = await this.db.select().from(tasks).where(eq(tasks.id, id));
-    if (!row) throw new NotFoundError("task", id);
-    return row as Task;
+    const task = (await this.taskMap()).get(id);
+    if (!task) throw new NotFoundError("task", id);
+    return task;
   }
 
   async updateTask(id: string, patch: Partial<Task>): Promise<Task> {
-    const { tags, ...rest } = patch;
-    const [row] = await this.db
-      .update(tasks)
-      .set({
-        ...rest,
-        ...(tags !== undefined ? { tags: [...tags] } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(tasks.id, id))
-      .returning();
-    if (!row) throw new NotFoundError("task", id);
-    const task = row as Task;
-    await this.observer.onTaskChanged?.(task);
-    return task;
+    const current = await this.getTask(id);
+    const updated: Task = {
+      ...current,
+      ...patch,
+      tags: patch.tags !== undefined ? [...patch.tags] : current.tags,
+      updatedAt: new Date(),
+    };
+    await this.writeTask(updated);
+    return updated;
   }
 
   async updateTaskStatus(id: string, status: TaskStatus): Promise<Task> {
@@ -70,134 +98,244 @@ export class RunStore {
   }
 
   async listTasks(): Promise<Task[]> {
-    const rows = await this.db.select().from(tasks).orderBy(asc(tasks.createdAt));
-    return rows as Task[];
+    return [...(await this.taskMap()).values()].sort(byDate((task) => task.createdAt));
   }
 
   async listTasksByStatus(status: TaskStatus): Promise<Task[]> {
-    const rows = await this.db.select().from(tasks).where(eq(tasks.status, status));
-    return rows as Task[];
+    return (await this.listTasks()).filter((task) => task.status === status);
   }
 
   async countByStatus(): Promise<Record<TaskStatus, number>> {
-    const rows = (await this.db.select().from(tasks)) as Task[];
-    const init = Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])) as Record<TaskStatus, number>;
-    for (const t of rows) init[t.status]++;
-    return init;
+    const init = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<TaskStatus, number>;
+    return (await this.listTasks()).reduce(
+      (counts, task) => ({ ...counts, [task.status]: counts[task.status] + 1 }),
+      init,
+    );
   }
 
   async listActiveRunIds(): Promise<string[]> {
-    const rows = await this.db
-      .select({ id: runs.id })
-      .from(runs)
-      .where(inArray(runs.status, ["pending", "running"]))
-      .orderBy(asc(runs.startedAt));
-    return rows.map((r) => r.id);
+    return (await this.listAllRuns())
+      .filter((run) => run.status === "pending" || run.status === "running")
+      .map((run) => run.id);
   }
 
   async totalCostUsd(): Promise<number> {
-    const rows = (await this.db.select({ costUsd: runs.costUsd }).from(runs)) as { costUsd: number }[];
-    return rows.reduce((total, r) => total + r.costUsd, 0);
+    return (await this.listAllRuns()).reduce((total, run) => total + run.costUsd, 0);
   }
 
   async createRun(input: { taskId: string; phase: Phase }): Promise<Run> {
-    const [row] = await this.db
-      .insert(runs)
-      .values({ taskId: input.taskId, phase: input.phase })
-      .returning();
-    const run = row as Run;
-    await this.observer.onRunChanged?.(run);
+    const now = new Date();
+    const run: Run = {
+      id: randomUUID(),
+      taskId: input.taskId,
+      phase: input.phase,
+      status: "pending",
+      startedAt: now,
+      endedAt: null,
+      error: null,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      piSessionPath: null,
+    };
+    await this.writeRun(run);
     return run;
   }
 
-  // Cheap existence check used by the phaseModels freeze gate. LIMIT 1 so we
-  // don't pull or count rows we don't need.
   async hasAnyRun(taskId: string): Promise<boolean> {
-    const rows = await this.db
-      .select({ id: runs.id })
-      .from(runs)
-      .where(eq(runs.taskId, taskId))
-      .limit(1);
-    return rows.length > 0;
+    return (await this.listRuns(taskId)).length > 0;
   }
 
   async getRun(id: string): Promise<Run> {
     if (!UUID_RE.test(id)) throw new NotFoundError("run", id);
-    const [row] = await this.db.select().from(runs).where(eq(runs.id, id));
-    if (!row) throw new NotFoundError("run", id);
-    return row as Run;
+    const run = (await this.runMap()).get(id);
+    if (!run) throw new NotFoundError("run", id);
+    return run;
   }
 
   async listRuns(taskId: string): Promise<Run[]> {
-    const rows = await this.db
-      .select()
-      .from(runs)
-      .where(eq(runs.taskId, taskId))
-      .orderBy(asc(runs.startedAt));
-    return rows as Run[];
+    return (await this.listAllRuns()).filter((run) => run.taskId === taskId);
   }
 
   async listAllRuns(): Promise<Run[]> {
-    const rows = await this.db.select().from(runs).orderBy(asc(runs.startedAt));
-    return rows as Run[];
+    return [...(await this.runMap()).values()].sort(byDate((run) => run.startedAt));
   }
 
-  // Returns the most recently started non-terminal Run for (taskId, phase),
-  // or null. "Non-terminal" = status is pending or running (not succeeded /
-  // failed / cancelled). Used by the brainstorm phase to reuse a single Run
-  // across the many ticks the script does between user answers.
   async findActiveRun(taskId: string, phase: Phase): Promise<Run | null> {
-    const rows = await this.db
-      .select()
-      .from(runs)
-      .where(
-        and(
-          eq(runs.taskId, taskId),
-          eq(runs.phase, phase),
-          inArray(runs.status, ["pending", "running"]),
-        ),
-      )
-      .orderBy(desc(runs.startedAt))
-      .limit(1);
-    return (rows[0] as Run | undefined) ?? null;
+    return latestRun(
+      (await this.listRuns(taskId)).filter(
+        (run) => run.phase === phase && (run.status === "pending" || run.status === "running"),
+      ),
+    );
   }
 
   async findLatestRun(taskId: string, phase: Phase, status: Run["status"]): Promise<Run | null> {
-    const rows = await this.db
-      .select()
-      .from(runs)
-      .where(
-        and(
-          eq(runs.taskId, taskId),
-          eq(runs.phase, phase),
-          eq(runs.status, status),
-        ),
-      )
-      .orderBy(desc(runs.startedAt))
-      .limit(1);
-    return (rows[0] as Run | undefined) ?? null;
+    return latestRun(
+      (await this.listRuns(taskId)).filter((run) => run.phase === phase && run.status === status),
+    );
   }
 
-  // All non-terminal runs for a task across all phases. Used by user_cancel
-  // to settle every active run in one pass.
+  async isPhasePausedByCancellation(taskId: string, phase: Phase): Promise<boolean> {
+    const active = await this.findActiveRun(taskId, phase);
+    if (active) return false;
+    const latest = latestRun((await this.listRuns(taskId)).filter((run) => run.phase === phase));
+    return latest?.status === "cancelled";
+  }
+
   async findActiveRunsForTask(taskId: string): Promise<Run[]> {
-    const rows = await this.db
-      .select()
-      .from(runs)
-      .where(
-        and(
-          eq(runs.taskId, taskId),
-          inArray(runs.status, ["pending", "running"]),
-        ),
-      );
-    return rows as Run[];
+    return (await this.listRuns(taskId)).filter(
+      (run) => run.status === "pending" || run.status === "running",
+    );
   }
 
   async updateRun(id: string, patch: Partial<Run>): Promise<Run> {
-    const [row] = await this.db.update(runs).set(patch).where(eq(runs.id, id)).returning();
-    if (!row) throw new NotFoundError("run", id);
-    const run = row as Run;
-    await this.observer.onRunChanged?.(run);
-    return run;
+    const current = await this.getRun(id);
+    const updated: Run = { ...current, ...patch };
+    await this.writeRun(updated);
+    return updated;
   }
+
+  private async writeTask(task: Task): Promise<void> {
+    await appendJsonl(this.taskLogPath, { type: "task.upsert", task: serializeTask(task) });
+    await this.observer.onTaskChanged?.(task);
+  }
+
+  private async writeRun(run: Run): Promise<void> {
+    await appendJsonl(this.runLogPath, { type: "run.upsert", run: serializeRun(run) });
+    await this.observer.onRunChanged?.(run);
+  }
+
+  private async taskMap(): Promise<Map<string, Task>> {
+    return foldById(await readJsonl<unknown>(this.taskLogPath), parseTaskEntry);
+  }
+
+  private async runMap(): Promise<Map<string, Run>> {
+    return foldById(await readJsonl<unknown>(this.runLogPath), parseRunEntry);
+  }
+}
+
+function foldById<T extends { readonly id: string }>(
+  rows: readonly unknown[],
+  parse: (row: unknown) => T | null,
+): Map<string, T> {
+  let map = new Map<string, T>();
+  for (const row of rows) {
+    const parsed = parse(row);
+    if (parsed) map = new Map([...map, [parsed.id, parsed]]);
+  }
+  return map;
+}
+
+function parseTaskEntry(row: unknown): Task | null {
+  if (!isRecord(row) || row["type"] !== "task.upsert") return null;
+  return parseTask(row["task"]);
+}
+
+function parseRunEntry(row: unknown): Run | null {
+  if (!isRecord(row) || row["type"] !== "run.upsert") return null;
+  return parseRun(row["run"]);
+}
+
+function parseTask(value: unknown): Task | null {
+  if (!isRecord(value)) return null;
+  const createdAt = parseDate(value["createdAt"]);
+  const updatedAt = parseDate(value["updatedAt"]);
+  if (!createdAt || !updatedAt) return null;
+  if (
+    typeof value["id"] !== "string" ||
+    typeof value["title"] !== "string" ||
+    typeof value["description"] !== "string" ||
+    typeof value["status"] !== "string" ||
+    typeof value["retryCount"] !== "number" ||
+    typeof value["priority"] !== "string" ||
+    !Array.isArray(value["tags"])
+  ) {
+    return null;
+  }
+  return {
+    id: value["id"],
+    title: value["title"],
+    description: value["description"],
+    status: value["status"] as TaskStatus,
+    workflow: value["workflow"] === "backend-feature" ? value["workflow"] : null,
+    worktreePath: typeof value["worktreePath"] === "string" ? value["worktreePath"] : null,
+    branchName: typeof value["branchName"] === "string" ? value["branchName"] : null,
+    retryCount: value["retryCount"],
+    priority: value["priority"] as TaskPriority,
+    tags: value["tags"].filter((tag): tag is string => typeof tag === "string"),
+    phaseModels: isRecord(value["phaseModels"]) ? value["phaseModels"] : {},
+    createdAt,
+    updatedAt,
+  };
+}
+
+function parseRun(value: unknown): Run | null {
+  if (!isRecord(value)) return null;
+  const startedAt = parseDate(value["startedAt"]);
+  const endedAt = value["endedAt"] === null ? null : parseDate(value["endedAt"]);
+  if (!startedAt || endedAt === undefined) return null;
+  if (
+    typeof value["id"] !== "string" ||
+    typeof value["taskId"] !== "string" ||
+    typeof value["phase"] !== "string" ||
+    typeof value["status"] !== "string" ||
+    typeof value["costUsd"] !== "number" ||
+    typeof value["inputTokens"] !== "number" ||
+    typeof value["outputTokens"] !== "number"
+  ) {
+    return null;
+  }
+  return {
+    id: value["id"],
+    taskId: value["taskId"],
+    phase: value["phase"] as Phase,
+    status: value["status"] as Run["status"],
+    startedAt,
+    endedAt,
+    error: typeof value["error"] === "string" ? value["error"] : null,
+    costUsd: value["costUsd"],
+    inputTokens: value["inputTokens"],
+    outputTokens: value["outputTokens"],
+    piSessionPath: typeof value["piSessionPath"] === "string" ? value["piSessionPath"] : null,
+  };
+}
+
+function serializeTask(task: Task): SerializedTask {
+  return {
+    ...task,
+    tags: [...task.tags],
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+  };
+}
+
+function serializeRun(run: Run): SerializedRun {
+  return {
+    ...run,
+    startedAt: run.startedAt.toISOString(),
+    endedAt: run.endedAt?.toISOString() ?? null,
+  };
+}
+
+function latestRun(runs: readonly Run[]): Run | null {
+  return [...runs].sort(byDateDesc((run) => run.startedAt))[0] ?? null;
+}
+
+function byDate<T>(getDate: (item: T) => Date): (a: T, b: T) => number {
+  return (a, b) => getDate(a).getTime() - getDate(b).getTime();
+}
+
+function byDateDesc<T>(getDate: (item: T) => Date): (a: T, b: T) => number {
+  return (a, b) => getDate(b).getTime() - getDate(a).getTime();
+}
+
+function parseDate(value: unknown): Date | null | undefined {
+  if (value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

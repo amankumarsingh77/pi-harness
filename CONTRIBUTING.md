@@ -11,8 +11,6 @@ Use Node 22+ and pnpm 9.12:
 ```bash
 corepack enable
 pnpm install
-pnpm db:up
-pnpm db:migrate
 pnpm dev
 ```
 
@@ -44,7 +42,8 @@ Please include:
 - What changed and why.
 - Validation commands you ran.
 - Screenshots or Playwright evidence for visible dashboard changes.
-- Notes for migrations, new environment variables, or infrastructure changes.
+- Notes for state layout changes, new environment variables, or infrastructure
+  changes.
 
 Keep commits short, imperative, and scoped when useful, for example
 `fix(orchestrator): handle missing task metadata`.

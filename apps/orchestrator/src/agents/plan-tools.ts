@@ -74,6 +74,10 @@ export type ClaimVerifierResult = {
   // text only, or hit an error). Treating that as "audit passed" is unsafe —
   // mark_ready rejects so the planner has to dispatch again.
   findingsWritten: boolean;
+  // True when the dispatch was cut short by the parent planner timeout. The
+  // tool must NOT flip status to ready in this case — the run is being torn
+  // down. mark_ready returns a reject so the planner sees the audit failed.
+  aborted?: boolean;
 };
 
 export type DispatchClaimVerifier = (planBody: string) => Promise<ClaimVerifierResult>;
@@ -94,6 +98,11 @@ export function makeMarkReadyTool(deps: {
   claimVerifierState: ClaimVerifierState;
   claimLedger?: ClaimLedgerStore;
   claimPublisher?: ClaimPublisher;
+  // Fires when the planner stage's timeout/cancel cuts the run short. If set
+  // and aborted at any point during mark_ready, the tool refuses to flip
+  // artifact status to ready — otherwise a slow audit can finish *after* the
+  // blocked event was published and silently promote the run.
+  cancelSignal?: AbortSignal;
 }): ToolLike<typeof MarkReadyParams, MarkReadyDetails> {
   const {
     store,
@@ -104,6 +113,7 @@ export function makeMarkReadyTool(deps: {
     claimVerifierState,
     claimLedger,
     claimPublisher,
+    cancelSignal,
   } = deps;
 
   function reject(missing: string): ToolResult<MarkReadyDetails> {
@@ -170,6 +180,14 @@ export function makeMarkReadyTool(deps: {
       if (claimsResult.kind === "exhausted") {
         return reject(claimsResult.message);
       }
+      if (claimsResult.kind === "aborted") {
+        // Parent planner timed out / cancelled during the audit. Do NOT flip
+        // status to ready — the run is being torn down. The planner stage's
+        // timeout handler has already published the blocked event with reason.
+        return reject(
+          "claim-verifier: aborted by planner timeout — plan not promoted to ready",
+        );
+      }
       if (claimsResult.kind === "no_findings") {
         return reject(
           `claim-verifier: subagent ended without writing findings. Call mark_ready again — it will re-dispatch claim-verifier (until the cap of ${claimVerifierState.cap} attempts).`,
@@ -178,6 +196,12 @@ export function makeMarkReadyTool(deps: {
       if (claimsResult.kind === "falsified") {
         return reject(
           `claim-verifier: ${claimsResult.claims[0]} — re-evaluate or remove (${claimsResult.claims.length} flagged)`,
+        );
+      }
+
+      if (cancelSignal?.aborted) {
+        return reject(
+          "mark_ready: planner aborted before promotion — plan not flipped to ready",
         );
       }
 
@@ -364,6 +388,7 @@ type ClaimVerifierOutcome =
   | { kind: "ok" }
   | { kind: "falsified"; claims: string[] }
   | { kind: "no_findings" }
+  | { kind: "aborted" }
   | { kind: "exhausted"; message: string };
 
 async function runClaimVerifier(args: {
@@ -397,6 +422,7 @@ async function runClaimVerifier(args: {
   state.attempts += 1;
 
   const result = await dispatchClaimVerifier(planBody);
+  if (result.aborted) return { kind: "aborted" };
   if (!result.findingsWritten) return { kind: "no_findings" };
   if (result.falsifiedClaims.length === 0) return { kind: "ok" };
   return { kind: "falsified", claims: result.falsifiedClaims };

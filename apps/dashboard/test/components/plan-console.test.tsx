@@ -140,6 +140,24 @@ describe("PlanConsole", () => {
     expect(screen.getByText("execution phases not authored yet")).toBeInTheDocument();
   });
 
+  it("renders the blocked banner with the failure reason when lastBlocked is set", () => {
+    renderConsole({
+      lastBlocked: {
+        reason: "planner timed out after 300000ms",
+        ts: "2026-05-21T18:58:41.000Z",
+      },
+    });
+
+    const banner = screen.getByTestId("plan-blocked-banner");
+    expect(banner).toHaveTextContent("plan blocked");
+    expect(banner).toHaveTextContent("planner timed out after 300000ms");
+  });
+
+  it("omits the blocked banner when lastBlocked is null", () => {
+    renderConsole();
+    expect(screen.queryByTestId("plan-blocked-banner")).toBeNull();
+  });
+
   it("collapses and expands the planner log", () => {
     renderConsole();
 
@@ -251,6 +269,7 @@ function renderConsole(
   opts: {
     readonly liveEvents?: readonly AgentEvent[];
     readonly executionDag?: Artifact | null;
+    readonly lastBlocked?: { reason: string; ts: string } | null;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -284,6 +303,7 @@ function renderConsole(
           liveEvents={opts.liveEvents ?? liveEvents}
           connected={true}
           plannerLogDefaultOpen
+          lastBlocked={opts.lastBlocked ?? null}
         />
       </PlanEventsProvider>
     </QueryClientProvider>,
