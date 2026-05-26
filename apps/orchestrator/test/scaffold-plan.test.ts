@@ -14,7 +14,6 @@ beforeEach(async () => {
   await git.addConfig("user.email", "test@example.com", false, "local");
   await git.addConfig("user.name", "Test", false, "local");
   // Mirror the real harness layout: root .gitignore excludes `.harness/`.
-  // scaffoldPlan must force-add anyway.
   await writeFile(join(scratch, ".gitignore"), ".harness/\n");
   await writeFile(join(scratch, "README.md"), "init\n");
   await git.add(["README.md", ".gitignore"]);
@@ -88,11 +87,11 @@ describe("scaffoldPlan", () => {
     expect(status.staged.some((p) => p.includes("research/"))).toBe(false);
   });
 
-  it("commits with chore(<taskId>): plan scaffolding subject", async () => {
+  it("does not commit generated plan artifacts", async () => {
     await scaffoldPlan({ cwd: scratch, taskId: "T-002", branch: "pi/T-002" });
     const git = simpleGit(scratch);
     const log = await git.log();
-    expect(log.latest?.message).toBe("chore(T-002): plan scaffolding");
+    expect(log.latest?.message).toBe("init");
   });
 
   it("is idempotent — second call is a no-op", async () => {
@@ -103,6 +102,6 @@ describe("scaffoldPlan", () => {
     const git = simpleGit(scratch);
     const log = await git.log();
     const scaffoldCommits = log.all.filter((c) => c.message.includes("plan scaffolding"));
-    expect(scaffoldCommits).toHaveLength(1);
+    expect(scaffoldCommits).toHaveLength(0);
   });
 });

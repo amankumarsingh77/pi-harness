@@ -181,7 +181,7 @@ async function dispatchBrainstorm(
   const task = opts.task;
 
   // Lay down design.md / spec.md scaffolding + initial commit. Idempotent.
-  await scaffoldBrainstorm({ cwd: worktree.path, taskId: task.id, branch });
+  await scaffoldBrainstorm({ cwd: worktree.path, taskId: task.id, branch, store: phaseDeps.store });
 
   // Reuse a single Run across ticks so the dashboard's SSE subscription,
   // opened on the first render, keeps receiving events as the agent advances.
@@ -267,7 +267,7 @@ async function dispatchPlan(
   const { runs, events, phaseDeps, worktree, retryCap, branch, cancellation } = opts;
   const task = opts.task;
 
-  await scaffoldPlan({ cwd: worktree.path, taskId: task.id, branch });
+  await scaffoldPlan({ cwd: worktree.path, taskId: task.id, branch, store: phaseDeps.store });
 
   const existingRun = await runs.findActiveRun(task.id, "plan");
   let run: Run = existingRun ?? (await runs.createRun({ taskId: task.id, phase: "plan" }));

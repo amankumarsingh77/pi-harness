@@ -6,6 +6,7 @@ import {
   makeGraphifyQueryTools,
   makeGraphifyRefreshTool,
 } from "../../src/agents/graphify-tools.js";
+import { graphDirFor } from "../../src/agents/graphify-manager.js";
 import type { GraphifyLifecycle, GraphifyRunResult, GraphifyStatus } from "../../src/agents/graphify-manager.js";
 
 describe("Graphify tools", () => {
@@ -22,8 +23,9 @@ describe("Graphify tools", () => {
 
   it("queries graph nodes and returns concise matches", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "graphify-tools-"));
-    await writeGraph(cwd);
-    const query = makeGraphifyQueryTools({ cwd }).find((tool) => tool.name === "graphify_query");
+    const stateDir = join(cwd, ".state");
+    await writeGraph(graphDirFor(cwd, stateDir), ".");
+    const query = makeGraphifyQueryTools({ cwd, stateDir }).find((tool) => tool.name === "graphify_query");
     if (!query) throw new Error("missing graphify_query");
 
     const result = await query.execute("t1", { query: "runLoop" }, undefined, undefined, undefined as never);
@@ -49,6 +51,18 @@ describe("Graphify tools", () => {
     expect(result.details.ok).toBe(true);
     expect(result.content[0]!.text).toContain("runLoop");
     expect(result.content[0]!.text).toContain("GraphifyManager");
+  });
+
+  it("falls back to legacy graphify-out graph", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "graphify-tools-"));
+    await writeGraph(cwd, "graphify-out");
+    const query = makeGraphifyQueryTools({ cwd, stateDir: join(cwd, ".state") }).find((tool) => tool.name === "graphify_query");
+    if (!query) throw new Error("missing graphify_query");
+
+    const result = await query.execute("t1", { query: "runLoop" }, undefined, undefined, undefined as never);
+
+    expect(result.details.ok).toBe(true);
+    expect(result.content[0]!.text).toContain("runLoop");
   });
 
   it("refreshes through the injected manager", async () => {
@@ -83,10 +97,10 @@ describe("Graphify tools", () => {
   });
 });
 
-async function writeGraph(cwd: string): Promise<void> {
-  await mkdir(join(cwd, "graphify-out"), { recursive: true });
+async function writeGraph(cwd: string, relDir = "graphify-out"): Promise<void> {
+  await mkdir(join(cwd, relDir), { recursive: true });
   await writeFile(
-    join(cwd, "graphify-out", "graph.json"),
+    join(cwd, relDir, "graph.json"),
     JSON.stringify({
       nodes: [
         { id: "n1", label: "runLoop", kind: "function", source: "apps/orchestrator/src/runner/run-loop.ts" },
@@ -97,6 +111,7 @@ async function writeGraph(cwd: string): Promise<void> {
     "utf8",
   );
 }
+
 
 function status(cwd: string): GraphifyStatus {
   return {

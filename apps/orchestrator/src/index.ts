@@ -55,8 +55,8 @@ async function main(): Promise<void> {
     worktreesDir: config.worktreesDir,
     baseBranch: config.baseBranch,
   });
-  const artifacts = new ArtifactsStore();
-  const graphify = new GraphifyManager();
+  const artifacts = new ArtifactsStore({ stateDir: config.stateDir });
+  const graphify = new GraphifyManager({ stateDir: config.stateDir });
 
   void graphify.ensureInitialized(config.repoRoot)
     .then((result) => {

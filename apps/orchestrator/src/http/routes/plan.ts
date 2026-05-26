@@ -167,7 +167,7 @@ export function registerPlanRoutes(
       const prior = await deps.artifacts.readArtifact(task.worktreePath, task.id, parsed.kind);
       const sizeDelta = parsed.body.length - (prior?.body.length ?? 0);
 
-      const { commitSha } = await deps.artifacts.applyHumanEdit(
+      const { commitSha, artifactRevisionId } = await deps.artifacts.applyHumanEdit(
         task.worktreePath,
         task.id,
         parsed.kind,
@@ -191,6 +191,7 @@ export function registerPlanRoutes(
           kind: "plan_artifact_edited",
           artifact: parsed.kind,
           commitSha,
+          artifactRevisionId,
           sizeDelta,
         });
       } else {
@@ -202,12 +203,13 @@ export function registerPlanRoutes(
           kind: "plan_artifact_edited",
           artifact: parsed.kind,
           commitSha,
+          artifactRevisionId,
           sizeDelta,
         });
       }
 
       deps.scheduler?.enqueue(task.id);
-      return { ok: true, commitSha };
+      return { ok: true, commitSha, artifactRevisionId };
     });
   });
 
@@ -271,6 +273,7 @@ export function registerPlanRoutes(
         cwd: task.worktreePath,
         taskId: task.id,
         branch,
+        store: deps.artifacts,
       });
 
       const newJsonlPath = join(task.worktreePath, ".harness", task.id, "plan.jsonl");

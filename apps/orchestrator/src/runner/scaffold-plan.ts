@@ -1,15 +1,14 @@
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import simpleGit from "simple-git";
 import type { Artifact } from "@pi-harness/shared";
 import { ArtifactsStore } from "../agents/artifacts-store.js";
-import { withGitLockDiagnostic } from "./git-diagnostics.js";
 
 export type ScaffoldPlanOpts = {
   cwd: string;          // worktree root
   taskId: string;       // e.g. "T-001"
   branch: string;       // e.g. "pi/T-001"
+  store?: ArtifactsStore;
 };
 
 export type ScaffoldPlanResult = {
@@ -30,7 +29,7 @@ export type ScaffoldPlanResult = {
 // but we force-add `.harness/<taskId>/`, which would otherwise sweep
 // `research/<name>.md` files into the planner's commits.
 export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlanResult> {
-  const store = new ArtifactsStore();
+  const store = opts.store ?? new ArtifactsStore();
   const planPath = store.artifactPath(opts.cwd, opts.taskId, "plan");
   const scenariosPath = store.artifactPath(opts.cwd, opts.taskId, "scenarios");
   const blastRadiusPath = store.artifactPath(opts.cwd, opts.taskId, "blast-radius");
@@ -106,17 +105,11 @@ export async function scaffoldPlan(opts: ScaffoldPlanOpts): Promise<ScaffoldPlan
     await writeFile(gitignorePath, "research/\n");
   }
 
-  const git = simpleGit(opts.cwd);
-  const created = await withGitLockDiagnostic(
-    { taskId: opts.taskId, operation: "plan scaffolding" },
-    async () => {
-      await git.raw(["add", "-f", ".harness"]);
-      const status = await git.status();
-      if (status.staged.length === 0) return false;
-      await git.commit(`chore(${opts.taskId}): plan scaffolding`);
-      return true;
-    },
-  );
-
-  return { created, planPath, scenariosPath, blastRadiusPath, executionDagPath };
+  return {
+    created: !filesExist,
+    planPath,
+    scenariosPath,
+    blastRadiusPath,
+    executionDagPath,
+  };
 }

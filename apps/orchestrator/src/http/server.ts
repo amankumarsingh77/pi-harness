@@ -75,9 +75,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send({ error: "internal", message });
   });
 
-  const artifacts = deps.artifacts ?? new ArtifactsStoreCtor();
-  const mutationLock = deps.mutationLock ?? new TaskMutationLock();
   const stateDir = deps.stateDir ?? ".harness";
+  const artifacts = deps.artifacts ?? new ArtifactsStoreCtor({ stateDir });
+  const mutationLock = deps.mutationLock ?? new TaskMutationLock();
   const missionStore = deps.missionStore ?? new MissionStore({ stateDir });
   const claimLedger = deps.claimLedger ?? new ClaimLedgerStore({ stateDir });
   registerHealth(app);

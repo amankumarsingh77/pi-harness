@@ -5,6 +5,7 @@ import {
   type GraphifyLifecycle,
   type GraphifyRunResult,
   graphPathFor,
+  legacyGraphPathFor,
 } from "./graphify-manager.js";
 
 const MAX_OUTPUT_CHARS = 8_000;
@@ -135,6 +136,7 @@ const RefreshParams = Type.Object({});
 
 export function makeGraphifyQueryTools(deps: {
   readonly cwd: string;
+  readonly stateDir?: string;
 }): ReadonlyArray<
   | ToolLike<typeof QueryParams, GraphQueryDetails>
   | ToolLike<typeof PathParams, GraphPathDetails>
@@ -181,6 +183,7 @@ export function makeGraphifyRefreshTool(deps: {
 
 function makeGraphifyQueryTool(deps: {
   readonly cwd: string;
+  readonly stateDir?: string;
 }): ToolLike<typeof QueryParams, GraphQueryDetails> {
   return {
     name: "graphify_query",
@@ -189,7 +192,7 @@ function makeGraphifyQueryTool(deps: {
       "Search the Graphify knowledge graph before broad grep/find/read operations. Returns concise matching nodes with source hints.",
     parameters: QueryParams,
     async execute(_id, params) {
-      const loaded = await loadGraph(deps.cwd);
+      const loaded = await loadGraph(deps.cwd, deps.stateDir);
       if (!loaded.ok) return graphFailure(loaded.error, loaded.graphPath);
       const limit = bounded(params.maxResults, DEFAULT_MAX_RESULTS, MAX_RESULTS);
       const matches = scoreNodes(loaded.graph.nodes, params.query).slice(0, limit);
@@ -210,6 +213,7 @@ function makeGraphifyQueryTool(deps: {
 
 function makeGraphifyPathTool(deps: {
   readonly cwd: string;
+  readonly stateDir?: string;
 }): ToolLike<typeof PathParams, GraphPathDetails> {
   return {
     name: "graphify_path",
@@ -218,7 +222,7 @@ function makeGraphifyPathTool(deps: {
       "Find a short path between two graph nodes by id, label, or source text.",
     parameters: PathParams,
     async execute(_id, params) {
-      const loaded = await loadGraph(deps.cwd);
+      const loaded = await loadGraph(deps.cwd, deps.stateDir);
       if (!loaded.ok) return graphFailure(loaded.error, loaded.graphPath);
       const source = findNode(loaded.graph.nodes, params.source);
       const target = findNode(loaded.graph.nodes, params.target);
@@ -249,6 +253,7 @@ function makeGraphifyPathTool(deps: {
 
 function makeGraphifyExplainTool(deps: {
   readonly cwd: string;
+  readonly stateDir?: string;
 }): ToolLike<typeof ExplainParams, GraphExplainDetails> {
   return {
     name: "graphify_explain",
@@ -257,7 +262,7 @@ function makeGraphifyExplainTool(deps: {
       "Show one graph node plus its immediate neighbors, useful for understanding local architecture context.",
     parameters: ExplainParams,
     async execute(_id, params) {
-      const loaded = await loadGraph(deps.cwd);
+      const loaded = await loadGraph(deps.cwd, deps.stateDir);
       if (!loaded.ok) return graphFailure(loaded.error, loaded.graphPath);
       const node = findNode(loaded.graph.nodes, params.node);
       if (!node) return graphFailure("node was not found", loaded.graphPath);
@@ -287,6 +292,7 @@ function makeGraphifyExplainTool(deps: {
 
 function makeGraphifyStatsTool(deps: {
   readonly cwd: string;
+  readonly stateDir?: string;
 }): ToolLike<typeof StatsParams, GraphStatsDetails> {
   return {
     name: "graphify_stats",
@@ -294,7 +300,7 @@ function makeGraphifyStatsTool(deps: {
     description: "Report whether the Graphify graph is available and how large it is.",
     parameters: StatsParams,
     async execute() {
-      const loaded = await loadGraph(deps.cwd);
+      const loaded = await loadGraph(deps.cwd, deps.stateDir);
       if (!loaded.ok) return graphFailure(loaded.error, loaded.graphPath);
       const text = `${loaded.graph.nodes.length} nodes, ${loaded.graph.edges.length} edges in ${loaded.graphPath}`;
       return {
@@ -310,22 +316,24 @@ function makeGraphifyStatsTool(deps: {
   };
 }
 
-async function loadGraph(cwd: string): Promise<
+async function loadGraph(cwd: string, stateDir?: string): Promise<
   | { readonly ok: true; readonly graphPath: string; readonly graph: GraphData }
   | { readonly ok: false; readonly graphPath: string; readonly error: string }
 > {
-  const graphPath = graphPathFor(cwd);
-  if (!existsSync(graphPath)) {
+  const graphPath = graphPathFor(cwd, stateDir);
+  const legacyGraphPath = legacyGraphPathFor(cwd);
+  const readableGraphPath = existsSync(graphPath) ? graphPath : legacyGraphPath;
+  if (!existsSync(readableGraphPath)) {
     return { ok: false, graphPath, error: "graphify-out/graph.json does not exist" };
   }
   try {
-    const parsed: unknown = JSON.parse(await readFile(graphPath, "utf8"));
+    const parsed: unknown = JSON.parse(await readFile(readableGraphPath, "utf8"));
     if (!isRecord(parsed)) return { ok: false, graphPath, error: "graph.json root is not an object" };
     const nodes = normalizeNodes(parsed["nodes"]);
     if (nodes.length === 0) return { ok: false, graphPath, error: "graph.json has no nodes" };
     return {
       ok: true,
-      graphPath,
+      graphPath: readableGraphPath,
       graph: {
         nodes,
         edges: normalizeEdges(parsed["edges"]),

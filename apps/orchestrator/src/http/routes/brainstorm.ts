@@ -338,7 +338,7 @@ export function registerBrainstormRoutes(
       );
       const sizeDelta = parsed.body.length - (prior?.body.length ?? 0);
 
-      const { commitSha } = await deps.artifacts.applyHumanEdit(
+      const { commitSha, artifactRevisionId } = await deps.artifacts.applyHumanEdit(
         task.worktreePath,
         task.id,
         parsed.kind,
@@ -366,6 +366,7 @@ export function registerBrainstormRoutes(
           kind: "brainstorm_artifact_edited",
           artifact: parsed.kind,
           commitSha,
+          artifactRevisionId,
           sizeDelta,
         });
       } else {
@@ -377,13 +378,14 @@ export function registerBrainstormRoutes(
           kind: "brainstorm_artifact_edited",
           artifact: parsed.kind,
           commitSha,
+          artifactRevisionId,
           sizeDelta,
         });
       }
 
       // Wake the agent so it can re-evaluate against the human edit.
       deps.scheduler?.enqueue(task.id);
-      return { ok: true, commitSha };
+      return { ok: true, commitSha, artifactRevisionId };
     },
   );
 
@@ -619,6 +621,7 @@ export function registerBrainstormRoutes(
         cwd: task.worktreePath,
         taskId: task.id,
         branch,
+        store: deps.artifacts,
       });
 
       // Write the boundary marker + (optional) seed nudge to the new
