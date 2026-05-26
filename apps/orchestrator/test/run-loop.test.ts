@@ -13,7 +13,7 @@ vi.mock("../src/runner/phase-prompts.js", () => ({
 import { runLoop } from "../src/runner/run-loop.js";
 import { runPhase, type PhaseDeps } from "../src/runner/phase-prompts.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
-import type { ArtifactsStore } from "../src/agents/artifacts-store.js";
+import { ArtifactsStore } from "../src/agents/artifacts-store.js";
 import type { GraphifyLifecycle, GraphifyStatus } from "../src/agents/graphify-manager.js";
 import { createBareTestStores, resetTestStore } from "./helpers/stores.js";
 
@@ -23,9 +23,7 @@ const phaseDepsBase: PhaseDeps = {
   createAgentSession: vi.fn(),
   // Mocked runPhase doesn't actually use store, but run-loop reads artifacts
   // post-phase to compute the brainstorm gate. Stub the methods it touches.
-  store: {
-    readArtifact: vi.fn(async () => null),
-  } as ArtifactsStore,
+  store: new ArtifactsStore(),
   eventStore: { append: vi.fn(async () => {}) } as EventStore,
   exec: vi.fn(),
 };
@@ -119,14 +117,10 @@ describe("runLoop", () => {
     const t = await runs.createTask({ title: "ready" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
 
+    const readyStore = new ArtifactsStore();
     const readyDeps: PhaseDeps = {
       ...phaseDepsBase,
-      store: {
-        readArtifact: vi.fn(async () => ({
-          fm: { status: "ready" },
-          body: "",
-        })),
-      } as ArtifactsStore,
+      store: readyStore,
     };
 
     vi.mocked(runPhase).mockResolvedValue({
@@ -147,6 +141,10 @@ describe("runLoop", () => {
     });
 
     expect(after.status).toBe("brainstorming");
+    await Promise.all([
+      readyStore.setArtifactStatus(after.worktreePath!, t.id, "design", "ready", "agent"),
+      readyStore.setArtifactStatus(after.worktreePath!, t.id, "spec", "ready", "agent"),
+    ]);
     // The run-loop only persists status. The gate is computed on read by
     // deriveBrainstormGate; the run-loop's responsibility is to *not advance*
     // when the gate would say awaiting_user. Re-running the loop here would
@@ -174,7 +172,7 @@ describe("runLoop", () => {
     expect(list[0]!.endedAt).toBeNull();
   });
 
-  it("creates worktree + branch + scaffolding commit on brainstorm entry", async () => {
+  it("creates worktree + branch + draft scaffold on brainstorm entry", async () => {
     const t = await runs.createTask({ title: "scaffold" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
 
@@ -215,10 +213,10 @@ describe("runLoop", () => {
     expect(spec).toContain("parent: design.md");
     expect(spec).toContain("status: draft");
 
-    // Scaffolding commit is on the branch
+    // Scaffolding artifacts are runtime state, not git commits.
     const wtGit = simpleGit(after.worktreePath!);
     const log = await wtGit.log();
-    expect(log.latest?.message).toContain("brainstorm scaffolding");
+    expect(log.latest?.message).toBe("init");
   });
 
   it("threads worktree path as cwd into phaseDeps", async () => {

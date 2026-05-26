@@ -211,7 +211,13 @@ class ObservedArtifactsStore extends ArtifactsStore {
 describe("http /api/tasks/:id/plan routes", () => {
   const { stateDir, runs, events } = createBareTestStores();
   const cancellation = new CancellationRegistry();
-  const app = buildServer({ runs, events, runsDir: tmpdir(), cancellation });
+  const app = buildServer({
+    runs,
+    events,
+    runsDir: tmpdir(),
+    cancellation,
+    artifacts: new ArtifactsStore(),
+  });
 
   beforeAll(async () => {
     await app.ready();
@@ -366,7 +372,8 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(true);
     expect(existsSync(join(dir, "execution-dag.yaml"))).toBe(true);
 
-    const archive = join(dir, "runs", activeRun.id);
+    const store = new ArtifactsStore();
+    const archive = store.taskRunDir(wt, t.id, activeRun.id);
     expect(existsSync(join(archive, "design.md"))).toBe(false);
     expect(existsSync(join(archive, "spec.md"))).toBe(false);
     expect(existsSync(join(archive, "plan.md"))).toBe(true);
@@ -377,7 +384,6 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "research", "codebase-scout.md"))).toBe(true);
 
-    const store = new ArtifactsStore();
     const plan = await store.readArtifact(wt, t.id, "plan");
     const scenarios = await store.readArtifact(wt, t.id, "scenarios");
     const blastRadius = await store.readArtifact(wt, t.id, "blast-radius");

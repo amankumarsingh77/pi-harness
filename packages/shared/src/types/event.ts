@@ -138,6 +138,7 @@ export type AgentEvent =
       kind: "brainstorm_artifact_edited";
       artifact: "design" | "spec";
       commitSha: string;
+      artifactRevisionId?: string;
       sizeDelta: number;
     })
   // Free-form prose reply from the agent, surfaced in the brainstorm
@@ -231,6 +232,7 @@ export type AgentEvent =
       kind: "plan_artifact_edited";
       artifact: "plan" | "scenarios";
       commitSha: string;
+      artifactRevisionId?: string;
       sizeDelta: number;
     })
   // Code-phase DAG execution events. The code runner emits one start/end pair

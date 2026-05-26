@@ -60,6 +60,6 @@ function buildPrBody(
     (s) => `- ${s.ok ? "✅" : "❌"} \`${s.id}\` (${s.type})`,
   );
   const verification = `## Verification\n\n${proof.ok ? "All scenarios green." : "Failures present."}\n\n${scenarioBullets.join("\n")}\n`;
-  const planLink = `## Plan\n\nSee \`.harness/runs/<task-id>/plan.md\`.\n`;
+  const planLink = `## Plan\n\nSee the task artifact view for the approved plan and verification report.\n`;
   return [summary, planLink, verification].join("\n");
 }

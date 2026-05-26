@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import simpleGit from "simple-git";
 import { z } from "zod";
 import {
@@ -18,7 +19,6 @@ import {
   type PlanArtifact,
   type ProofReport,
 } from "@pi-harness/shared";
-import { withGitLockDiagnostic } from "../runner/git-diagnostics.js";
 
 const SafeSlugSchema = z.string().min(1).max(80).regex(/^[a-z0-9][a-z0-9-]*$/);
 
@@ -127,24 +127,63 @@ export function artifactFileName(kind: ArtifactKind): string {
   return `${kind}.md`;
 }
 
-// Branch-scoped artifact store. Owns every read/write under
-// `<worktree>/.harness/<taskId>/`. The brainstorm phase, brainstorm-tools,
-// the run-loop's gate check, and the brainstorm GET route all go through
-// here so no caller knows the literal paths.
+type ArtifactWriteResult = {
+  readonly artifact: Artifact;
+  readonly artifactRevisionId: string;
+};
+
+type ArtifactsStoreOptions = {
+  readonly stateDir?: string;
+};
+
+// Durable artifact store. Canonical state lives under
+// `<stateDir>/tasks/<taskId>/artifacts/current/` with revision history under
+// `artifacts/history/`; `<worktree>/.harness/<taskId>/` remains the
+// agent-facing execution mirror.
 //
 // Layout (post plan-phase):
-//   <cwd>/.harness/<taskId>/
-//     ├── design.md       (frontmatter + body)
-//     ├── spec.md         (frontmatter + body)
-//     ├── plan.md         (frontmatter + body)
-//     ├── scenarios.yaml  (frontmatter + body)
-//     └── blast-radius.yaml (frontmatter + body)
+//   <stateDir>/tasks/<taskId>/artifacts/current/
+//     ├── design.md
+//     ├── spec.md
+//     ├── plan.md
+//     ├── scenarios.yaml
+//     └── blast-radius.yaml
 //
 // Legacy run-scoped artifacts (BrainstormArtifact / PlanArtifact /
 // ProofReport JSON) live in LegacyRunArtifactsStore — separate class because
 // only the not-yet-migrated plan/code/verify/pr phases consume them and
 // we want one owner per directory tree.
 export class ArtifactsStore {
+  private readonly stateDir: string | null;
+
+  constructor(opts: ArtifactsStoreOptions = {}) {
+    this.stateDir = opts.stateDir ? resolve(opts.stateDir) : null;
+  }
+
+  stateRoot(cwd: string): string {
+    return this.stateDir ?? join(resolve(cwd), ".harness");
+  }
+
+  taskDir(cwd: string, taskId: string): string {
+    return join(this.stateRoot(cwd), "tasks", taskId);
+  }
+
+  currentArtifactDir(cwd: string, taskId: string): string {
+    return join(this.taskDir(cwd, taskId), "artifacts", "current");
+  }
+
+  currentArtifactPath(cwd: string, taskId: string, kind: ArtifactKind): string {
+    return join(this.currentArtifactDir(cwd, taskId), artifactFileName(kind));
+  }
+
+  artifactHistoryDir(cwd: string, taskId: string, kind: ArtifactKind): string {
+    return join(this.taskDir(cwd, taskId), "artifacts", "history", kind);
+  }
+
+  taskRunDir(cwd: string, taskId: string, runId: string): string {
+    return join(this.taskDir(cwd, taskId), "runs", runId);
+  }
+
   artifactDir(cwd: string, taskId: string): string {
     return join(cwd, ".harness", taskId);
   }
@@ -170,7 +209,8 @@ export class ArtifactsStore {
   }
 
   async readArtifact(cwd: string, taskId: string, kind: ArtifactKind): Promise<Artifact | null> {
-    const path = this.artifactPath(cwd, taskId, kind);
+    await this.syncMirrorIfNewer(cwd, taskId, kind);
+    const path = this.currentArtifactPath(cwd, taskId, kind);
     if (!existsSync(path)) return null;
     const raw = await readFile(path, "utf8");
     return parseArtifact(raw);
@@ -200,12 +240,50 @@ export class ArtifactsStore {
   // guarantees rename is atomic on POSIX; readers either see the prior file
   // or the new one, never a half-written one.
   async writeArtifact(cwd: string, taskId: string, art: Artifact): Promise<void> {
-    const dir = this.artifactDir(cwd, taskId);
-    await mkdir(dir, { recursive: true });
-    const finalPath = this.artifactPath(cwd, taskId, art.fm.kind);
-    const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(tmpPath, stringifyArtifact(art));
-    await rename(tmpPath, finalPath);
+    await this.writeArtifactWithRevision(cwd, taskId, art);
+  }
+
+  private async writeArtifactWithRevision(
+    cwd: string,
+    taskId: string,
+    art: Artifact,
+  ): Promise<ArtifactWriteResult> {
+    const serialized = stringifyArtifact(art);
+    const currentPath = this.currentArtifactPath(cwd, taskId, art.fm.kind);
+    const mirrorPath = this.artifactPath(cwd, taskId, art.fm.kind);
+    await atomicWrite(currentPath, serialized);
+    await atomicWrite(mirrorPath, serialized);
+    const artifactRevisionId = await this.writeRevision(cwd, taskId, art, serialized);
+    return { artifact: art, artifactRevisionId };
+  }
+
+  private async writeRevision(
+    cwd: string,
+    taskId: string,
+    art: Artifact,
+    serialized: string,
+  ): Promise<string> {
+    const revisionId = createRevisionId();
+    const revisionPath = join(
+      this.artifactHistoryDir(cwd, taskId, art.fm.kind),
+      `${revisionId}.${artifactFileName(art.fm.kind)}`,
+    );
+    await atomicWrite(revisionPath, serialized);
+    return revisionId;
+  }
+
+  private async syncMirrorIfNewer(cwd: string, taskId: string, kind: ArtifactKind): Promise<void> {
+    const currentPath = this.currentArtifactPath(cwd, taskId, kind);
+    const mirrorPath = this.artifactPath(cwd, taskId, kind);
+    if (!existsSync(mirrorPath)) return;
+    if (existsSync(currentPath)) {
+      const [mirrorStats, currentStats] = await Promise.all([stat(mirrorPath), stat(currentPath)]);
+      if (mirrorStats.mtimeMs <= currentStats.mtimeMs) return;
+    }
+    const raw = await readFile(mirrorPath, "utf8");
+    const artifact = parseArtifact(raw);
+    await atomicWrite(currentPath, raw);
+    await this.writeRevision(cwd, taskId, artifact, raw);
   }
 
   async readBrainstormMockManifest(
@@ -291,31 +369,90 @@ export class ArtifactsStore {
     cwd: string,
     taskId: string,
     kind: ArtifactKind,
-    gitRef: string,
+    revisionId: string,
   ): Promise<Artifact | null> {
+    const revisionPath = join(
+      this.artifactHistoryDir(cwd, taskId, kind),
+      `${revisionId}.${artifactFileName(kind)}`,
+    );
+    if (existsSync(revisionPath)) {
+      const raw = await readFile(revisionPath, "utf8");
+      return parseArtifact(raw);
+    }
+
     const relPath = `.harness/${taskId}/${artifactFileName(kind)}`;
-    const git = simpleGit(cwd);
     try {
-      const raw = await git.show([`${gitRef}:${relPath}`]);
+      const git = simpleGit(cwd);
+      const raw = await git.show([`${revisionId}:${relPath}`]);
       if (!raw) return null;
       return parseArtifact(raw);
     } catch {
-      // simple-git rejects with a stderr-bearing GitError when the ref or
-      // file is missing. Either case is "no baseline available" — treat as
-      // null and let the caller decide how to render the empty state.
-      return null;
+      try {
+        const git = simpleGit(cwd);
+        const currentRelPath = join(
+          ".harness",
+          "tasks",
+          taskId,
+          "artifacts",
+          "current",
+          artifactFileName(kind),
+        );
+        const raw = await git.show([`${revisionId}:${currentRelPath}`]);
+        if (!raw) return null;
+        return parseArtifact(raw);
+      } catch {
+        return null;
+      }
     }
   }
 
-  // Find the commit hash of the diff baseline for an artifact. The baseline
-  // is the artifact's commit at the most recent brainstorm_revision_requested
-  // timestamp (so the diff shows "what the agent changed since the user
-  // last asked for revisions"). Falls back to the parent of the first
-  // "mark <kind> as ready" commit when no revisions have been filed yet, so
-  // the user always sees the agent's authored content vs the empty scaffold.
-  // Returns null when there's no usable baseline (artifact never marked
-  // ready and no revisions filed).
   async findDiffBaseline(
+    cwd: string,
+    taskId: string,
+    kind: ArtifactKind,
+    revisionTs: string | null,
+  ): Promise<string | null> {
+    await this.syncMirrorIfNewer(cwd, taskId, kind);
+    const revisions = await this.readRevisionIndex(cwd, taskId, kind);
+    if (revisions.length > 0) {
+      if (revisionTs) {
+        const before = revisions
+          .filter((r) => r.updatedAt <= revisionTs)
+          .at(-1);
+        return before?.revisionId ?? null;
+      }
+      return revisions[0]?.revisionId ?? null;
+    }
+
+    return this.findLegacyGitDiffBaseline(cwd, taskId, kind, revisionTs);
+  }
+
+  private async readRevisionIndex(
+    cwd: string,
+    taskId: string,
+    kind: ArtifactKind,
+  ): Promise<ReadonlyArray<{ readonly revisionId: string; readonly updatedAt: string }>> {
+    const dir = this.artifactHistoryDir(cwd, taskId, kind);
+    if (!existsSync(dir)) return [];
+    const entries = await readdir(dir);
+    const suffix = `.${artifactFileName(kind)}`;
+    const parsed = await Promise.all(
+      entries
+        .filter((entry) => entry.endsWith(suffix))
+        .map(async (entry) => {
+          const path = join(dir, entry);
+          const stats = await stat(path);
+          const revisionId = entry.slice(0, -suffix.length);
+          return {
+            revisionId,
+            updatedAt: revisionTimestamp(revisionId) ?? stats.mtime.toISOString(),
+          };
+        }),
+    );
+    return [...parsed].sort((a, b) => a.revisionId.localeCompare(b.revisionId));
+  }
+
+  private async findLegacyGitDiffBaseline(
     cwd: string,
     taskId: string,
     kind: ArtifactKind,
@@ -325,10 +462,6 @@ export class ArtifactsStore {
     const git = simpleGit(cwd);
 
     if (revisionTs) {
-      // The newest commit touching this file at-or-before the revision
-      // timestamp is the version the user was looking at when they asked
-      // for changes. simple-git's log options object inconsistently quotes
-      // timestamps; using raw avoids that fragility.
       try {
         const out = await git.raw([
           "log",
@@ -346,20 +479,13 @@ export class ArtifactsStore {
       }
     }
 
-    // No revisions yet. Preferred anchor: the parent of the first "mark
-    // <kind> as ready" commit so the diff shows agent-authored vs scaffold.
-    // Fallback: the first (chronologically earliest) commit touching the
-    // artifact, used as the baseline directly (= scaffold body) so the
-    // diff surfaces the agent's still-uncommitted writes against the
-    // initial draft. This keeps the diff useful in the common case where
-    // mark_ready writes the artifact but doesn't commit.
     let log;
     try {
       log = await git.log({ file: relPath });
     } catch {
       return null;
     }
-    const all = [...log.all].reverse(); // chronological order
+    const all = [...log.all].reverse();
     const ready = all.find((c) => c.message.includes(`mark ${kind} as ready`));
     if (ready) {
       try {
@@ -374,69 +500,52 @@ export class ArtifactsStore {
     return first ? first.hash : null;
   }
 
-  // Move the current phase's files into runs/<runId>/ on the same task
-  // branch, then commit the move. Brainstorm restarts archive brainstorm-owned
-  // inputs; plan restarts archive plan-owned outputs while preserving
-  // brainstorm-approved design.md/spec.md for the next preflight.
-  //
-  // Files (and the research/ directory) that don't exist are silently
-  // skipped — partial-state runs still archive cleanly.
+  /*
+   * Move the current phase's files into runs/<runId>/ in central task state.
+   * Worktree mirror files are removed as cleanup only; dashboard/API reads do
+   * not depend on them after archive.
+   */
   async archiveCurrentRun(
     cwd: string,
     taskId: string,
     runId: string,
     phase: "brainstorm" | "plan",
   ): Promise<void> {
-    const baseDir = this.artifactDir(cwd, taskId);
-    const archiveDir = join(baseDir, "runs", runId);
+    const archiveDir = this.taskRunDir(cwd, taskId, runId);
     await mkdir(archiveDir, { recursive: true });
     const candidates = archiveFileNames(phase);
-    const moved: string[] = [];
     for (const name of candidates) {
-      const src = join(baseDir, name);
-      if (!existsSync(src)) continue;
-      const dst = join(archiveDir, name);
-      await rename(src, dst);
-      moved.push(join(".harness", taskId, "runs", runId, name));
+      await moveFirstExisting(
+        [
+          join(this.currentArtifactDir(cwd, taskId), name),
+          join(this.artifactDir(cwd, taskId), name),
+        ],
+        join(archiveDir, name),
+      );
     }
-    const movedDirs = archiveDirectoryNames(phase);
-    for (const name of movedDirs) {
-      const src = join(baseDir, name);
-      if (!existsSync(src)) continue;
-      const dst = join(archiveDir, name);
-      await rename(src, dst);
+    for (const name of archiveDirectoryNames(phase)) {
+      await moveFirstExisting(
+        [
+          join(this.taskDir(cwd, taskId), name),
+          join(this.artifactDir(cwd, taskId), name),
+        ],
+        join(archiveDir, name),
+      );
     }
-    if (moved.length === 0) return;
-    const git = simpleGit(cwd);
-    // .harness is gitignored — same -f trick as setArtifactStatus.
-    await withGitLockDiagnostic(
-      { taskId, operation: `archive ${phase} run ${runId}` },
-      async () => {
-        await git.raw([
-          "add",
-          "-f",
-          "--",
-          ...moved,
-          // Stage deletions of the originals too so the commit captures the move.
-          join(".harness", taskId),
-        ]);
-        await git.commit(`chore(${taskId}): archive ${phase} run ${runId}`);
-      },
-    );
   }
 
-  // Apply a user-authored edit to an artifact. Body is replaced verbatim;
-  // frontmatter is preserved (only `status`, `last_updated`, and
-  // `last_updated_by` change). Commits on the worktree's branch with a
-  // human-attribution message so the diff endpoint can locate this revision
-  // explicitly. Returns the new artifact + commit SHA so the caller can
-  // surface it in the brainstorm_artifact_edited event.
+  /*
+   * Apply a user-authored edit to an artifact. Body is replaced verbatim;
+   * frontmatter is preserved (only `status`, `last_updated`, and
+   * `last_updated_by` change). Returns a central artifact revision id. The
+   * `commitSha` alias remains for older dashboard/event consumers.
+   */
   async applyHumanEdit(
     cwd: string,
     taskId: string,
     kind: ArtifactKind,
     body: string,
-  ): Promise<{ artifact: Artifact; commitSha: string }> {
+  ): Promise<{ artifact: Artifact; artifactRevisionId: string; commitSha: string }> {
     const cur = await this.readArtifact(cwd, taskId, kind);
     if (!cur) throw new Error(`artifact ${kind}.md not found for ${taskId}`);
     const next: Artifact = {
@@ -448,21 +557,18 @@ export class ArtifactsStore {
       },
       body,
     };
-    await this.writeArtifact(cwd, taskId, next);
-    const git = simpleGit(cwd);
-    const fileName = artifactFileName(kind);
-    const commit = await withGitLockDiagnostic(
-      { taskId, operation: `human edit ${fileName}` },
-      async () => {
-        await git.raw(["add", "-f", join(".harness", taskId, fileName)]);
-        return git.commit(`human(${taskId}): edit ${fileName}`);
-      },
-    );
-    return { artifact: next, commitSha: commit.commit };
+    const result = await this.writeArtifactWithRevision(cwd, taskId, next);
+    return {
+      artifact: result.artifact,
+      artifactRevisionId: result.artifactRevisionId,
+      commitSha: result.artifactRevisionId,
+    };
   }
 
-  // Helper used by the approval gate: read the artifact, mutate its status,
-  // bump last_updated, write atomically, then commit on the worktree's branch.
+  /*
+   * Helper used by approval gates: mutate frontmatter, write atomically to
+   * central state + mirror, and record a revision. No git commit is created.
+   */
   async setArtifactStatus(
     cwd: string,
     taskId: string,
@@ -481,20 +587,59 @@ export class ArtifactsStore {
       },
       body: cur.body,
     };
-    await this.writeArtifact(cwd, taskId, next);
-    const git = simpleGit(cwd);
-    // .harness/ is gitignored at the repo root; force-add so the commit
-    // captures the artifact-status flip just like the scaffolding commit
-    // does (see scaffold-brainstorm.ts).
-    await withGitLockDiagnostic(
-      { taskId, operation: `mark ${kind} as ${status}` },
-      async () => {
-        await git.raw(["add", "-f", join(".harness", taskId, artifactFileName(kind))]);
-        await git.commit(`chore(${taskId}): mark ${kind} as ${status}`);
-      },
-    );
+    await this.writeArtifactWithRevision(cwd, taskId, next);
     return next;
   }
+
+}
+
+async function atomicWrite(path: string, content: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
+  await writeFile(tmpPath, content);
+  await rename(tmpPath, path);
+}
+
+function createRevisionId(): string {
+  const sequence = nextRevisionSequence();
+  return `${new Date().toISOString().replace(/[:.]/g, "-")}-${sequence}-${randomUUID()}`;
+}
+
+let lastRevisionTimeMs = 0;
+let revisionSequence = 0;
+
+function nextRevisionSequence(): string {
+  const now = Date.now();
+  if (now === lastRevisionTimeMs) {
+    revisionSequence += 1;
+  } else {
+    lastRevisionTimeMs = now;
+    revisionSequence = 0;
+  }
+  return revisionSequence.toString().padStart(6, "0");
+}
+
+function revisionTimestamp(revisionId: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z-/.exec(revisionId);
+  if (!match) return null;
+  const [, dateHour, minute, second, millisecond] = match;
+  return `${dateHour}:${minute}:${second}.${millisecond}Z`;
+}
+
+async function moveFirstExisting(sources: ReadonlyArray<string>, destination: string): Promise<void> {
+  const src = sources.find((candidate) => existsSync(candidate));
+  if (!src) return;
+  await mkdir(dirname(destination), { recursive: true });
+  await rm(destination, { recursive: true, force: true });
+  await rename(src, destination).catch(async () => {
+    await cp(src, destination, { recursive: true });
+    await rm(src, { recursive: true, force: true });
+  });
+  await Promise.all(
+    sources
+      .filter((candidate) => candidate !== src && existsSync(candidate))
+      .map((candidate) => rm(candidate, { recursive: true, force: true })),
+  );
 }
 
 function archiveFileNames(phase: "brainstorm" | "plan"): ReadonlyArray<string> {

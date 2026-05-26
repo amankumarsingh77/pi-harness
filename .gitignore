@@ -14,9 +14,7 @@ apps/dashboard/test-results/
 .env.harness
 .harness/
 coverage
-graphify-out/cache/
-graphify-out/cost.json
-graphify-out/manifest.json
+graphify-out/
 
 # Local agent / tooling state — not project source
 .claude/

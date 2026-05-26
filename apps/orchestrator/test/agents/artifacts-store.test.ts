@@ -47,11 +47,14 @@ describe("LegacyRunArtifactsStore", () => {
 
 describe("ArtifactsStore", () => {
   let cwd: string;
+  let stateDir: string;
+  let git: ReturnType<typeof simpleGit>;
 
   beforeEach(async () => {
     cwd = join(scratch, "wt");
+    stateDir = join(scratch, "state");
     await mkdir(cwd, { recursive: true });
-    const git = simpleGit(cwd);
+    git = simpleGit(cwd);
     await git.init();
     await git.addConfig("user.email", "test@example.com", false, "local");
     await git.addConfig("user.name", "Test", false, "local");
@@ -75,23 +78,25 @@ describe("ArtifactsStore", () => {
   };
 
   it("readArtifact returns null when missing", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     const got = await store.readArtifact(cwd, "T-1", "design");
     expect(got).toBeNull();
   });
 
-  it("write + read round-trips an artifact", async () => {
-    const store = new ArtifactsStore();
+  it("write + read round-trips an artifact through central state and worktree mirror", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
     const got = await store.readArtifact(cwd, "T-1", "design");
     expect(got?.fm).toEqual(sample.fm);
     expect(got?.body.trim()).toBe(sample.body.trim());
+    expect(await readFile(store.currentArtifactPath(cwd, "T-1", "design"), "utf8")).toContain("# Design");
+    expect(await readFile(store.artifactPath(cwd, "T-1", "design"), "utf8")).toContain("# Design");
   });
 
   it("writeArtifact is atomic (no .tmp file remains on success)", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
-    const dir = store.artifactDir(cwd, "T-1");
+    const dir = store.currentArtifactDir(cwd, "T-1");
     const files = await readFile(join(dir, "design.md"), "utf8");
     expect(files).toContain("status: draft");
     const fs = await import("node:fs");
@@ -99,21 +104,51 @@ describe("ArtifactsStore", () => {
     expect(remaining).toHaveLength(0);
   });
 
-  it("setArtifactStatus mutates frontmatter and commits", async () => {
-    const store = new ArtifactsStore();
+  it("imports a newer worktree mirror into central state on read", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
-    const git = simpleGit(cwd);
-    await git.add([join(".harness", "T-1", "design.md")]);
-    await git.commit("seed");
+    await new Promise((r) => setTimeout(r, 20));
+    await writeFile(
+      store.artifactPath(cwd, "T-1", "design"),
+      [
+        "---",
+        "task: T-1",
+        "kind: design",
+        "parent: null",
+        "status: draft",
+        "branch: pi/T-1",
+        "last_updated: '2026-05-09T00:00:01.000Z'",
+        "last_updated_by: brainstorm-agent",
+        "---",
+        "# Design",
+        "",
+        "mirror-authored body",
+        "",
+      ].join("\n"),
+    );
+
+    const got = await store.readArtifact(cwd, "T-1", "design");
+
+    expect(got?.body).toContain("mirror-authored body");
+    expect(await readFile(store.currentArtifactPath(cwd, "T-1", "design"), "utf8")).toContain(
+      "mirror-authored body",
+    );
+  });
+
+  it("setArtifactStatus mutates frontmatter and records a revision without committing", async () => {
+    const store = new ArtifactsStore({ stateDir });
+    await store.writeArtifact(cwd, "T-1", sample);
     const updated = await store.setArtifactStatus(cwd, "T-1", "design", "approved", "user");
     expect(updated.fm.status).toBe("approved");
     expect(updated.fm.last_updated_by).toBe("user");
+    const baseline = await store.findDiffBaseline(cwd, "T-1", "design", null);
+    expect(baseline).not.toBeNull();
     const log = await git.log();
-    expect(log.latest?.message).toContain("mark design as approved");
+    expect(log.latest?.message).toBe("init");
   });
 
-  it("archiveCurrentRun moves brainstorm-owned files into runs/<runId>/ and commits", async () => {
-    const store = new ArtifactsStore();
+  it("archiveCurrentRun moves brainstorm-owned files into central runs/<runId>", async () => {
+    const store = new ArtifactsStore({ stateDir });
     // Lay down the four files the archive helper relocates.
     await store.writeArtifact(cwd, "T-1", sample);
     const spec: Artifact = {
@@ -121,121 +156,90 @@ describe("ArtifactsStore", () => {
       body: "# Spec\n\nstuff\n",
     };
     await store.writeArtifact(cwd, "T-1", spec);
-    const dir = join(cwd, ".harness", "T-1");
+    const dir = store.artifactDir(cwd, "T-1");
     await writeFile(join(dir, "brainstorm.jsonl"), "{\"kind\":\"x\"}\n");
     await writeFile(join(dir, "pi-session.jsonl"), "session-data\n");
 
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1")]);
-    await git.commit("seed");
-
     await store.archiveCurrentRun(cwd, "T-1", "r_old", "brainstorm");
 
-    // Originals gone, archive populated.
     const { existsSync } = await import("node:fs");
-    expect(existsSync(join(dir, "design.md"))).toBe(false);
-    expect(existsSync(join(dir, "spec.md"))).toBe(false);
-    expect(existsSync(join(dir, "brainstorm.jsonl"))).toBe(false);
-    expect(existsSync(join(dir, "pi-session.jsonl"))).toBe(false);
-    const archive = join(dir, "runs", "r_old");
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "design"))).toBe(false);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "spec"))).toBe(false);
+    const archive = join(store.taskRunDir(cwd, "T-1", "r_old"));
     expect(existsSync(join(archive, "design.md"))).toBe(true);
     expect(existsSync(join(archive, "spec.md"))).toBe(true);
     expect(existsSync(join(archive, "brainstorm.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "pi-session.jsonl"))).toBe(true);
-
-    const log = await git.log();
-    expect(log.latest?.message).toContain("archive brainstorm run r_old");
   });
 
   it("archiveCurrentRun is idempotent on missing files (only what exists is moved)", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     // Only design.md exists; spec.md, jsonl files missing.
     await store.writeArtifact(cwd, "T-1", sample);
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    await git.commit("seed");
-
     await store.archiveCurrentRun(cwd, "T-1", "r_partial", "brainstorm");
 
     const { existsSync } = await import("node:fs");
-    expect(existsSync(join(cwd, ".harness", "T-1", "design.md"))).toBe(false);
-    expect(existsSync(join(cwd, ".harness", "T-1", "runs", "r_partial", "design.md"))).toBe(true);
-    // The non-existent files don't crash and don't appear in archive.
-    expect(existsSync(join(cwd, ".harness", "T-1", "runs", "r_partial", "spec.md"))).toBe(false);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "design"))).toBe(false);
+    expect(existsSync(join(store.taskRunDir(cwd, "T-1", "r_partial"), "design.md"))).toBe(true);
+    expect(existsSync(join(store.taskRunDir(cwd, "T-1", "r_partial"), "spec.md"))).toBe(false);
   });
 
-  it("getArtifactAt returns the artifact body at a specific commit", async () => {
-    const store = new ArtifactsStore();
+  it("getArtifactAt returns the artifact body at a specific revision", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    const commit = await git.commit("v1");
+    const revision = await store.findDiffBaseline(cwd, "T-1", "design", null);
+    if (!revision) throw new Error("missing revision");
 
-    // Update + commit a second version.
     await store.writeArtifact(cwd, "T-1", { fm: sample.fm, body: "v2 body\n" });
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    await git.commit("v2");
 
-    const v1 = await store.getArtifactAt(cwd, "T-1", "design", commit.commit);
+    const v1 = await store.getArtifactAt(cwd, "T-1", "design", revision);
     expect(v1?.body).toBe("# Design\n\nbody\n");
-    const v2 = await store.getArtifactAt(cwd, "T-1", "design", "HEAD");
-    expect(v2?.body).toBe("v2 body\n");
   });
 
   it("getArtifactAt returns null when the ref is unknown or file missing at ref", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     expect(
       await store.getArtifactAt(cwd, "T-1", "design", "nonexistent-ref"),
     ).toBeNull();
-    // Ref exists (HEAD) but the file doesn't.
-    expect(await store.getArtifactAt(cwd, "T-1", "design", "HEAD")).toBeNull();
   });
 
-  it("findDiffBaseline anchors to the parent of the first 'mark ready' commit when no revisions", async () => {
-    const store = new ArtifactsStore();
+  it("findDiffBaseline anchors to the first recorded revision when no revisions were requested", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    const initial = await git.commit("scaffold");
-    // Update body, then mark ready.
     await store.writeArtifact(cwd, "T-1", { fm: sample.fm, body: "filled\n" });
     await store.setArtifactStatus(cwd, "T-1", "design", "ready", "agent");
 
     const baseline = await store.findDiffBaseline(cwd, "T-1", "design", null);
-    expect(baseline).toBe(initial.commit);
+    if (!baseline) throw new Error("missing baseline");
+    const art = await store.getArtifactAt(cwd, "T-1", "design", baseline);
+    expect(art?.body).toBe("# Design\n\nbody\n");
   });
 
-  it("findDiffBaseline anchors to the artifact commit at-or-before the revision ts", async () => {
-    const store = new ArtifactsStore();
+  it("findDiffBaseline anchors to the artifact revision at-or-before the revision ts", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    const v1 = await git.commit("v1");
     // Wait one ms so timestamps don't collide on coarse clocks.
     await new Promise((r) => setTimeout(r, 1100));
     const revisionTs = new Date().toISOString();
     await new Promise((r) => setTimeout(r, 1100));
     await store.writeArtifact(cwd, "T-1", { fm: sample.fm, body: "v2\n" });
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    await git.commit("v2");
 
     const baseline = await store.findDiffBaseline(cwd, "T-1", "design", revisionTs);
-    expect(baseline).toBe(v1.commit);
+    if (!baseline) throw new Error("missing baseline");
+    const art = await store.getArtifactAt(cwd, "T-1", "design", baseline);
+    expect(art?.body).toBe("# Design\n\nbody\n");
   });
 
   it("findDiffBaseline returns null when no commits touch the artifact", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     expect(await store.findDiffBaseline(cwd, "T-1", "design", null)).toBeNull();
   });
 
-  it("applyHumanEdit replaces body, sets status to human_edited, commits", async () => {
-    const store = new ArtifactsStore();
+  it("applyHumanEdit replaces body, sets status to human_edited, and returns a revision id", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "design.md")]);
-    await git.commit("seed");
 
-    const { artifact, commitSha } = await store.applyHumanEdit(
+    const { artifact, artifactRevisionId, commitSha } = await store.applyHumanEdit(
       cwd,
       "T-1",
       "design",
@@ -244,28 +248,27 @@ describe("ArtifactsStore", () => {
     expect(artifact.fm.status).toBe("human_edited");
     expect(artifact.fm.last_updated_by).toBe("human");
     expect(artifact.body).toBe("# Design\n\nuser-authored body\n");
-    expect(commitSha.length).toBeGreaterThan(0);
+    expect(artifactRevisionId.length).toBeGreaterThan(0);
+    expect(commitSha).toBe(artifactRevisionId);
 
     // Re-read confirms the disk contents match what was returned.
     const reread = await store.readArtifact(cwd, "T-1", "design");
     expect(reread?.fm.status).toBe("human_edited");
     expect(reread?.body).toBe("# Design\n\nuser-authored body\n");
 
-    // Commit message has the human-attribution prefix the diff endpoint can
-    // recognize.
     const log = await git.log();
-    expect(log.latest?.message).toContain("human(T-1): edit design.md");
+    expect(log.latest?.message).toBe("init");
   });
 
   it("applyHumanEdit throws when the artifact doesn't exist yet", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await expect(
       store.applyHumanEdit(cwd, "T-1", "design", "anything"),
     ).rejects.toThrow(/not found/);
   });
 
   it("listArtifacts returns design then spec when both present", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
     const spec: Artifact = {
       fm: { ...sample.fm, kind: "spec", parent: "design.md" },
@@ -331,7 +334,7 @@ describe("ArtifactsStore", () => {
   };
 
   it("plan + YAML plan artifacts round-trip with correct file extensions", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", planSample);
     await store.writeArtifact(cwd, "T-1", scenariosSample);
     await store.writeArtifact(cwd, "T-1", blastRadiusSample);
@@ -359,20 +362,19 @@ describe("ArtifactsStore", () => {
     expect(executionDag?.body).toContain("version: 1");
   });
 
-  it("setArtifactStatus on scenarios commits with the .yaml file path", async () => {
-    const store = new ArtifactsStore();
+  it("setArtifactStatus on scenarios records a .yaml revision without committing", async () => {
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", scenariosSample);
-    const git = simpleGit(cwd);
-    await git.raw(["add", "-f", join(".harness", "T-1", "scenarios.yaml")]);
-    await git.commit("seed");
     const updated = await store.setArtifactStatus(cwd, "T-1", "scenarios", "ready", "plan-agent");
     expect(updated.fm.status).toBe("ready");
+    const baseline = await store.findDiffBaseline(cwd, "T-1", "scenarios", null);
+    expect(baseline).not.toBeNull();
     const log = await git.log();
-    expect(log.latest?.message).toContain("mark scenarios as ready");
+    expect(log.latest?.message).toBe("init");
   });
 
   it("listArtifacts returns all plan kinds when present", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
     await store.writeArtifact(cwd, "T-1", { fm: { ...sample.fm, kind: "spec", parent: "design.md" }, body: "# Spec\n" });
     await store.writeArtifact(cwd, "T-1", planSample);
@@ -391,7 +393,7 @@ describe("ArtifactsStore", () => {
   });
 
   it("listArtifacts honors a kinds filter", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
     await store.writeArtifact(cwd, "T-1", planSample);
     const list = await store.listArtifacts(cwd, "T-1", ["plan"]);
@@ -399,7 +401,7 @@ describe("ArtifactsStore", () => {
   });
 
   it("archiveCurrentRun moves plan artifacts + research/ directory but preserves design and spec", async () => {
-    const store = new ArtifactsStore();
+    const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);
     await store.writeArtifact(cwd, "T-1", {
       fm: { ...sample.fm, kind: "spec", parent: "design.md" },
@@ -409,41 +411,26 @@ describe("ArtifactsStore", () => {
     await store.writeArtifact(cwd, "T-1", scenariosSample);
     await store.writeArtifact(cwd, "T-1", blastRadiusSample);
     await store.writeArtifact(cwd, "T-1", executionDagSample);
-    const dir = join(cwd, ".harness", "T-1");
+    const dir = store.artifactDir(cwd, "T-1");
     await writeFile(join(dir, "plan.jsonl"), "{\"kind\":\"x\"}\n");
     await writeFile(join(dir, "pi-session-plan.jsonl"), "session\n");
     await mkdir(join(dir, "research"), { recursive: true });
     await writeFile(join(dir, "research", "codebase-locator.md"), "# findings\n");
 
-    const git = simpleGit(cwd);
-    await git.raw([
-      "add",
-      "-f",
-      join(".harness", "T-1", "design.md"),
-      join(".harness", "T-1", "spec.md"),
-      join(".harness", "T-1", "plan.md"),
-      join(".harness", "T-1", "scenarios.yaml"),
-      join(".harness", "T-1", "blast-radius.yaml"),
-      join(".harness", "T-1", "execution-dag.yaml"),
-      join(".harness", "T-1", "plan.jsonl"),
-      join(".harness", "T-1", "pi-session-plan.jsonl"),
-    ]);
-    await git.commit("seed");
-
     await store.archiveCurrentRun(cwd, "T-1", "r_old", "plan");
 
     const { existsSync } = await import("node:fs");
-    expect(existsSync(join(dir, "design.md"))).toBe(true);
-    expect(existsSync(join(dir, "spec.md"))).toBe(true);
-    expect(existsSync(join(dir, "plan.md"))).toBe(false);
-    expect(existsSync(join(dir, "scenarios.yaml"))).toBe(false);
-    expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(false);
-    expect(existsSync(join(dir, "execution-dag.yaml"))).toBe(false);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "design"))).toBe(true);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "spec"))).toBe(true);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "plan"))).toBe(false);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "scenarios"))).toBe(false);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "blast-radius"))).toBe(false);
+    expect(existsSync(store.currentArtifactPath(cwd, "T-1", "execution-dag"))).toBe(false);
     expect(existsSync(join(dir, "plan.jsonl"))).toBe(false);
     expect(existsSync(join(dir, "pi-session-plan.jsonl"))).toBe(false);
     expect(existsSync(join(dir, "research"))).toBe(false);
 
-    const archive = join(dir, "runs", "r_old");
+    const archive = store.taskRunDir(cwd, "T-1", "r_old");
     expect(existsSync(join(archive, "design.md"))).toBe(false);
     expect(existsSync(join(archive, "spec.md"))).toBe(false);
     expect(existsSync(join(archive, "plan.md"))).toBe(true);

@@ -105,7 +105,13 @@ async function makeReadyWorktree(taskId: string): Promise<string> {
 describe("http", () => {
   const { stateDir, runs, events } = createBareTestStores();
   const cancellation = new CancellationRegistry();
-  const app = buildServer({ runs, events, runsDir: tmpdir(), cancellation });
+  const app = buildServer({
+    runs,
+    events,
+    runsDir: tmpdir(),
+    cancellation,
+    artifacts: new ArtifactsStore(),
+  });
 
   beforeAll(async () => {
     await app.ready();
@@ -787,7 +793,8 @@ describe("http", () => {
 
     // Old artifacts archived.
     const { existsSync } = await import("node:fs");
-    const archive = join(worktree, ".harness", t.id, "runs", activeRun.id);
+    const restartStore = new ArtifactsStore();
+    const archive = restartStore.taskRunDir(worktree, t.id, activeRun.id);
     expect(existsSync(join(archive, "brainstorm.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "design.md"))).toBe(true);
     expect(existsSync(join(archive, "spec.md"))).toBe(true);
@@ -796,7 +803,6 @@ describe("http", () => {
     expect(existsSync(join(archive, "mocks", "manifest.json"))).toBe(true);
 
     // Fresh artifacts re-scaffolded in draft state.
-    const restartStore = new ArtifactsStore();
     const design = await restartStore.readArtifact(worktree, t.id, "design");
     const spec = await restartStore.readArtifact(worktree, t.id, "spec");
     expect(design?.fm.status).toBe("draft");
