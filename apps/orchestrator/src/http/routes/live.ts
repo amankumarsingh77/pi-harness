@@ -11,6 +11,7 @@ type LiveQuery = {
   readonly scope?: string;
   readonly taskId?: string;
   readonly runId?: string;
+  readonly after?: string;
 };
 
 export function registerLiveEventStream(
@@ -45,8 +46,12 @@ export function registerLiveEventStream(
       );
     };
 
-    const afterSequence = parseLastEventId(req.headers["last-event-id"]);
+    const afterSequence = Math.max(
+      parseCursor(req.headers["last-event-id"]),
+      parseCursor(req.query.after),
+    );
     const unsub = deps.liveEvents.subscribe(filter, send);
+    reply.raw.write(": connected\n\n");
 
     if ("scope" in filter && filter.scope === "dashboard") {
       send(await dashboardSnapshot(deps));
@@ -67,6 +72,10 @@ export function registerLiveEventStream(
 
     return new Promise<never>(() => {});
   });
+
+  app.get("/api/live/cursor", async () => ({
+    sequence: await deps.liveEvents.latestSequence(),
+  }));
 }
 
 function parseFilter(query: LiveQuery): LiveEventFilter | null {
@@ -80,7 +89,7 @@ function parseFilter(query: LiveQuery): LiveEventFilter | null {
   return null;
 }
 
-function parseLastEventId(value: string | string[] | undefined): number {
+function parseCursor(value: string | string[] | undefined): number {
   if (typeof value !== "string") return 0;
   const sequence = Number.parseInt(value, 10);
   return Number.isFinite(sequence) && sequence > 0 ? sequence : 0;

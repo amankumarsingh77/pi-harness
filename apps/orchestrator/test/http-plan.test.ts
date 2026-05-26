@@ -1,9 +1,5 @@
-import "dotenv/config";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import simpleGit from "simple-git";
-import { createDb } from "@pi-harness/db";
-import { RunStore } from "../src/adapters/run-store.js";
-import { EventStore } from "../src/adapters/event-store.js";
 import { ArtifactsStore } from "../src/agents/artifacts-store.js";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
@@ -12,6 +8,7 @@ import { tmpdir } from "node:os";
 import { buildServer } from "../src/http/server.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
 import type { Artifact, ArtifactKind, ArtifactStatus } from "@pi-harness/shared";
+import { createBareTestStores, resetTestStore } from "./helpers/stores.js";
 
 const validScenariosBody = `scenarios:
   - id: s1
@@ -211,26 +208,27 @@ class ObservedArtifactsStore extends ArtifactsStore {
   }
 }
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
-
 describe("http /api/tasks/:id/plan routes", () => {
-  const { db, client } = createDb(url);
-  const runs = new RunStore(db);
-  const events = new EventStore(db);
+  const { stateDir, runs, events } = createBareTestStores();
   const cancellation = new CancellationRegistry();
-  const app = buildServer({ runs, events, runsDir: tmpdir(), cancellation });
+  const app = buildServer({
+    runs,
+    events,
+    runsDir: tmpdir(),
+    cancellation,
+    artifacts: new ArtifactsStore(),
+  });
 
   beforeAll(async () => {
     await app.ready();
   });
 
   beforeEach(async () => {
-    await db.execute("delete from tasks");
+    await resetTestStore(stateDir);
   });
 
   afterAll(async () => {
     await app.close();
-    await client.end();
   });
 
   it("GET returns null artifacts when task has no worktree", async () => {
@@ -374,7 +372,8 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(existsSync(join(dir, "blast-radius.yaml"))).toBe(true);
     expect(existsSync(join(dir, "execution-dag.yaml"))).toBe(true);
 
-    const archive = join(dir, "runs", activeRun.id);
+    const store = new ArtifactsStore();
+    const archive = store.taskRunDir(wt, t.id, activeRun.id);
     expect(existsSync(join(archive, "design.md"))).toBe(false);
     expect(existsSync(join(archive, "spec.md"))).toBe(false);
     expect(existsSync(join(archive, "plan.md"))).toBe(true);
@@ -385,7 +384,6 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(existsSync(join(archive, "pi-session-plan.jsonl"))).toBe(true);
     expect(existsSync(join(archive, "research", "codebase-scout.md"))).toBe(true);
 
-    const store = new ArtifactsStore();
     const plan = await store.readArtifact(wt, t.id, "plan");
     const scenarios = await store.readArtifact(wt, t.id, "scenarios");
     const blastRadius = await store.readArtifact(wt, t.id, "blast-radius");

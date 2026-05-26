@@ -1,32 +1,21 @@
-import "dotenv/config";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import { createDb } from "@pi-harness/db";
-import { RunStore } from "../src/adapters/run-store.js";
-import { EventStore } from "../src/adapters/event-store.js";
-import { LiveEventStore } from "../src/adapters/live-event-store.js";
 import { ClaimLedgerStore, MissionStore } from "../src/adapters/mission-store.js";
+import { LiveEventStore } from "../src/adapters/live-event-store.js";
 import { buildServer } from "../src/http/server.js";
+import { createBareTestStores, resetTestStore } from "./helpers/stores.js";
 
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
 const CreatedTaskResponseSchema = z.object({ id: z.string().min(1) });
 
 describe("mission routes", () => {
-  const { db, client } = createDb(url);
-  const runs = new RunStore(db);
-  const events = new EventStore(db);
-  const liveEvents = new LiveEventStore(db);
+  const { stateDir: storeDir, runs, events } = createBareTestStores();
+  const liveEvents = new LiveEventStore({ stateDir: storeDir });
 
   beforeEach(async () => {
-    await db.execute("delete from live_events");
-    await db.execute("delete from tasks");
-  });
-
-  afterAll(async () => {
-    await client.end();
+    await resetTestStore(storeDir);
   });
 
   it("POST /api/tasks initializes mission files", async () => {

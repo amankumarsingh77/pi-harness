@@ -7,8 +7,11 @@ import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
 import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import type { EventStore } from "../../adapters/event-store.js";
-import { JsonlWriter, readJsonl } from "../../adapters/jsonl-writer.js";
-import { BrainstormEventBus } from "../../agents/brainstorm-event-bus.js";
+import { readJsonl } from "../../adapters/jsonl-writer.js";
+import {
+  PhaseEventLogStore,
+  type BrainstormPhaseEventInput,
+} from "../../adapters/phase-event-log-store.js";
 import { join } from "node:path";
 import { ValidationError } from "../../domain/errors.js";
 import { deriveBrainstormGate } from "../../agents/brainstorm-gate.js";
@@ -118,6 +121,11 @@ export function registerBrainstormRoutes(
     mutationLock: TaskMutationLock;
   },
 ): void {
+  const phaseEvents = new PhaseEventLogStore({
+    ...(deps.events !== undefined ? { events: deps.events } : {}),
+    runs: deps.runs,
+  });
+
   app.get<{ Params: { id: string } }>("/api/tasks/:id/brainstorm", async (req, reply) => {
     const task = await deps.runs.getTask(req.params.id);
     const cwd = task.worktreePath;
@@ -150,7 +158,7 @@ export function registerBrainstormRoutes(
 
   // POST /api/tasks/:id/brainstorm/answers
   // Append a batch of brainstorm_answer events to the task's
-  // brainstorm.jsonl in a single write, then wake the scheduler exactly
+  // brainstorm.jsonl through the centralized phase event log, then wake the scheduler exactly
   // once. The dashboard always submits the full question batch at once;
   // partial submission is rejected client-side. Atomic batching here
   // closes the race where the scheduler could fire mid-batch and the agent
@@ -172,19 +180,20 @@ export function registerBrainstormRoutes(
         reply.code(409);
         return { error: "no_worktree", message: "task has no worktree yet" };
       }
-      const path = join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl");
-      const w = new JsonlWriter(path);
       const now = new Date().toISOString();
-      for (const a of parsed.answers) {
-        await w.append({
-          ts: now,
+      await phaseEvents.publishMany({
+        phase: "brainstorm",
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        timestamp: new Date(now),
+        inputs: parsed.answers.map((a): BrainstormPhaseEventInput => ({
           kind: "brainstorm_answer",
           questionId: a.questionId,
           ...(a.optionId !== undefined ? { optionId: a.optionId } : {}),
           ...(a.optionIds !== undefined ? { optionIds: a.optionIds } : {}),
           ...(a.freeText !== undefined ? { freeText: a.freeText } : {}),
-        });
-      }
+        })),
+      });
       // One enqueue per batch — the agent's decide() already collects all
       // new answers since the last agent activity, so a single tick covers
       // every entry in this request.
@@ -229,15 +238,17 @@ export function registerBrainstormRoutes(
             "brainstorm artifacts are ready and awaiting your approval — request changes instead of nudging",
         };
       }
-      const path = join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl");
-      const w = new JsonlWriter(path);
       const nudgeId = `n_${randomUUID()}`;
-      await w.append({
-        ts: new Date().toISOString(),
-        kind: "brainstorm_user_nudge",
-        nudgeId,
-        comment: parsed.comment,
-        consumed: false,
+      await phaseEvents.publish({
+        phase: "brainstorm",
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        input: {
+          kind: "brainstorm_user_nudge",
+          nudgeId,
+          comment: parsed.comment,
+          consumed: false,
+        },
       });
       // Wake the agent so it picks up the nudge on the next tick.
       deps.scheduler?.enqueue(task.id);
@@ -345,43 +356,18 @@ export function registerBrainstormRoutes(
         parsed.body,
       );
 
-      // Append the edit event to JSONL + (when an active run + EventStore is
-      // wired) broadcast through the bus so SSE subscribers see it. Falling
-      // back to JSONL-only is fine — the brainstorm bundle GET still surfaces
-      // the event on the next page revalidate.
-      const activeRun = deps.events
-        ? await deps.runs.findActiveRun(task.id, "brainstorm")
-        : null;
-      if (activeRun && deps.events) {
-        const jsonl = new JsonlWriter(
-          join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl"),
-        );
-        const bus = new BrainstormEventBus({
-          eventStore: deps.events,
-          jsonl,
-          runId: activeRun.id,
-          taskId: task.id,
-        });
-        await bus.publish({
+      await phaseEvents.publish({
+        phase: "brainstorm",
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        input: {
           kind: "brainstorm_artifact_edited",
           artifact: parsed.kind,
           commitSha,
           artifactRevisionId,
           sizeDelta,
-        });
-      } else {
-        const jsonl = new JsonlWriter(
-          join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl"),
-        );
-        await jsonl.append({
-          ts: new Date().toISOString(),
-          kind: "brainstorm_artifact_edited",
-          artifact: parsed.kind,
-          commitSha,
-          artifactRevisionId,
-          sizeDelta,
-        });
-      }
+        },
+      });
 
       // Wake the agent so it can re-evaluate against the human edit.
       deps.scheduler?.enqueue(task.id);
@@ -483,11 +469,10 @@ export function registerBrainstormRoutes(
         };
       }
       const requestId = `mer_${randomUUID()}`;
-      await publishBrainstormRouteEvent({
-        runs: deps.runs,
+      await phaseEvents.publish({
+        phase: "brainstorm",
         worktreePath: task.worktreePath,
         taskId: task.id,
-        ...(deps.events ? { events: deps.events } : {}),
         input: {
           kind: "brainstorm_mock_edit_requested",
           requestId,
@@ -536,11 +521,10 @@ export function registerBrainstormRoutes(
         reply.code(404);
         return { error: "mock_not_found", message: `mock ${req.params.mockId} not found` };
       }
-      await publishBrainstormRouteEvent({
-        runs: deps.runs,
+      await phaseEvents.publish({
+        phase: "brainstorm",
         worktreePath: task.worktreePath,
         taskId: task.id,
-        ...(deps.events ? { events: deps.events } : {}),
         input: {
           kind: "brainstorm_mock_selected",
           mockId: req.params.mockId,
@@ -624,37 +608,34 @@ export function registerBrainstormRoutes(
         store: deps.artifacts,
       });
 
-      // Write the boundary marker + (optional) seed nudge to the new
-      // (now empty) JSONL. Order: nudge first so it shows up at the top of
-      // the transcript, then the system event (the dashboard renders it as a
-      // "session_reset" SystemLine).
-      const newJsonlPath = join(task.worktreePath, ".harness", task.id, "brainstorm.jsonl");
-      const w = new JsonlWriter(newJsonlPath);
+      // Create the new Run row before writing reset events so SSE replay can
+      // attach those JSONL events to the replacement run immediately.
+      const newRun = await deps.runs.createRun({ taskId: task.id, phase: "brainstorm" });
       const note = parsed.note?.trim();
+      const inputs: BrainstormPhaseEventInput[] = [];
       if (note && note.length > 0) {
-        await w.append({
-          ts: new Date().toISOString(),
+        inputs.push({
           kind: "brainstorm_user_nudge",
           nudgeId: `n_${randomUUID()}`,
           comment: note,
           consumed: false,
         });
       }
-      await w.append({
-        ts: new Date().toISOString(),
-          kind: "brainstorm_system",
-          systemKind: "session_reset",
-          data: {
-            archivedRunId: restartRun.id,
-            ...(note ? { note } : {}),
-          },
-        });
-
-      // Create the new Run row + wake the scheduler. dispatchBrainstorm in
-      // the run-loop also creates one if findActiveRun is null, but pre-
-      // creating it here means the response can return the newRunId for the
-      // dashboard to resubscribe immediately.
-      const newRun = await deps.runs.createRun({ taskId: task.id, phase: "brainstorm" });
+      inputs.push({
+        kind: "brainstorm_system",
+        systemKind: "session_reset",
+        data: {
+          archivedRunId: restartRun.id,
+          ...(note ? { note } : {}),
+        },
+      });
+      await phaseEvents.publishMany({
+        phase: "brainstorm",
+        worktreePath: task.worktreePath,
+        taskId: task.id,
+        runId: newRun.id,
+        inputs,
+      });
       deps.scheduler?.enqueue(task.id);
 
       return {
@@ -696,32 +677,3 @@ const EditMockRequestSchema = z.object({
     .transform((s) => s.trim())
     .refine((s) => s.length > 0, { message: "comment must not be blank" }),
 });
-
-async function publishBrainstormRouteEvent(opts: {
-  runs: RunStore;
-  events?: EventStore;
-  worktreePath: string;
-  taskId: string;
-  input: Parameters<BrainstormEventBus["publish"]>[0];
-}): Promise<void> {
-  const jsonl = new JsonlWriter(
-    join(opts.worktreePath, ".harness", opts.taskId, "brainstorm.jsonl"),
-  );
-  const activeRun = opts.events
-    ? await opts.runs.findActiveRun(opts.taskId, "brainstorm")
-    : null;
-  if (activeRun && opts.events) {
-    const bus = new BrainstormEventBus({
-      eventStore: opts.events,
-      jsonl,
-      runId: activeRun.id,
-      taskId: opts.taskId,
-    });
-    await bus.publish(opts.input);
-    return;
-  }
-  await jsonl.append({
-    ts: new Date().toISOString(),
-    ...opts.input,
-  });
-}

@@ -85,6 +85,12 @@ describe("useEvents", () => {
     expect(es.url).toBe("/api/live/stream?runId=run-2");
   });
 
+  it("encodes run ids through the shared live stream URL builder", () => {
+    renderHook(() => useEvents("run 2"));
+    const es = MockEventSource.instances[0]!;
+    expect(es.url).toBe("/api/live/stream?runId=run+2");
+  });
+
   it("exposes the latest event timestamp", async () => {
     const { result } = renderHook(() => useEvents("run-3"));
     const es = MockEventSource.instances[0]!;

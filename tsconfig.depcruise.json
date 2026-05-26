@@ -4,7 +4,6 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["apps/dashboard/*"],
-      "@pi-harness/db": ["packages/db/src/index.ts"],
       "@pi-harness/pi-bridge": ["packages/pi-bridge/src/index.ts"],
       "@pi-harness/shared": ["packages/shared/src/index.ts"],
       "@pi-harness/subagents": ["subagents/index.ts"]

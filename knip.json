@@ -10,9 +10,6 @@
     "apps/orchestrator/src/index.ts",
     "apps/orchestrator/vitest.config.ts",
     "apps/orchestrator/vitest.live.config.ts",
-    "packages/db/drizzle.config.ts",
-    "packages/db/vitest.config.ts",
-    "packages/db/src/index.ts",
     "packages/pi-bridge/src/index.ts",
     "packages/shared/src/index.ts",
     "subagents/index.ts",
@@ -35,8 +32,7 @@
     "**/test-results/**",
     "**/*.d.ts",
     "**/*.tsbuildinfo",
-    "subagents/_vendored/**",
-    "packages/db/migrations/**"
+    "subagents/_vendored/**"
   ],
   "ignoreBinaries": ["podman"],
   "ignoreDependencies": [

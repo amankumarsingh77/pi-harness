@@ -442,13 +442,14 @@ export class ArtifactsStore {
         .map(async (entry) => {
           const path = join(dir, entry);
           const stats = await stat(path);
+          const revisionId = entry.slice(0, -suffix.length);
           return {
-            revisionId: entry.slice(0, -suffix.length),
-            updatedAt: stats.mtime.toISOString(),
+            revisionId,
+            updatedAt: revisionTimestamp(revisionId) ?? stats.mtime.toISOString(),
           };
         }),
     );
-    return [...parsed].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    return [...parsed].sort((a, b) => a.revisionId.localeCompare(b.revisionId));
   }
 
   private async findLegacyGitDiffBaseline(
@@ -600,7 +601,29 @@ async function atomicWrite(path: string, content: string): Promise<void> {
 }
 
 function createRevisionId(): string {
-  return `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}`;
+  const sequence = nextRevisionSequence();
+  return `${new Date().toISOString().replace(/[:.]/g, "-")}-${sequence}-${randomUUID()}`;
+}
+
+let lastRevisionTimeMs = 0;
+let revisionSequence = 0;
+
+function nextRevisionSequence(): string {
+  const now = Date.now();
+  if (now === lastRevisionTimeMs) {
+    revisionSequence += 1;
+  } else {
+    lastRevisionTimeMs = now;
+    revisionSequence = 0;
+  }
+  return revisionSequence.toString().padStart(6, "0");
+}
+
+function revisionTimestamp(revisionId: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z-/.exec(revisionId);
+  if (!match) return null;
+  const [, dateHour, minute, second, millisecond] = match;
+  return `${dateHour}:${minute}:${second}.${millisecond}Z`;
 }
 
 async function moveFirstExisting(sources: ReadonlyArray<string>, destination: string): Promise<void> {

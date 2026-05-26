@@ -512,6 +512,62 @@ describe("mark_ready", () => {
     expect(dispatcher).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects when dispatchClaimVerifier reports aborted (planner timeout) — artifacts stay draft", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const dispatcher = vi.fn(async () => ({
+      falsifiedClaims: [],
+      findingsWritten: false,
+      aborted: true,
+    }));
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: dispatcher,
+      claimVerifierState: newState(),
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("aborted by planner timeout");
+    expect(result.terminate).toBeUndefined();
+    expect(dispatcher).toHaveBeenCalledTimes(1);
+
+    const plan = await store.readArtifact(cwd, "T-1", "plan");
+    expect(plan?.fm.status).toBe("draft");
+
+    const events = await eventStore.list("r-1");
+    const statusChanged = events.find(
+      (e) => e.kind === "plan_system" && (e as { systemKind?: string }).systemKind === "status_changed",
+    );
+    expect(statusChanged).toBeUndefined();
+  });
+
+  it("refuses promotion when cancelSignal is aborted after claim-verifier passes", async () => {
+    await writePlanArtifacts(validPlanBody, validScenariosYaml);
+    const controller = new AbortController();
+    const dispatcher = vi.fn(async () => {
+      // Audit finishes cleanly, but the parent times out before we promote.
+      controller.abort();
+      return { falsifiedClaims: [], findingsWritten: true };
+    });
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: dispatcher,
+      claimVerifierState: newState(),
+      cancelSignal: controller.signal,
+    });
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toContain("planner aborted before promotion");
+
+    const plan = await store.readArtifact(cwd, "T-1", "plan");
+    expect(plan?.fm.status).toBe("draft");
+
+    const events = await eventStore.list("r-1");
+    const statusChanged = events.find(
+      (e) => e.kind === "plan_system" && (e as { systemKind?: string }).systemKind === "status_changed",
+    );
+    expect(statusChanged).toBeUndefined();
+  });
+
   it("succeeds: flips all plan artifacts to ready and publishes status_changed event", async () => {
     await writePlanArtifacts(validPlanBody, validScenariosYaml);
     const tool = makeMarkReadyTool({

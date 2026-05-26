@@ -16,9 +16,8 @@ export type ScaffoldResult = {
 };
 
 // Materialize empty design.md and spec.md inside the worktree at
-// `<cwd>/.harness/<taskId>/`, with `status: draft` frontmatter, then commit
-// them on the worktree's branch. Idempotent: if the artifacts already exist,
-// returns immediately without re-writing or re-committing.
+// `<cwd>/.harness/<taskId>/` with `status: draft` frontmatter. Idempotent:
+// if the artifacts already exist, returns immediately without re-writing.
 //
 // This is the brainstorm phase's entry hook — it runs *before* the subagent
 // boots so the subagent always has writable, frontmatter-bearing files in the

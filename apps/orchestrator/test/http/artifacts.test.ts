@@ -1,28 +1,20 @@
-import "dotenv/config";
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDb } from "@pi-harness/db";
-import { RunStore } from "../../src/adapters/run-store.js";
-import { EventStore } from "../../src/adapters/event-store.js";
 import { buildServer } from "../../src/http/server.js";
-
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
+import { createBareTestStores, resetTestStore } from "../helpers/stores.js";
 
 describe("/api/tasks/:id/artifacts and /screenshots", () => {
-  const { db, client } = createDb(url);
-  const runs = new RunStore(db);
-  const events = new EventStore(db);
+  const { stateDir, runs, events } = createBareTestStores();
   let runsDir: string;
 
   beforeEach(async () => {
-    await db.execute("delete from tasks");
+    await resetTestStore(stateDir);
     runsDir = await mkdtemp(join(tmpdir(), "runs-"));
   });
 
   afterAll(async () => {
-    await client.end();
     if (runsDir) await rm(runsDir, { recursive: true, force: true });
   });
 

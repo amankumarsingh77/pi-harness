@@ -22,6 +22,8 @@ export type BuiltinTool =
   | "write";
 
 export type CustomTool =
+  | "read_artifact"
+  | "write_artifact"
   | "submit_questions"
   | "submit_mock_choices"
   | "write_mock_revision"
@@ -57,8 +59,10 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     role: "phase-driver",
     promptDir: "phase",
     promptFile: "brainstorm.md",
-    allowedTools: ["read", "write"],
+    allowedTools: ["read"],
     customTools: [
+      "read_artifact",
+      "write_artifact",
       "submit_questions",
       "submit_mock_choices",
       "write_mock_revision",

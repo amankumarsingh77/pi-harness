@@ -21,8 +21,8 @@ export type ScaffoldPlanResult = {
 
 // Materialize plan.md + scenarios.yaml inside the worktree at
 // `<cwd>/.harness/<taskId>/`, plus a per-task `.gitignore` excluding
-// `research/` so the preflight subagents' findings stay uncommitted.
-// Then commit on the worktree's branch. Idempotent.
+// `research/` so the preflight subagents' findings stay out of the
+// worktree mirror. Idempotent.
 //
 // Mirrors scaffold-brainstorm.ts but writes plan-phase artifacts. The per-task
 // .gitignore is the key new piece: the root .gitignore excludes `.harness/`

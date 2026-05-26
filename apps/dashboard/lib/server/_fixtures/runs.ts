@@ -95,7 +95,7 @@ export const MOCK_RUNS: MockRun[] = [
   {
     id: "r_e91200c7",
     taskId: "T-085",
-    taskTitle: "Postgres connection pool tuning",
+    taskTitle: "JSONL replay performance tuning",
     attempt: 1,
     branch: "pi/T-085",
     startedAt: "2026-05-08T22:14:00Z",

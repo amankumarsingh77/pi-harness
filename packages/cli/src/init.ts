@@ -74,7 +74,6 @@ export function renderHarnessConfig(config: HarnessProjectConfig): string {
   stateDir: ${JSON.stringify(config.stateDir)},
   worktreesDir: ${JSON.stringify(config.worktreesDir)},
   containerRuntime: ${JSON.stringify(config.containerRuntime)},
-  databaseUrl: ${JSON.stringify(config.databaseUrl)},
   dashboardPort: ${config.dashboardPort},
   orchestratorPort: ${config.orchestratorPort},
   webProvider: ${JSON.stringify(config.webProvider)},
@@ -83,25 +82,8 @@ export function renderHarnessConfig(config: HarnessProjectConfig): string {
 }
 
 export function renderComposeFile(config: HarnessProjectConfig): string {
-  const postgresPort = databasePort(config.databaseUrl);
+  void config;
   return `services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: pi-harness-postgres
-    environment:
-      POSTGRES_USER: piharness
-      POSTGRES_PASSWORD: piharness
-      POSTGRES_DB: piharness
-    ports:
-      - "${postgresPort}:5432"
-    volumes:
-      - pi-harness-pg:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U piharness"]
-      interval: 2s
-      timeout: 2s
-      retries: 10
-
   searxng:
     image: docker.io/searxng/searxng:latest
     container_name: pi-harness-searxng
@@ -110,9 +92,6 @@ export function renderComposeFile(config: HarnessProjectConfig): string {
     environment:
       SEARXNG_BASE_URL: http://localhost:8888/
       SEARXNG_SECRET: \${SEARXNG_SECRET:-pi-harness-local-searxng-change-me}
-
-volumes:
-  pi-harness-pg:
 `;
 }
 
@@ -213,14 +192,4 @@ async function detectContainerRuntime(execFile: ExecFile): Promise<ContainerRunt
   const docker = await execFile("docker", ["--version"]);
   if (docker.ok) return "docker";
   return null;
-}
-
-function databasePort(databaseUrl: string): number {
-  try {
-    const parsed = new URL(databaseUrl);
-    const port = Number(parsed.port);
-    return Number.isInteger(port) && port > 0 ? port : 5432;
-  } catch {
-    return 54330;
-  }
 }

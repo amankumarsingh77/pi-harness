@@ -30,14 +30,21 @@ export async function runDoctor(opts: {
     };
   }
 
-  const runtime = await opts.execFile(loaded.config.containerRuntime, ["--version"]);
+  const needsRuntime = loaded.config.webProvider === "searxng";
+  const runtime = needsRuntime
+    ? await opts.execFile(loaded.config.containerRuntime, ["--version"])
+    : { ok: true, stdout: "", stderr: "" };
   const composeFile = join(loaded.config.stateDir, "runtime", "compose.yml");
   const checks: ReadonlyArray<DoctorCheck> = [
     { name: "config", ok: true, message: "harness.config.ts loaded" },
     {
       name: "container-runtime",
       ok: runtime.ok,
-      message: runtime.ok ? `${loaded.config.containerRuntime} is available` : `${loaded.config.containerRuntime} is not available`,
+      message: needsRuntime
+        ? runtime.ok
+          ? `${loaded.config.containerRuntime} is available`
+          : `${loaded.config.containerRuntime} is not available`
+        : "not required for current web provider",
     },
     {
       name: "compose-file",

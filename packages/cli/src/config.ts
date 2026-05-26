@@ -67,7 +67,6 @@ function compactConfigInput(input: Readonly<Record<string, unknown>>): Partial<H
     ...(typeof input["stateDir"] === "string" ? { stateDir: input["stateDir"] } : {}),
     ...(typeof input["worktreesDir"] === "string" ? { worktreesDir: input["worktreesDir"] } : {}),
     ...(containerRuntime.success ? { containerRuntime: containerRuntime.data } : {}),
-    ...(typeof input["databaseUrl"] === "string" ? { databaseUrl: input["databaseUrl"] } : {}),
     ...(typeof input["dashboardPort"] === "number" ? { dashboardPort: input["dashboardPort"] } : {}),
     ...(typeof input["orchestratorPort"] === "number" ? { orchestratorPort: input["orchestratorPort"] } : {}),
     ...(webProvider.success ? { webProvider: webProvider.data } : {}),

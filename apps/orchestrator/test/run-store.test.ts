@@ -1,28 +1,10 @@
-import "dotenv/config";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { createDb } from "@pi-harness/db";
+import { describe, it, expect } from "vitest";
 import { RunStore } from "../src/adapters/run-store.js";
-
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
+import { createBareTestStores } from "./helpers/stores.js";
 
 describe("RunStore", () => {
-  const { db, client } = createDb(url);
-  const store = new RunStore(db);
-
-  beforeAll(async () => {
-    // Migration is applied by Plan 1 Task 5 step 10. Tests assume tables exist.
-  });
-
-  beforeEach(async () => {
-    // Clean slate per test.
-    await db.execute("delete from tasks");
-  });
-
-  afterAll(async () => {
-    await client.end();
-  });
-
   it("createTask + getTask round-trip", async () => {
+    const { runs: store } = createBareTestStores();
     const t = await store.createTask({
       title: "round-trip",
       description: "",
@@ -41,12 +23,14 @@ describe("RunStore", () => {
   });
 
   it("createTask defaults board metadata", async () => {
+    const { runs: store } = createBareTestStores();
     const t = await store.createTask({ title: "default-meta" });
     expect(t.priority).toBe("none");
     expect(t.tags).toEqual([]);
   });
 
   it("listTasksByStatus returns only matching", async () => {
+    const { runs: store } = createBareTestStores();
     const a = await store.createTask({ title: "a" });
     await store.createTask({ title: "b" });
     await store.updateTaskStatus(a.id, "brainstorming");
@@ -59,6 +43,7 @@ describe("RunStore", () => {
   });
 
   it("createRun + listRuns returns runs in order", async () => {
+    const { runs: store } = createBareTestStores();
     const t = await store.createTask({ title: "with-runs" });
     await store.createRun({ taskId: t.id, phase: "brainstorm" });
     await store.createRun({ taskId: t.id, phase: "plan" });
@@ -68,8 +53,9 @@ describe("RunStore", () => {
   });
 
   it("notifies an observer after task and run writes", async () => {
+    const { stateDir } = createBareTestStores();
     const notifications: string[] = [];
-    const observed = new RunStore(db, {
+    const observed = new RunStore({ stateDir }, {
       onTaskChanged: (task) => notifications.push(`task:${task.status}`),
       onRunChanged: (run) => notifications.push(`run:${run.status}`),
     });
@@ -88,6 +74,7 @@ describe("RunStore", () => {
   });
 
   it("hasAnyRun is false until the first run is created", async () => {
+    const { runs: store } = createBareTestStores();
     const t = await store.createTask({ title: "freeze-probe" });
     expect(await store.hasAnyRun(t.id)).toBe(false);
     await store.createRun({ taskId: t.id, phase: "brainstorm" });
@@ -95,6 +82,7 @@ describe("RunStore", () => {
   });
 
   it("countByStatus returns the kanban summary", async () => {
+    const { runs: store } = createBareTestStores();
     await store.createTask({ title: "a" });
     await store.createTask({ title: "b" });
     const t = await store.createTask({ title: "c" });
@@ -106,6 +94,7 @@ describe("RunStore", () => {
   });
 
   it("dashboard summary helpers expose active run ids and total cost", async () => {
+    const { runs: store } = createBareTestStores();
     const t = await store.createTask({ title: "summary" });
     const active = await store.createRun({ taskId: t.id, phase: "brainstorm" });
     const settled = await store.createRun({ taskId: t.id, phase: "code" });

@@ -1,11 +1,9 @@
-import "dotenv/config";
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
-import { createDb } from "@pi-harness/db";
 import {
   createAgentSession,
   __resetAuthCache,
@@ -13,16 +11,13 @@ import {
   type AgentSessionOptions,
 } from "@pi-harness/pi-bridge";
 import { createFakeAdapter, type FakeAgentSdkAdapter } from "@pi-harness/pi-bridge/_test/fake-sdk";
-import { RunStore } from "../../src/adapters/run-store.js";
-import { EventStore } from "../../src/adapters/event-store.js";
 import { WorktreeManager } from "../../src/adapters/worktree.js";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
 import { runLoop } from "../../src/runner/run-loop.js";
 import { CancellationRegistry } from "../../src/runner/cancellation.js";
 import { transition } from "../../src/domain/state-machine.js";
-
-const url = process.env.DATABASE_URL ?? "postgresql://piharness:piharness@localhost:54330/piharness";
+import { createBareTestStores, resetTestStore } from "../helpers/stores.js";
 
 function assistantWithUsage(input: number, output: number, costTotal: number) {
   return {
@@ -44,9 +39,7 @@ function assistantWithUsage(input: number, output: number, costTotal: number) {
 // boundary between "the harness" and "the LLM". This proves the dashboard's
 // brainstorm event sequence is intact through the real run-loop + bridge.
 describe("brainstorm integration flow", () => {
-  const { db, client } = createDb(url);
-  const runs = new RunStore(db);
-  const events = new EventStore(db);
+  const { stateDir, runs, events } = createBareTestStores();
   let scratch: string;
   let repo: string;
   let envDir: string;
@@ -56,12 +49,8 @@ describe("brainstorm integration flow", () => {
   let queue: ((adapter: FakeAgentSdkAdapter) => Promise<void>)[];
   let cancellationRegistry: CancellationRegistry;
 
-  afterAll(async () => {
-    await client.end();
-  });
-
   beforeEach(async () => {
-    await db.execute("delete from tasks");
+    await resetTestStore(stateDir);
     scratch = await mkdtemp(join(tmpdir(), "bs-int-"));
     repo = join(scratch, "repo");
     await mkdir(repo, { recursive: true });

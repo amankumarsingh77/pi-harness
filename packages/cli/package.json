@@ -43,7 +43,6 @@
   },
   "dependencies": {
     "@pi-harness/dashboard": "workspace:0.1.0-alpha.0",
-    "@pi-harness/db": "workspace:0.1.0-alpha.0",
     "@pi-harness/orchestrator": "workspace:0.1.0-alpha.0",
     "@pi-harness/shared": "workspace:0.1.0-alpha.0"
   },

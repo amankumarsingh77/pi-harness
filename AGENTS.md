@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a pnpm/Turbo monorepo for a multi-agent coding harness. Application code lives in `apps/`: `apps/dashboard` is the Next.js UI and `apps/orchestrator` is the Fastify runner service. Shared libraries live in `packages/`: `shared` contains schemas and types, `db` contains Drizzle migrations, and `pi-bridge` wraps pi.dev integration. Agent prompts and registry code live in `subagents/`. Infrastructure files are under `infra/`, with local services in `compose.yml`.
+This is a pnpm/Turbo monorepo for a multi-agent coding harness. Application code lives in `apps/`: `apps/dashboard` is the Next.js UI and `apps/orchestrator` is the Fastify runner service. Shared libraries live in `packages/`: `shared` contains schemas and types, and `pi-bridge` wraps pi.dev integration. Agent prompts and registry code live in `subagents/`. Infrastructure files are under `infra/`, with optional local services in `compose.yml`.
 
 Tests are colocated by package: `*.test.ts` or `*.test.tsx` in `src/`, `test/`, and `apps/dashboard/test/`. Browser tests are in `apps/dashboard/e2e/`.
 
@@ -21,8 +21,7 @@ pnpm install
 - `pnpm test`: runs all Vitest suites through Turbo.
 - `pnpm typecheck`: runs `tsc --noEmit` across workspaces.
 - `pnpm --filter @pi-harness/dashboard test:e2e`: runs Playwright dashboard tests.
-- `pnpm infra:up` / `pnpm infra:down`: starts or stops local Postgres and SearXNG.
-- `pnpm db:migrate` and `pnpm db:generate`: apply or create Drizzle migrations.
+- `pnpm infra:up` / `pnpm infra:down`: starts or stops optional local SearXNG.
 
 ## Coding Style & Naming Conventions
 
@@ -38,7 +37,7 @@ Vitest is the default unit and integration test runner. Dashboard component test
 
 Recent history uses conventional-style commits such as `feat(dashboard): add raw plan console` and merge commits from pull requests. Keep commit subjects short, imperative, and scoped when useful, for example `fix(orchestrator): handle missing task metadata`.
 
-Pull requests should describe the change, list validation commands, link related issues, and include screenshots or Playwright evidence for visible dashboard changes. Call out database migrations, environment variables, and infrastructure impacts.
+Pull requests should describe the change, list validation commands, link related issues, and include screenshots or Playwright evidence for visible dashboard changes. Call out state layout changes, environment variables, and infrastructure impacts.
 
 ## Security & Configuration Tips
 

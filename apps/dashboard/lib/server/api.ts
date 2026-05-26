@@ -14,7 +14,7 @@ const real = api({ baseUrl: ORCHESTRATOR_URL });
  * Hybrid orchestrator client.
  *
  * Real backend: listTasks, createTask, getTask, transitionTask. The board (/),
- * new-task flow, and task-detail header are fully wired against Postgres.
+ * new-task flow, and task-detail header are fully wired against the orchestrator.
  *
  * Mock fallbacks: brainstorm artifact and run events. These surfaces stay on
  * fixtures until the agent run-loop produces real artifacts. Remove each
