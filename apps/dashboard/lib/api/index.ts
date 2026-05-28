@@ -11,6 +11,8 @@ import type {
   ClaimEvent,
   MissionEvent,
   MissionPacket,
+  GraphifyInstallState,
+  PreflightStep,
 } from "@pi-harness/shared";
 
 // "awaiting_user" exactly when the artifacts on disk are status: ready AND
@@ -41,6 +43,8 @@ export type PlanBundle = {
   blastRadius: Artifact | null;
   executionDag: Artifact | null;
   research: Record<string, string | null>;
+  preflightSteps: PreflightStep[];
+  preflightBlockedReason: string | null;
   events: PlanJsonlEvent[];
   // Most recent unresolved `plan_system blocked` event — the reason the plan
   // phase stalled. Null when no block is in effect (the plan is healthy, or a
@@ -292,7 +296,7 @@ export type Api = {
   restartBrainstorm: (
     taskId: string,
     payload: { note?: string },
-  ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
+  ) => Promise<{ ok: true; archivedRunId: string | null; newRunId: string }>;
   getBrainstormDiff: (
     taskId: string,
     kind: "design" | "spec",
@@ -319,6 +323,7 @@ export type Api = {
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
   getMission: (taskId: string) => Promise<MissionBundle>;
   runVerifier: (taskId: string, payload?: VerifierRunRequest) => Promise<VerifierRunResult>;
+  getGraphifyStatus: () => Promise<{ status: GraphifyInstallState | null }>;
   getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
   submitPlanArtifactEdit: (
     taskId: string,
@@ -402,7 +407,7 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
         body: JSON.stringify(payload),
       }),
     restartBrainstorm: (taskId, payload) =>
-      send<{ ok: true; archivedRunId: string; newRunId: string }>(
+      send<{ ok: true; archivedRunId: string | null; newRunId: string }>(
         `/api/tasks/${taskId}/brainstorm/restart`,
         {
           method: "POST",
@@ -454,6 +459,10 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    getGraphifyStatus: async () => {
+      const r = await send<{ status: GraphifyInstallState | null }>("/api/graphify/status");
+      return { status: r.status ? hydrateGraphifyStatus(r.status) : null };
+    },
     getPlanDiff: (taskId, kind) =>
       send<PlanDiff>(`/api/tasks/${taskId}/plan/diff?kind=${kind}`),
     submitPlanArtifactEdit: (taskId, payload) =>
@@ -507,5 +516,12 @@ function hydrateDashboardSummary(summary: DashboardSummary): DashboardSummary {
   return {
     ...summary,
     lastEventAt: summary.lastEventAt ? toDate(summary.lastEventAt) : null,
+  };
+}
+
+function hydrateGraphifyStatus(status: GraphifyInstallState): GraphifyInstallState {
+  return {
+    ...status,
+    updatedAt: toDate(status.updatedAt),
   };
 }

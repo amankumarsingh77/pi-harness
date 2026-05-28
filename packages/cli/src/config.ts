@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ContainerRuntimeSchema,
+  GraphifyProviderConfigSchema,
   HarnessProjectConfigSchema,
   WebProviderSchema,
   type HarnessProjectConfig,
@@ -11,6 +12,10 @@ import {
   parseHarnessProjectEnv,
 } from "@pi-harness/shared";
 import type { ExecFile } from "./exec.js";
+
+const HarnessProjectConfigInputSchema = HarnessProjectConfigSchema.partial().extend({
+  graphify: GraphifyProviderConfigSchema.partial().optional(),
+});
 
 export type LoadConfigResult =
   | { readonly ok: true; readonly config: HarnessProjectConfig }
@@ -53,7 +58,7 @@ function parseConfigSource(source: string): Partial<HarnessProjectConfigInput> |
   const body = extractConfigObjectBody(source);
   if (!body) return null;
   const value = evaluateConfigBody(body);
-  const parsed = HarnessProjectConfigSchema.partial().safeParse(value);
+  const parsed = HarnessProjectConfigInputSchema.safeParse(value);
   if (!parsed.success) return null;
   return compactConfigInput(parsed.data);
 }
@@ -61,6 +66,7 @@ function parseConfigSource(source: string): Partial<HarnessProjectConfigInput> |
 function compactConfigInput(input: Readonly<Record<string, unknown>>): Partial<HarnessProjectConfigInput> {
   const containerRuntime = ContainerRuntimeSchema.safeParse(input["containerRuntime"]);
   const webProvider = WebProviderSchema.safeParse(input["webProvider"]);
+  const graphify = compactGraphifyInput(input["graphify"]);
   return {
     ...(typeof input["repoRoot"] === "string" ? { repoRoot: input["repoRoot"] } : {}),
     ...(typeof input["baseBranch"] === "string" ? { baseBranch: input["baseBranch"] } : {}),
@@ -70,6 +76,18 @@ function compactConfigInput(input: Readonly<Record<string, unknown>>): Partial<H
     ...(typeof input["dashboardPort"] === "number" ? { dashboardPort: input["dashboardPort"] } : {}),
     ...(typeof input["orchestratorPort"] === "number" ? { orchestratorPort: input["orchestratorPort"] } : {}),
     ...(webProvider.success ? { webProvider: webProvider.data } : {}),
+    ...(graphify ? { graphify } : {}),
+  };
+}
+
+function compactGraphifyInput(value: unknown): NonNullable<HarnessProjectConfigInput["graphify"]> | null {
+  const parsed = GraphifyProviderConfigSchema.partial().safeParse(value);
+  if (!parsed.success) return null;
+  return {
+    ...(parsed.data.provider !== undefined ? { provider: parsed.data.provider } : {}),
+    ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
+    ...(parsed.data.baseUrl !== undefined ? { baseUrl: parsed.data.baseUrl } : {}),
+    ...(parsed.data.apiKeyEnv !== undefined ? { apiKeyEnv: parsed.data.apiKeyEnv } : {}),
   };
 }
 

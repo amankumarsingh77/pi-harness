@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "designs": {
+    "MongoDB-design-analysis": {
+      "source": "voltagent/awesome-design-md",
+      "sourcePath": "design-md/mongodb/DESIGN.md",
+      "outputPath": "DESIGN.md",
+      "ref": "HEAD",
+      "commitSha": "3883984baf05226208a5dae15730a3593548b808",
+      "contentHash": "4523f10efd5ccd46f9aeac3b98626e24bcf907bc0c1e46500cb0e3920f932e71",
+      "fetchedAt": "2026-05-19T18:45:16.534Z"
+    },
+    "linear": {
+      "source": "soulcore-dev/soul-design-md",
+      "sourcePath": "designs/linear/DESIGN.md",
+      "outputPath": "linear/DESIGN.md",
+      "ref": "HEAD",
+      "commitSha": "d194d8a0dbcd05697d72da85f49b6b982a366edf",
+      "contentHash": "cecdc2f723fbaa16996b5fcbb6fbc1bc8faca935a251c03c9cd5510eac44dd8c",
+      "fetchedAt": "2026-05-19T18:56:01.724Z"
+    }
+  }
+}

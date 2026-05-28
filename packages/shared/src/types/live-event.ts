@@ -50,6 +50,24 @@ export type ClaimsUpdatedPayload = {
   readonly claimEvents: readonly ClaimEvent[];
 };
 
+export type GraphifyInstallReason =
+  | "missing_cli"
+  | "incompatible_cli"
+  | "stale_skill"
+  | "missing_python_extra"
+  | "missing_provider_key";
+
+export type GraphifyInstallStatus = "ready" | "installing" | "install_failed" | "config_required";
+
+export type GraphifyInstallState = {
+  readonly status: GraphifyInstallStatus;
+  readonly updatedAt: Date;
+  readonly reason?: GraphifyInstallReason;
+  readonly message?: string;
+  readonly stdoutTail?: string;
+  readonly stderrTail?: string;
+};
+
 export type LiveEventPayloadByKind = {
   readonly "dashboard.snapshot": DashboardSnapshotPayload;
   readonly "task.updated": Task;
@@ -60,6 +78,7 @@ export type LiveEventPayloadByKind = {
   readonly "usage.updated": UsageUpdatedPayload;
   readonly "mission.updated": MissionUpdatedPayload;
   readonly "claims.updated": ClaimsUpdatedPayload;
+  readonly "graphify.status.updated": GraphifyInstallState;
 };
 
 export type LiveEventKind = keyof LiveEventPayloadByKind;

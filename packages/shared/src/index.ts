@@ -2,6 +2,7 @@ export * from "./types/task.js";
 export * from "./types/run.js";
 export * from "./types/event.js";
 export * from "./types/live-event.js";
+export * from "./types/preflight.js";
 export * from "./types/mission.js";
 export * from "./types/scenario.js";
 export * from "./types/execution-dag.js";
@@ -21,12 +22,15 @@ export {
 export {
   ContainerRuntimeSchema,
   DEFAULT_HARNESS_PROJECT_CONFIG,
+  DEFAULT_GRAPHIFY_PROVIDER_CONFIG,
+  GraphifyProviderConfigSchema,
   HarnessProjectConfigSchema,
   WebProviderSchema,
   defineHarnessConfig,
   mergeHarnessProjectConfig,
   parseHarnessProjectEnv,
   type ContainerRuntime,
+  type GraphifyProviderConfig,
   type HarnessProjectConfig,
   type HarnessProjectConfigInput,
   type WebProvider,

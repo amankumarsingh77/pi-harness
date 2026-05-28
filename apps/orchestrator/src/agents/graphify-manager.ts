@@ -4,10 +4,26 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import {
+  DEFAULT_GRAPHIFY_PROVIDER_CONFIG,
+  type GraphifyProviderConfig,
+} from "@pi-harness/shared";
+import type { GraphifyInstallCoordinator } from "./graphify-installer.js";
 
 const execFileAsync = promisify(execFile);
 
-export const GRAPHIFY_INSTALL_HINT = `Install Graphify with: uv tool install "graphifyy[mcp]"`;
+export const GRAPHIFY_INSTALL_HINT =
+  `Install Graphify with: uv tool install --force --upgrade "graphifyy[mcp,ollama]" && graphify install --platform codex`;
+const GRAPHIFY_UV_FROM_SPEC = "graphifyy[mcp,ollama]";
+
+// Hard ceiling on any graphify subprocess. Extraction is legitimately slow on
+// large repos, but a subprocess that waits on an unreachable LLM backend would
+// otherwise hang forever — and because ensureInitialized() runs inside the
+// brainstorm tick (before the run is created), that hang wedges the task in
+// `brainstorming` with no run and no error. Killing the process turns the hang
+// into a failure that run-loop's ensureGraphifyReady() swallows, letting
+// brainstorm proceed without the graph.
+export const GRAPHIFY_COMMAND_TIMEOUT_MS = 10 * 60_000;
 
 export type GraphifyReason =
   | "startup"
@@ -38,7 +54,14 @@ export type GraphifyRunResult =
       readonly ok: false;
       readonly action: "initialize" | "update";
       readonly cwd: string;
-      readonly code: "missing_cli" | "command_failed" | "invalid_graph";
+      readonly code:
+        | "missing_cli"
+        | "incompatible_cli"
+        | "stale_skill"
+        | "missing_python_extra"
+        | "missing_llm_key"
+        | "command_failed"
+        | "invalid_graph";
       readonly message: string;
       readonly stdout: string;
       readonly stderr: string;
@@ -64,23 +87,44 @@ type CommandResult =
 type CommandRunner = (
   command: string,
   args: ReadonlyArray<string>,
-  opts: { readonly cwd: string },
+  opts: {
+    readonly cwd: string;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+    readonly timeoutMs?: number;
+  },
 ) => Promise<CommandResult>;
+
+type GraphifyCommandFailureCode =
+  | "missing_cli"
+  | "incompatible_cli"
+  | "stale_skill"
+  | "missing_python_extra"
+  | "missing_llm_key"
+  | "command_failed";
 
 export class GraphifyManager implements GraphifyLifecycle {
   private readonly command: string;
   private readonly runCommand: CommandRunner;
   private readonly stateDir: string | null;
+  private readonly installer: GraphifyInstallCoordinator | undefined;
+  private readonly graphify: GraphifyProviderConfig;
+  private readonly env: Readonly<Record<string, string | undefined>>;
   private readonly inFlight = new Map<string, Promise<GraphifyRunResult>>();
 
   constructor(opts: {
     readonly command?: string;
     readonly runCommand?: CommandRunner;
     readonly stateDir?: string;
+    readonly installer?: GraphifyInstallCoordinator;
+    readonly graphify?: Partial<GraphifyProviderConfig>;
+    readonly env?: Readonly<Record<string, string | undefined>>;
   } = {}) {
     this.command = opts.command ?? "graphify";
     this.runCommand = opts.runCommand ?? runExecFile;
     this.stateDir = opts.stateDir ? resolve(opts.stateDir) : null;
+    this.installer = opts.installer;
+    this.graphify = { ...DEFAULT_GRAPHIFY_PROVIDER_CONFIG, ...(opts.graphify ?? {}) };
+    this.env = opts.env ?? process.env;
   }
 
   async status(cwd: string): Promise<GraphifyStatus> {
@@ -145,7 +189,14 @@ export class GraphifyManager implements GraphifyLifecycle {
         });
       }
 
-      const result = await this.runCommand(this.command, [".", "--wiki", "--no-viz"], { cwd });
+      const credential = this.semanticCredential();
+      if (!credential.ok) {
+        this.installer?.recordConfigRequired?.({ message: credential.message });
+        return graphifyConfigFailure("initialize", cwd, credential.message);
+      }
+      const result = await this.runGraphify(cwd, semanticExtractArgs(this.graphify), {
+        env: graphifySemanticEnv(this.graphify, credential.apiKey),
+      });
       return this.finishCommand({
         action: "initialize",
         cwd,
@@ -156,13 +207,36 @@ export class GraphifyManager implements GraphifyLifecycle {
 
   async update(cwd: string, _reason: GraphifyReason): Promise<GraphifyRunResult> {
     return this.exclusive(cwd, async () => {
-      const result = await this.runCommand(this.command, ["update", "."], { cwd });
+      const result = await this.runGraphify(cwd, ["update", "."]);
       return this.finishCommand({
         action: "update",
         cwd,
         result,
       });
     });
+  }
+
+  private async runGraphify(
+    cwd: string,
+    args: ReadonlyArray<string>,
+    opts: { readonly env?: Readonly<Record<string, string | undefined>> } = {},
+  ): Promise<CommandResult> {
+    if (await this.installer?.hasReadyInstall()) {
+      return this.runCommand("uv", ["tool", "run", "--from", GRAPHIFY_UV_FROM_SPEC, "graphify", ...args], {
+        cwd,
+        ...(opts.env ? { env: opts.env } : {}),
+      });
+    }
+    return this.runCommand(this.command, args, { cwd, ...(opts.env ? { env: opts.env } : {}) });
+  }
+
+  private semanticCredential(): { readonly ok: true; readonly apiKey: string } | { readonly ok: false; readonly message: string } {
+    const apiKey = this.env[this.graphify.apiKeyEnv]?.trim();
+    if (apiKey) return { ok: true, apiKey };
+    return {
+      ok: false,
+      message: `Graphify provider '${this.graphify.provider}' requires ${this.graphify.apiKeyEnv} for semantic extraction.`,
+    };
   }
 
   private async exclusive(
@@ -185,14 +259,24 @@ export class GraphifyManager implements GraphifyLifecycle {
   }): Promise<GraphifyRunResult> {
     const { action, cwd, result } = args;
     if (!result.ok) {
+      const code = classifyCommandFailure(result);
+      if (
+        code === "missing_cli" ||
+        code === "incompatible_cli" ||
+        code === "stale_skill" ||
+        code === "missing_python_extra"
+      ) {
+        this.installer?.triggerInstall({
+          reason: code,
+          message: installableFailureMessage(code, result),
+        });
+      }
       return {
         ok: false,
         action,
         cwd,
-        code: result.missingExecutable ? "missing_cli" : "command_failed",
-        message: result.missingExecutable
-          ? `Graphify CLI not found. ${GRAPHIFY_INSTALL_HINT}`
-          : result.message,
+        code,
+        message: installableFailureMessage(code, result),
         stdout: result.stdout,
         stderr: result.stderr,
       };
@@ -225,6 +309,97 @@ export class GraphifyManager implements GraphifyLifecycle {
       skipped: false,
     });
   }
+}
+
+function semanticExtractArgs(graphify: GraphifyProviderConfig): readonly string[] {
+  return [
+    "extract",
+    ".",
+    "--backend",
+    "ollama",
+    "--model",
+    graphify.model,
+    "--out",
+    ".",
+  ];
+}
+
+function graphifySemanticEnv(
+  graphify: GraphifyProviderConfig,
+  apiKey: string,
+): Readonly<Record<string, string | undefined>> {
+  return {
+    OLLAMA_API_KEY: apiKey,
+    OLLAMA_BASE_URL: graphify.baseUrl,
+    OLLAMA_MODEL: graphify.model,
+  };
+}
+
+function graphifyConfigFailure(
+  action: "initialize" | "update",
+  cwd: string,
+  message: string,
+): GraphifyRunResult {
+  return {
+    ok: false,
+    action,
+    cwd,
+    code: "missing_llm_key",
+    message,
+    stdout: "",
+    stderr: "",
+  };
+}
+
+function classifyCommandFailure(
+  result: Extract<CommandResult, { ok: false }>,
+): GraphifyCommandFailureCode {
+  if (result.missingExecutable) return "missing_cli";
+  const output = `${result.message}\n${result.stdout}\n${result.stderr}`;
+  if (isIncompatibleGraphifyOutput(output)) {
+    return "incompatible_cli";
+  }
+  if (isStaleSkillOutput(output)) return "stale_skill";
+  if (isMissingPythonExtraOutput(output)) return "missing_python_extra";
+  if (isMissingLlmKeyOutput(output)) return "missing_llm_key";
+  return "command_failed";
+}
+
+function installableFailureMessage(
+  code: GraphifyCommandFailureCode,
+  result: Extract<CommandResult, { ok: false }>,
+): string {
+  if (code === "missing_cli") return `Graphify CLI not found. ${GRAPHIFY_INSTALL_HINT}`;
+  if (code === "incompatible_cli") {
+    return `Graphify CLI is incompatible with this workflow. ${GRAPHIFY_INSTALL_HINT}`;
+  }
+  if (code === "stale_skill") {
+    return `Graphify skill files are stale. ${GRAPHIFY_INSTALL_HINT}`;
+  }
+  if (code === "missing_python_extra") {
+    return `Graphify is missing the Python dependencies for semantic extraction. ${GRAPHIFY_INSTALL_HINT}`;
+  }
+  if (code === "missing_llm_key") {
+    return "Graphify needs an LLM backend for headless extraction. Set the configured Graphify API key env var, configure Ollama, or pass a supported backend.";
+  }
+  return result.message;
+}
+
+function isIncompatibleGraphifyOutput(output: string): boolean {
+  return output.includes("unknown command '.'") || output.includes('unknown command "."');
+}
+
+function isStaleSkillOutput(output: string): boolean {
+  return output.includes("skill is from graphify") && output.includes("Run 'graphify install' to update");
+}
+
+function isMissingPythonExtraOutput(output: string): boolean {
+  return output.includes("requires the openai package") ||
+    (output.includes("requires the") && output.includes("package") && output.includes("pip install"));
+}
+
+function isMissingLlmKeyOutput(output: string): boolean {
+  return output.includes("no LLM API key found");
 }
 
 export function graphPathFor(cwd: string, stateDir?: string): string {
@@ -275,15 +450,24 @@ async function persistGraphifyOutputs(args: {
   }
 }
 
-async function runExecFile(
+export async function runExecFile(
   command: string,
   args: ReadonlyArray<string>,
-  opts: { readonly cwd: string },
+  opts: {
+    readonly cwd: string;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+    readonly timeoutMs?: number;
+  },
 ): Promise<CommandResult> {
   try {
+    // `timeout` makes execFile send `killSignal` (default SIGTERM) once the
+    // limit is hit and reject the promise — so a hung graphify subprocess can
+    // never block the caller past this ceiling.
     const result = await execFileAsync(command, [...args], {
       cwd: opts.cwd,
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       maxBuffer: 2_000_000,
+      timeout: opts.timeoutMs ?? GRAPHIFY_COMMAND_TIMEOUT_MS,
     });
     return { ok: true, stdout: result.stdout, stderr: result.stderr };
   } catch (err) {

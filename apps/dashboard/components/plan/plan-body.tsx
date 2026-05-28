@@ -1,5 +1,5 @@
 "use client";
-import type { Artifact, Run, Task } from "@pi-harness/shared";
+import type { Artifact, PreflightStep, Run, Task } from "@pi-harness/shared";
 import type { PlanJsonlEvent } from "@/lib/api";
 import type { PlanGate } from "@/lib/api";
 import { usePlanEvents } from "@/lib/plan-events-context";
@@ -19,6 +19,7 @@ export function PlanBody({
   canCancelRun,
   research,
   planEvents,
+  preflightSteps,
   plan,
   blastRadius,
   scenarios,
@@ -34,6 +35,7 @@ export function PlanBody({
   canCancelRun: boolean;
   research: Record<string, string | null>;
   planEvents: PlanJsonlEvent[];
+  preflightSteps: PreflightStep[];
   plan: Artifact | null;
   blastRadius: Artifact | null;
   scenarios: Artifact | null;
@@ -57,6 +59,7 @@ export function PlanBody({
       executionDag={executionDag}
       research={research}
       planEvents={planEvents}
+      preflightSteps={preflightSteps}
       liveEvents={liveEvents}
       connected={connected}
       plannerLogDefaultOpen={plannerLogDefaultOpen}

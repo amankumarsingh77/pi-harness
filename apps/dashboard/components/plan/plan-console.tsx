@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { AgentEvent, Artifact, Run, Task } from "@pi-harness/shared";
+import type { AgentEvent, Artifact, PreflightStep, Run, Task } from "@pi-harness/shared";
 import type { PlanGate, PlanJsonlEvent } from "@/lib/api";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
@@ -24,6 +24,7 @@ export function PlanConsole({
   research,
   planEvents,
   liveEvents,
+  preflightSteps,
   connected,
   plannerLogDefaultOpen,
   lastBlocked,
@@ -41,6 +42,7 @@ export function PlanConsole({
   readonly research: Record<string, string | null>;
   readonly planEvents: readonly PlanJsonlEvent[];
   readonly liveEvents: readonly AgentEvent[];
+  readonly preflightSteps: readonly PreflightStep[];
   readonly connected: boolean;
   readonly plannerLogDefaultOpen: boolean;
   readonly lastBlocked: { reason: string; ts: string } | null;
@@ -127,6 +129,7 @@ export function PlanConsole({
           research={research}
           planEvents={planEvents}
           liveEvents={liveEvents}
+          preflightSteps={preflightSteps}
         />
 
         <PlanArtifactConsole

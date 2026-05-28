@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { mergeHarnessProjectConfig } from "@pi-harness/shared";
 import { createInitPlan, renderComposeFile, renderHarnessConfig } from "./init.js";
 
 async function tempProject(): Promise<string> {
@@ -104,20 +105,15 @@ describe("createInitPlan", () => {
   });
 
   it("renders a TS config and compose file from the chosen config", () => {
-    const config = {
+    const config = mergeHarnessProjectConfig({
       repoRoot: "/repo",
       baseBranch: "trunk",
-      stateDir: "/repo/.harness",
-      worktreesDir: "/repo/.harness/worktrees",
-      containerRuntime: "podman" as const,
-      dashboardPort: 3000,
-      orchestratorPort: 4000,
-      webProvider: "tinyfish" as const,
-    };
+    });
     expect(renderHarnessConfig(config)).not.toContain("@pi-harness/shared");
     expect(renderHarnessConfig(config)).not.toContain("databaseUrl");
     expect(renderHarnessConfig(config)).toContain("export default {");
     expect(renderHarnessConfig(config)).toContain("baseBranch: \"trunk\"");
+    expect(renderHarnessConfig(config)).toContain("model: \"deepseek-v4-pro\"");
     expect(renderComposeFile(config)).not.toContain("postgres");
   });
 });

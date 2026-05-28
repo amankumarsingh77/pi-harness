@@ -1,4 +1,5 @@
 import type { PlanJsonlEvent } from "@/lib/api";
+import type { PreflightStep } from "@pi-harness/shared";
 
 export const SUBAGENTS: readonly string[] = [
   "codebase-scout",
@@ -7,13 +8,16 @@ export const SUBAGENTS: readonly string[] = [
   "claim-verifier",
 ];
 
-export type DotKind = "intake" | "progress" | "done" | "blocked";
+export type DotKind = "intake" | "progress" | "done" | "blocked" | "fallback";
 
 export function deriveKind(
   subagent: string,
   research: Record<string, string | null>,
   events: readonly PlanJsonlEvent[],
+  preflightSteps: readonly PreflightStep[] = [],
 ): DotKind {
+  const stepKind = deriveKindFromSteps(subagent, preflightSteps);
+  if (stepKind) return stepKind;
   if (research[subagent]) return "done";
   const attemptId = latestPreflightAttemptId(events);
   let latest: { sessionId: string; ended: boolean } | null = null;
@@ -28,6 +32,19 @@ export function deriveKind(
   }
   if (!latest) return "intake";
   if (!latest.ended) return "progress";
+  return "blocked";
+}
+
+function deriveKindFromSteps(
+  subagent: string,
+  preflightSteps: readonly PreflightStep[],
+): DotKind | null {
+  const step = [...preflightSteps].reverse().find((item) => item.subagent === subagent);
+  if (!step) return null;
+  if (step.status === "running") return "progress";
+  if (step.status === "queued") return "intake";
+  if (step.status === "succeeded" || step.status === "skipped") return "done";
+  if (step.status === "fallback_succeeded") return "fallback";
   return "blocked";
 }
 

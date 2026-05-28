@@ -118,6 +118,20 @@ function makeHangingWriter(opts: {
   };
 }
 
+function subagentForSessionOptions(sessionOpts: AgentSessionOptions): string {
+  const writeFindings = (sessionOpts.customTools ?? []).find(
+    (t) => t.name === "write_findings",
+  ) as
+    | (NonNullable<AgentSessionOptions["customTools"]>[number] & {
+        __subagent: string;
+      })
+    | undefined;
+  if (!writeFindings) {
+    throw new Error("fake session: write_findings custom tool missing from session options");
+  }
+  return writeFindings.__subagent;
+}
+
 describe("runPreflight", () => {
   const N = PREFLIGHT_SUBAGENTS.length;
   const FIRST = PREFLIGHT_SUBAGENTS[0]!;
@@ -305,6 +319,62 @@ describe("runPreflight", () => {
     expect(result.failed).toBe(true);
     expect(aborts).toBe(1);
     expect(result.results.every((r) => r.error?.includes("timed out"))).toBe(true);
+  });
+
+  it("writes fallback findings when soft enrichment subagents time out after retry", async () => {
+    const events: PreflightSubagentEvent[] = [];
+    const steps: Array<{ subagent: string; status: string; error: string | null }> = [];
+    const writer = makeFakeWriter();
+    const createAgentSession: typeof writer = async (sessionOpts) => {
+      const subagent = subagentForSessionOptions(sessionOpts);
+      if (subagent === "codebase-scout") return writer(sessionOpts);
+      return {
+        async prompt() {
+          return new Promise(() => {});
+        },
+        async abort() {},
+        async close() {},
+      } satisfies AgentSession;
+    };
+
+    const result = await runPreflight(
+      baseOpts({
+        runId: "run-1",
+        attemptId: "attempt-1",
+        createAgentSession,
+        subagentTimeoutMs: 5,
+        retrySubagentTimeoutMs: 5,
+        onSubagentEvent: (event) => {
+          events.push(event);
+        },
+        onStep: (step) => {
+          steps.push({ subagent: step.subagent, status: step.status, error: step.error });
+        },
+      }),
+    );
+
+    expect(result.failed).toBe(false);
+    expect(result.results.filter((item) => item.fallback).map((item) => item.subagent).sort()).toEqual([
+      "integration-scanner",
+      "precedent-locator",
+    ]);
+    expect(steps.filter((step) => step.status === "fallback_succeeded").map((step) => step.subagent).sort()).toEqual([
+      "integration-scanner",
+      "precedent-locator",
+    ]);
+    expect(events.filter((event) => event.kind === "ended" && !event.ok)).toHaveLength(4);
+
+    const integration = await readFile(
+      join(cwd, ".harness", "T-001", "research", "integration-scanner.md"),
+      "utf8",
+    );
+    expect(integration).toContain("Fallback finding");
+
+    const precedent = await readFile(
+      join(cwd, ".harness", "T-001", "research", "precedent-locator.md"),
+      "utf8",
+    );
+    expect(precedent).toContain("Git-history-backed lessons unavailable");
   });
 
   it("parent abort signal cancels in-flight subagents", async () => {

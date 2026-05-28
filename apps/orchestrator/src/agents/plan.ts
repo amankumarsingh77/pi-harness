@@ -25,6 +25,7 @@ import {
 } from "./plan-state.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import type { EventStore } from "../adapters/event-store.js";
+import type { PreflightStepStore } from "../adapters/preflight-step-store.js";
 import type { ClaimLedgerStore } from "../adapters/mission-store.js";
 import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
@@ -61,6 +62,7 @@ export type PlanOpts = {
   // Mirrors brainstorm's split: control-plane events on the bus, raw bridge
   // events on the store.
   eventStore: EventStore;
+  preflightSteps?: PreflightStepStore;
   claimLedger?: ClaimLedgerStore;
   claimPublisher?: ClaimPublisher;
   phaseModel: PhaseModelConfig;
@@ -79,6 +81,8 @@ export type PlanOpts = {
   // and pushes them to EventStore.
   onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
   plannerTimeoutMs?: number;
+  preflightSubagentTimeoutMs?: number;
+  preflightRetrySubagentTimeoutMs?: number;
 };
 
 export type PlanResult = {
@@ -366,17 +370,25 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
     if (event) void opts.eventStore.append(event).catch(() => {});
   };
 
+  const preflightSteps = opts.preflightSteps;
   let result: PreflightResult;
   try {
     result = await runPreflight({
       cwd: opts.cwd,
       taskId: opts.taskId,
+      runId: opts.runId,
+      attemptId,
       ticketTitle: opts.ticketTitle,
       ticketDescription: opts.ticketDescription,
       designBody: design.body,
       specBody: spec.body,
       phaseModel: opts.phaseModel,
       createAgentSession: opts.createAgentSession,
+      ...(preflightSteps !== undefined
+        ? { onStep: async (step) => {
+            await preflightSteps.upsert(step);
+          } }
+        : {}),
       onSubagentBridgeEvent: opts.onSubagentBridgeEvent ?? defaultForward,
       onSubagentEvent: async (e: PreflightSubagentEvent) => {
         if (e.kind === "started") {
@@ -402,6 +414,12 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
         }
       },
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.preflightSubagentTimeoutMs !== undefined
+        ? { subagentTimeoutMs: opts.preflightSubagentTimeoutMs }
+        : {}),
+      ...(opts.preflightRetrySubagentTimeoutMs !== undefined
+        ? { retrySubagentTimeoutMs: opts.preflightRetrySubagentTimeoutMs }
+        : {}),
     });
   } catch (err) {
     if (err instanceof AuthError) {

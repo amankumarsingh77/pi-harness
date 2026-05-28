@@ -22,24 +22,183 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export const TASK_PRIORITIES = ["none", "urgent", "high", "medium", "low"] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
-// Single source of truth: which phase the next dispatch should run, given
-// a task's current status. `null` means the task is terminal or gated on
-// human input — the run-loop must not auto-dispatch.
-export const STATUS_TO_PHASE: Record<TaskStatus, Phase | null> = {
-  backlog: null,
-  brainstorming: "brainstorm",
-  brainstorm_failed: null, // user must triage / restart
-  planning: "plan", // run-loop dispatches plan agent; gate stops dispatch when artifacts ready
-  plan_failed: null, // user must triage / restart
-  executing: "code",
-  code_failed: null, // user must triage / restart
-  verifying: "verify",
-  verification_failed: null, // user must triage
-  ready_to_ship: "pr",
-  pr_failed: null, // user must triage / restart
-  done: null,
-  cancelled: null,
+export type TaskStatusVisualKind = "intake" | "progress" | "blocked" | "shipping" | "done";
+
+export type TaskStatusDefinition = {
+  readonly dispatchPhase: Phase | null;
+  readonly displayPhase: Phase | "intake" | "done" | "cancelled";
+  readonly cancelablePhase: "brainstorm" | "plan" | null;
+  readonly running: boolean;
+  readonly blocked: boolean;
+  readonly terminal: boolean;
+  readonly statusLabel: "queued" | "needs input" | "running" | "blocked" | "done" | "cancelled";
+  readonly visualKind: TaskStatusVisualKind;
 };
+
+export const TASK_STATUS_DEFINITIONS = {
+  backlog: {
+    dispatchPhase: null,
+    displayPhase: "intake",
+    cancelablePhase: null,
+    running: false,
+    blocked: false,
+    terminal: false,
+    statusLabel: "queued",
+    visualKind: "intake",
+  },
+  brainstorming: {
+    dispatchPhase: "brainstorm",
+    displayPhase: "brainstorm",
+    cancelablePhase: "brainstorm",
+    running: true,
+    blocked: false,
+    terminal: false,
+    statusLabel: "needs input",
+    visualKind: "progress",
+  },
+  brainstorm_failed: {
+    dispatchPhase: null,
+    displayPhase: "brainstorm",
+    cancelablePhase: null,
+    running: false,
+    blocked: true,
+    terminal: false,
+    statusLabel: "blocked",
+    visualKind: "blocked",
+  },
+  planning: {
+    dispatchPhase: "plan",
+    displayPhase: "plan",
+    cancelablePhase: "plan",
+    running: true,
+    blocked: false,
+    terminal: false,
+    statusLabel: "needs input",
+    visualKind: "progress",
+  },
+  plan_failed: {
+    dispatchPhase: null,
+    displayPhase: "plan",
+    cancelablePhase: null,
+    running: false,
+    blocked: true,
+    terminal: false,
+    statusLabel: "blocked",
+    visualKind: "blocked",
+  },
+  executing: {
+    dispatchPhase: "code",
+    displayPhase: "code",
+    cancelablePhase: null,
+    running: true,
+    blocked: false,
+    terminal: false,
+    statusLabel: "running",
+    visualKind: "progress",
+  },
+  code_failed: {
+    dispatchPhase: null,
+    displayPhase: "code",
+    cancelablePhase: null,
+    running: false,
+    blocked: true,
+    terminal: false,
+    statusLabel: "blocked",
+    visualKind: "blocked",
+  },
+  verifying: {
+    dispatchPhase: "verify",
+    displayPhase: "verify",
+    cancelablePhase: null,
+    running: true,
+    blocked: false,
+    terminal: false,
+    statusLabel: "running",
+    visualKind: "progress",
+  },
+  verification_failed: {
+    dispatchPhase: null,
+    displayPhase: "verify",
+    cancelablePhase: null,
+    running: false,
+    blocked: true,
+    terminal: false,
+    statusLabel: "blocked",
+    visualKind: "blocked",
+  },
+  ready_to_ship: {
+    dispatchPhase: "pr",
+    displayPhase: "pr",
+    cancelablePhase: null,
+    running: false,
+    blocked: false,
+    terminal: false,
+    statusLabel: "running",
+    visualKind: "shipping",
+  },
+  pr_failed: {
+    dispatchPhase: null,
+    displayPhase: "pr",
+    cancelablePhase: null,
+    running: false,
+    blocked: true,
+    terminal: false,
+    statusLabel: "blocked",
+    visualKind: "blocked",
+  },
+  done: {
+    dispatchPhase: null,
+    displayPhase: "done",
+    cancelablePhase: null,
+    running: false,
+    blocked: false,
+    terminal: true,
+    statusLabel: "done",
+    visualKind: "done",
+  },
+  cancelled: {
+    dispatchPhase: null,
+    displayPhase: "cancelled",
+    cancelablePhase: null,
+    running: false,
+    blocked: false,
+    terminal: true,
+    statusLabel: "cancelled",
+    visualKind: "blocked",
+  },
+} satisfies Record<TaskStatus, TaskStatusDefinition>;
+
+export function phaseForTaskStatus(status: TaskStatus): Phase | null {
+  return TASK_STATUS_DEFINITIONS[status].dispatchPhase;
+}
+
+export function cancelablePhaseForTaskStatus(status: TaskStatus): "brainstorm" | "plan" | null {
+  return TASK_STATUS_DEFINITIONS[status].cancelablePhase;
+}
+
+export function isRunningTaskStatus(status: TaskStatus): boolean {
+  return TASK_STATUS_DEFINITIONS[status].running;
+}
+
+export function isBlockedTaskStatus(status: TaskStatus): boolean {
+  return TASK_STATUS_DEFINITIONS[status].blocked;
+}
+
+export function isTerminalTaskStatus(status: TaskStatus): boolean {
+  return TASK_STATUS_DEFINITIONS[status].terminal;
+}
+
+export function taskStatusLabel(status: TaskStatus): string {
+  return TASK_STATUS_DEFINITIONS[status].statusLabel;
+}
+
+export function taskPhaseLabel(status: TaskStatus): string {
+  return TASK_STATUS_DEFINITIONS[status].displayPhase;
+}
+
+export function taskStatusVisualKind(status: TaskStatus): TaskStatusVisualKind {
+  return TASK_STATUS_DEFINITIONS[status].visualKind;
+}
 
 export const WORKFLOWS = ["backend-feature"] as const;
 export type Workflow = (typeof WORKFLOWS)[number];

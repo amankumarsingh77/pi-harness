@@ -61,6 +61,7 @@ export function PlanPageLive({
         canCancelRun={task.status === "planning" && bundle.gate === "running" && planRunActive}
         research={bundle.research}
         planEvents={bundle.events}
+        preflightSteps={bundle.preflightSteps}
         plan={bundle.plan}
         blastRadius={bundle.blastRadius}
         scenarios={bundle.scenarios}

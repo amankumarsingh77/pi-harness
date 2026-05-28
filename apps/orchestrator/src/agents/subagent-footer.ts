@@ -9,7 +9,7 @@ You have the \`git_history\` tool for read-only git history. Use it instead of b
 
 You have no ability to spawn other agents. Use only the tools provided to you. Do not run bash.
 ${gitHistory}
-When you are done researching, persist your findings via the \`write_findings\` tool. It accepts a single \`body\` argument (the full markdown for your findings document) and writes to the correct path automatically — there is no path parameter to choose. Call it exactly once.`;
+Persist your findings via the \`write_findings\` tool. It accepts a single \`body\` argument (the full markdown for your findings document) and writes to the correct path automatically — there is no path parameter to choose. Write a concise checkpoint early, then overwrite it with final findings if you learn more.`;
 }
 
 export const SUBAGENT_FOOTER = makeSubagentFooter();

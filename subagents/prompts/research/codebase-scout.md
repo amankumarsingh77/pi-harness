@@ -75,4 +75,4 @@ Use file:line refs liberally. Skip generic framework code (e.g. don't trace Fast
 1. Read `.harness/<task>/design.md` and `spec.md` first to scope your search to what the ticket actually needs.
 2. Run `grep` / `find` / `ls` to locate candidate files. Keep tool calls focused — re-running a slightly different grep is fine; bulk-listing the entire repo is not.
 3. Use `read` only on high-signal files to confirm their purpose and to extract the patterns + call paths.
-4. Persist your findings via the `write_findings` tool. Call it exactly once when done.
+4. Persist your findings via the `write_findings` tool. Write a concise checkpoint early, then overwrite it with final findings if you learn more.

@@ -58,7 +58,9 @@ export type GitHistoryDetails =
 
 export function makeGitHistoryTool(deps: {
   cwd: string;
+  maxCalls?: number;
 }): ToolLike<typeof GitHistoryParams, GitHistoryDetails> {
+  let calls = 0;
   return {
     name: "git_history",
     label: "Git history",
@@ -66,6 +68,10 @@ export function makeGitHistoryTool(deps: {
       "Read-only git history helper. Supports is_repo, log_by_path, log_by_grep, show_stat, and show_file_at_commit. It never mutates the repository.",
     parameters: GitHistoryParams,
     async execute(_id, params, signal) {
+      calls += 1;
+      if (deps.maxCalls !== undefined && calls > deps.maxCalls) {
+        return failure(params.action, `git_history call budget exceeded (${deps.maxCalls})`);
+      }
       const validationError = validateParams(params);
       if (validationError) return failure(params.action, validationError);
 

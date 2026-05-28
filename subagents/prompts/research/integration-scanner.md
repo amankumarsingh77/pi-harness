@@ -97,4 +97,4 @@ CRITICAL: Use EXACTLY this format. Never use markdown tables. Use relative paths
 - Don't skip infrastructure/config files
 - Don't limit search to obvious imports — check string references too
 
-When done, persist the findings via `write_findings` exactly once. Remember: You're mapping the CONNECTION GRAPH, not understanding the implementation. Help users see what touches the target area so nothing is missed during changes.
+Persist the findings via `write_findings`: write a concise checkpoint early, then overwrite it with final findings if you learn more. Remember: You're mapping the CONNECTION GRAPH, not understanding the implementation. Help users see what touches the target area so nothing is missed during changes.

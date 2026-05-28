@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
-import type { Run, Task } from "@pi-harness/shared";
+import { taskPhaseLabel, taskStatusLabel, type Run, type Task } from "@pi-harness/shared";
 import { StatusIcon, statusKindFor } from "@/components/kanban/status-icon";
 import { TaskCostStrip } from "./task-cost-strip";
 
@@ -35,10 +35,10 @@ export function TaskDetailShell({
           <div className="mt-3 flex flex-wrap gap-2">
             <MetaPill>
               <StatusIcon kind={statusKindFor(task.status)} size={12} live={liveRunId !== null} />
-              <strong>{statusLabel(task.status)}</strong>
+              <strong>{taskStatusLabel(task.status)}</strong>
             </MetaPill>
             <MetaPill>
-              phase <strong>{phaseLabel(task.status)}</strong>
+              phase <strong>{taskPhaseLabel(task.status)}</strong>
             </MetaPill>
             <MetaPill>
               branch <strong>{task.branchName ?? "—"}</strong>
@@ -73,54 +73,4 @@ function MetaPill({ children }: { readonly children: React.ReactNode }) {
       {children}
     </span>
   );
-}
-
-function statusLabel(status: Task["status"]): string {
-  switch (status) {
-    case "backlog":
-      return "queued";
-    case "brainstorming":
-    case "planning":
-      return "needs input";
-    case "executing":
-    case "verifying":
-    case "ready_to_ship":
-      return "running";
-    case "done":
-      return "done";
-    case "cancelled":
-      return "cancelled";
-    case "brainstorm_failed":
-    case "plan_failed":
-    case "code_failed":
-    case "verification_failed":
-    case "pr_failed":
-      return "blocked";
-  }
-}
-
-function phaseLabel(status: Task["status"]): string {
-  switch (status) {
-    case "brainstorming":
-    case "brainstorm_failed":
-      return "brainstorm";
-    case "planning":
-    case "plan_failed":
-      return "plan";
-    case "executing":
-    case "code_failed":
-      return "code";
-    case "verifying":
-    case "verification_failed":
-      return "verify";
-    case "ready_to_ship":
-    case "pr_failed":
-      return "pr";
-    case "backlog":
-      return "intake";
-    case "done":
-      return "done";
-    case "cancelled":
-      return "cancelled";
-  }
 }

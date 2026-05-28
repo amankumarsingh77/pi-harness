@@ -90,6 +90,10 @@ function serviceEnv(config: HarnessProjectConfig, env: NodeJS.ProcessEnv): NodeJ
     PORT: String(config.orchestratorPort),
     DASHBOARD_PORT: String(config.dashboardPort),
     PI_WEB_PROVIDER: config.webProvider,
+    GRAPHIFY_PROVIDER: config.graphify.provider,
+    GRAPHIFY_MODEL: config.graphify.model,
+    GRAPHIFY_BASE_URL: config.graphify.baseUrl,
+    GRAPHIFY_API_KEY_ENV: config.graphify.apiKeyEnv,
   };
 }
 

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import yaml from "js-yaml";
@@ -13,6 +13,8 @@ import {
   BlastRadiusFileSchema,
   type Artifact,
   type PhaseModelConfig,
+  type PreflightStep,
+  type PreflightStepStatus,
 } from "@pi-harness/shared";
 import { PREFLIGHT_SUBAGENTS, getSubagent } from "@pi-harness/subagents";
 import { makeGitHistoryTool } from "./git-history-tool.js";
@@ -29,8 +31,10 @@ export { PREFLIGHT_SUBAGENTS };
 export type PreflightSubagent = string;
 
 export const PREFLIGHT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+export const PREFLIGHT_SUBAGENT_RETRY_TIMEOUT_MS = 2 * 60 * 1000;
 const SCOUT_SUBAGENT = "codebase-scout";
 const GIT_HISTORY_SUBAGENTS = new Set(["precedent-locator"]);
+const SOFT_FALLBACK_SUBAGENTS = new Set(["integration-scanner", "precedent-locator"]);
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -55,6 +59,8 @@ export type PreflightSubagentEvent =
 export type PreflightOpts = {
   cwd: string;
   taskId: string;
+  runId?: string;
+  attemptId?: string;
   ticketTitle: string;
   ticketDescription: string;
   designBody: string;
@@ -69,8 +75,10 @@ export type PreflightOpts = {
   // wires this to plan-event-bus so subagent message_delta / tool_call /
   // tool_result events surface in the existing Agent Log on /tasks/[id].
   onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
+  onStep?: (step: PreflightStep) => void | Promise<void>;
   signal?: AbortSignal;
   subagentTimeoutMs?: number;
+  retrySubagentTimeoutMs?: number;
 };
 
 export type PreflightSubagentResult = {
@@ -83,6 +91,7 @@ export type PreflightSubagentResult = {
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
+  fallback?: boolean;
 };
 
 export type PreflightResult = {
@@ -108,6 +117,7 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
     subagent: SCOUT_SUBAGENT,
     opts,
     researchDir,
+    required: true,
   });
 
   if (!scoutResult.ok) {
@@ -122,7 +132,7 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
 
   const enrichmentSubagents = PREFLIGHT_SUBAGENTS.filter((sa) => sa !== SCOUT_SUBAGENT);
   const tasks = enrichmentSubagents.map((subagent) =>
-    runSubagentWithEvents({ subagent, opts, researchDir }),
+    runSubagentWithFallback({ subagent, opts, researchDir }),
   );
 
   const results = [scoutResult, ...(await Promise.all(tasks))];
@@ -139,13 +149,28 @@ async function runSubagentWithEvents(args: {
   subagent: PreflightSubagent;
   opts: PreflightOpts;
   researchDir: string;
+  required: boolean;
+  attemptSuffix?: string;
+  narrowed?: boolean;
+  timeoutMs?: number;
 }): Promise<PreflightSubagentResult> {
   const { subagent, opts, researchDir } = args;
   const findingsPath = join(researchDir, `${subagent}.md`);
+  const attemptId = stepAttemptId(opts, args.attemptSuffix);
   // Cache hit: a previous tick already wrote this subagent's findings.
   // Skip silently — emit no started/ended events so the dashboard's
   // strip doesn't double-count.
   if (hasNonEmptyFindings(findingsPath)) {
+    await opts.onStep?.(makeStep({
+      opts,
+      attemptId,
+      subagent,
+      status: "skipped",
+      required: args.required,
+      artifactPath: findingsPath,
+      startedAt: new Date(),
+      endedAt: new Date(),
+    }));
     return {
       subagent,
       ok: true,
@@ -159,11 +184,27 @@ async function runSubagentWithEvents(args: {
 
   const sessionId = `psa_${randomUUID()}`;
   const startedAt = Date.now();
+  const startedAtDate = new Date(startedAt);
+  await opts.onStep?.(makeStep({
+    opts,
+    attemptId,
+    subagent,
+    status: "running",
+    required: args.required,
+    artifactPath: findingsPath,
+    startedAt: startedAtDate,
+  }));
   await opts.onSubagentEvent({ kind: "started", subagent, sessionId });
 
   let result: PreflightSubagentResult;
   try {
-    const usage = await runOneSubagent({ subagent, opts, findingsPath });
+    const usage = await runOneSubagent({
+      subagent,
+      opts,
+      findingsPath,
+      narrowed: args.narrowed === true,
+      ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
+    });
     result = {
       subagent,
       ok: true,
@@ -189,6 +230,21 @@ async function runSubagentWithEvents(args: {
     };
   }
 
+  await opts.onStep?.(makeStep({
+    opts,
+    attemptId,
+    subagent,
+    status: stepStatusForResult(result),
+    required: args.required,
+    artifactPath: findingsPath,
+    startedAt: startedAtDate,
+    endedAt: new Date(),
+    costUsd: result.costUsd,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    error: result.error ?? null,
+  }));
+
   await opts.onSubagentEvent({
     kind: "ended",
     subagent,
@@ -204,18 +260,67 @@ async function runSubagentWithEvents(args: {
   return result;
 }
 
+async function runSubagentWithFallback(args: {
+  subagent: PreflightSubagent;
+  opts: PreflightOpts;
+  researchDir: string;
+}): Promise<PreflightSubagentResult> {
+  const { subagent, opts, researchDir } = args;
+  const required = !SOFT_FALLBACK_SUBAGENTS.has(subagent);
+  const first = await runSubagentWithEvents({
+    subagent,
+    opts,
+    researchDir,
+    required,
+  });
+  if (first.ok || first.cancelled || required) return first;
+
+  const retry = await runSubagentWithEvents({
+    subagent,
+    opts,
+    researchDir,
+    required,
+    attemptSuffix: "retry",
+    narrowed: true,
+    timeoutMs: opts.retrySubagentTimeoutMs ?? PREFLIGHT_SUBAGENT_RETRY_TIMEOUT_MS,
+  });
+  if (retry.ok || retry.cancelled) return retry;
+
+  return writeFallbackFindings({
+    subagent,
+    opts,
+    researchDir,
+    prior: retry,
+    required,
+    attemptId: stepAttemptId(opts, "fallback"),
+  });
+}
+
 async function runOneSubagent(args: {
   subagent: PreflightSubagent;
   opts: PreflightOpts;
   findingsPath: string;
+  narrowed: boolean;
+  timeoutMs?: number;
 }): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
   const { subagent, opts, findingsPath } = args;
   const def = getSubagent(subagent);
   const hasGitHistory = GIT_HISTORY_SUBAGENTS.has(subagent);
   const systemPrompt = `${readFileSync(def.promptPath, "utf8")}\n\n${makeSubagentFooter({ hasGitHistory })}\n`;
-  const userPrompt = buildSubagentPrompt({ subagent, opts, findingsPath });
+  const userPrompt = buildSubagentPrompt({
+    subagent,
+    opts,
+    findingsPath,
+    narrowed: args.narrowed,
+  });
+  const gitHistoryTool = hasGitHistory
+    ? makeGitHistoryTool({
+        cwd: opts.cwd,
+        ...(args.narrowed ? { maxCalls: 4 } : {}),
+      })
+    : null;
   const customTools = [
-    ...(hasGitHistory ? [makeGitHistoryTool({ cwd: opts.cwd })] : []),
+    ...(gitHistoryTool ? [gitHistoryTool] : []),
     makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
     ...makeGraphifyQueryTools({ cwd: opts.cwd }),
   ];
@@ -243,7 +348,7 @@ async function runOneSubagent(args: {
     throw err;
   }
 
-  const timeoutMs = opts.subagentTimeoutMs ?? PREFLIGHT_SUBAGENT_TIMEOUT_MS;
+  const timeoutMs = args.timeoutMs ?? opts.subagentTimeoutMs ?? PREFLIGHT_SUBAGENT_TIMEOUT_MS;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let promptPromise: Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> | undefined;
   const onAbort = (): void => {
@@ -287,6 +392,7 @@ function buildSubagentPrompt(args: {
   subagent: PreflightSubagent;
   opts: PreflightOpts;
   findingsPath: string;
+  narrowed: boolean;
 }): string {
   const { subagent, opts } = args;
   const digest = buildTicketDigest({
@@ -301,11 +407,24 @@ function buildSubagentPrompt(args: {
   const blastRadiusSection = blastRadius
     ? [``, `# Current blast-radius.yaml`, ``, blastRadius]
     : [];
+  const retryDiscipline = args.narrowed
+    ? [
+        ``,
+        `# Retry budget`,
+        ``,
+        `This is a narrowed retry after an earlier attempt failed. Do not restart broad discovery.`,
+        `- Use only the ticket digest and blast-radius items already provided.`,
+        `- Make at most 15 focused tool calls.`,
+        `- If you need git_history, make at most 4 git_history calls.`,
+        `- Persist a concise findings document immediately once you have enough evidence.`,
+      ]
+    : [];
   return [
     `You are running inside a git worktree at ${opts.cwd}.`,
     ``,
     digest,
     ...blastRadiusSection,
+    ...retryDiscipline,
     ``,
     `# Your job`,
     ``,
@@ -317,8 +436,127 @@ function buildSubagentPrompt(args: {
     `- File:line refs and short prose.`,
     `- No code blocks longer than 3 lines. Don't quote whole functions.`,
     ``,
-    `Persist your findings via the \`write_findings\` tool. Call it exactly once when done.`,
+    `Persist your findings via the \`write_findings\` tool. Write an initial concise findings skeleton early, then overwrite it with final findings if you learn more.`,
   ].join("\n");
+}
+
+async function writeFallbackFindings(args: {
+  subagent: PreflightSubagent;
+  opts: PreflightOpts;
+  researchDir: string;
+  prior: PreflightSubagentResult;
+  required: boolean;
+  attemptId: string;
+}): Promise<PreflightSubagentResult> {
+  const { subagent, opts, researchDir, prior, required, attemptId } = args;
+  const findingsPath = join(researchDir, `${subagent}.md`);
+  const fallbackReason = prior.error ?? "preflight enrichment failed";
+  const startedAt = new Date();
+  const body = fallbackFindingsBody({ subagent, reason: fallbackReason });
+  await writeFile(findingsPath, body, "utf8");
+  const endedAt = new Date();
+  await opts.onStep?.(makeStep({
+    opts,
+    attemptId,
+    subagent,
+    status: "fallback_succeeded",
+    required,
+    artifactPath: findingsPath,
+    startedAt,
+    endedAt,
+    error: fallbackReason,
+    fallbackReason,
+  }));
+  return {
+    subagent,
+    ok: true,
+    findingsPath,
+    costUsd: prior.costUsd,
+    inputTokens: prior.inputTokens,
+    outputTokens: prior.outputTokens,
+    durationMs: prior.durationMs,
+    fallback: true,
+  };
+}
+
+function fallbackFindingsBody(args: {
+  subagent: PreflightSubagent;
+  reason: string;
+}): string {
+  if (args.subagent === "integration-scanner") {
+    return [
+      "## Connections unavailable",
+      "",
+      `Fallback finding: integration-scanner did not complete before the bounded retry finished.`,
+      `Reason: ${args.reason}`,
+      "",
+      "Planner instruction: treat blast radius as unverified. Use codebase-scout.md and blast-radius.yaml only, cite this fallback, and avoid claiming complete inbound/outbound coverage.",
+      "",
+    ].join("\n");
+  }
+  return [
+    "## Precedents",
+    "",
+    "Fallback finding: no reliable precedent scan completed.",
+    "",
+    "## Follow-up fixes",
+    "",
+    `Reason: ${args.reason}`,
+    "",
+    "## Composite lessons",
+    "",
+    "Planner instruction: do not invent historical precedents. State that precedent findings were unavailable and keep risk mitigations conservative.",
+    "",
+    "## Gaps",
+    "",
+    "- Git-history-backed lessons unavailable after bounded retry.",
+    "",
+  ].join("\n");
+}
+
+function stepAttemptId(opts: PreflightOpts, suffix: string | undefined): string {
+  const base = opts.attemptId ?? "preflight";
+  return suffix ? `${base}:${suffix}` : base;
+}
+
+function stepStatusForResult(result: PreflightSubagentResult): PreflightStepStatus {
+  if (result.ok) return "succeeded";
+  if (result.cancelled) return "cancelled";
+  if (result.error?.includes("timed out")) return "timed_out";
+  return "failed";
+}
+
+function makeStep(args: {
+  opts: PreflightOpts;
+  attemptId: string;
+  subagent: PreflightSubagent;
+  status: PreflightStepStatus;
+  required: boolean;
+  artifactPath: string;
+  startedAt: Date;
+  endedAt?: Date;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  error?: string | null;
+  fallbackReason?: string | null;
+}): PreflightStep {
+  return {
+    taskId: args.opts.taskId,
+    runId: args.opts.runId ?? "unknown",
+    attemptId: args.attemptId,
+    subagent: args.subagent,
+    status: args.status,
+    required: args.required,
+    artifactPath: args.artifactPath,
+    startedAt: args.startedAt,
+    endedAt: args.endedAt ?? null,
+    costUsd: args.costUsd ?? 0,
+    inputTokens: args.inputTokens ?? 0,
+    outputTokens: args.outputTokens ?? 0,
+    error: args.error ?? null,
+    fallbackReason: args.fallbackReason ?? null,
+  };
 }
 
 async function ensureBlastRadiusArtifact(args: {

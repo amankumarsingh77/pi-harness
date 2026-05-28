@@ -864,6 +864,52 @@ describe("http", () => {
     expect(reset).toBeDefined();
   });
 
+  it("POST /api/tasks/:id/brainstorm/restart recovers a brainstorming task with no run", async () => {
+    // Regression: a brainstorm tick that died after the worktree-path write
+    // but before dispatchBrainstorm created a run left the task wedged in
+    // `brainstorming` with zero runs. The restart route used to 409
+    // no_active_run; it must instead scaffold + create a fresh run + enqueue.
+    const t = await runs.createTask({ title: "restart-no-run" });
+    const worktree = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorming",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+    });
+    // No run created — this is the wedged state.
+    expect(await runs.listRuns(t.id)).toHaveLength(0);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/restart`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok?: boolean; archivedRunId?: string | null; newRunId?: string };
+    expect(body.ok).toBe(true);
+    expect(body.archivedRunId).toBeNull();
+    expect(typeof body.newRunId).toBe("string");
+
+    // A fresh brainstorm run now exists for the scheduler to drive.
+    const active = await runs.findActiveRun(t.id, "brainstorm");
+    expect(active).not.toBeNull();
+    expect(active!.id).toBe(body.newRunId);
+
+    // session_reset is still emitted so the dashboard sees the boundary.
+    const newJsonl = (await readFile(
+      join(worktree, ".harness", t.id, "brainstorm.jsonl"),
+      "utf8",
+    ))
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const reset = newJsonl.find(
+      (e) => e.kind === "brainstorm_system" && e["systemKind"] === "session_reset",
+    );
+    expect(reset).toBeDefined();
+    expect((reset!["data"] as { archivedRunId?: string | null }).archivedRunId).toBeNull();
+  });
+
   it("POST /api/tasks/:id/brainstorm/restart returns 409 when task is past brainstorming", async () => {
     const t = await runs.createTask({ title: "restart-late" });
     const worktree = await makeDraftWorktree(t.id);

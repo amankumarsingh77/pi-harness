@@ -3,13 +3,17 @@ import cors from "@fastify/cors";
 import type { RunStore } from "../adapters/run-store.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { LiveEventStore } from "../adapters/live-event-store.js";
+import { PreflightStepStore } from "../adapters/preflight-step-store.js";
+import type { PreflightStepStore as PreflightStepStoreType } from "../adapters/preflight-step-store.js";
 import { ClaimLedgerStore, MissionStore } from "../adapters/mission-store.js";
 import type { ClaimLedgerStore as ClaimLedgerStoreType, MissionStore as MissionStoreType } from "../adapters/mission-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
+import type { GraphifyAutoInstaller } from "../agents/graphify-installer.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
 import { TaskMutationLock } from "../runner/task-mutation-lock.js";
+import { TaskWorkflowService } from "../services/task-workflow-service.js";
 import { isHarnessError } from "../domain/errors.js";
 import { registerHealth } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
@@ -21,6 +25,7 @@ import { registerPlanRoutes } from "./routes/plan.js";
 import { registerLiveEventStream } from "./routes/live.js";
 import { registerMissionRoutes } from "./routes/mission.js";
 import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/verifier.js";
+import { registerGraphifyRoutes } from "./routes/graphify.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -41,9 +46,12 @@ export type ServerDeps = {
   // (tests), Fastify falls back to a quiet warn-level logger.
   pinoLogger?: FastifyBaseLogger;
   liveEvents?: LiveEventStore;
+  preflightSteps?: PreflightStepStoreType;
   missionStore?: MissionStoreType;
   claimLedger?: ClaimLedgerStoreType;
   verifierRunners?: VerifierRouteRunners;
+  graphifyInstaller?: Pick<GraphifyAutoInstaller, "status">;
+  workflow?: TaskWorkflowService;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -80,12 +88,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const mutationLock = deps.mutationLock ?? new TaskMutationLock();
   const missionStore = deps.missionStore ?? new MissionStore({ stateDir });
   const claimLedger = deps.claimLedger ?? new ClaimLedgerStore({ stateDir });
+  const preflightSteps = deps.preflightSteps ?? new PreflightStepStore({ stateDir });
+  const workflow = deps.workflow ?? new TaskWorkflowService({
+    runs: deps.runs,
+    events: deps.events,
+    artifacts,
+    missionStore,
+    mutationLock,
+    ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
+    ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
+  });
   registerHealth(app);
+  registerGraphifyRoutes(app, {
+    ...(deps.graphifyInstaller ? { installer: deps.graphifyInstaller } : {}),
+  });
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,
     artifacts,
     missionStore,
+    workflow,
     mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
@@ -118,6 +140,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     runs: deps.runs,
     artifacts,
     events: deps.events,
+    workflow,
     mutationLock,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
@@ -126,7 +149,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     runs: deps.runs,
     artifacts,
     events: deps.events,
+    workflow,
     mutationLock,
+    preflightSteps,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });

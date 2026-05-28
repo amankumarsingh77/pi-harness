@@ -1,14 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createAgentSession } from "@pi-harness/pi-bridge";
+import { createAgentSession, loadEnvHarness } from "@pi-harness/pi-bridge";
 import { loadConfig } from "./config.js";
 import { RunStore } from "./adapters/run-store.js";
 import { EventStore } from "./adapters/event-store.js";
 import { LiveEventStore } from "./adapters/live-event-store.js";
+import { PreflightStepStore } from "./adapters/preflight-step-store.js";
 import { ClaimLedgerStore, MissionStore } from "./adapters/mission-store.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
-import { deriveBrainstormGate } from "./agents/brainstorm-gate.js";
+import { GraphifyAutoInstaller } from "./agents/graphify-installer.js";
 import { GraphifyManager } from "./agents/graphify-manager.js";
 import { createPinoLogger, fromPino } from "./domain/logger.js";
 import { reconcileWorktrees } from "./runner/janitor.js";
@@ -16,10 +17,12 @@ import { TaskScheduler } from "./runner/scheduler.js";
 import { CancellationRegistry } from "./runner/cancellation.js";
 import type { PhaseDeps } from "./runner/phase-prompts.js";
 import { buildServer } from "./http/server.js";
+import { TaskWorkflowService } from "./services/task-workflow-service.js";
 
 const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
+  loadEnvHarness();
   const config = loadConfig();
   // Root logger. `service` is attached to every line so multi-service
   // log aggregation can route us cleanly. We keep both the pino instance
@@ -45,6 +48,7 @@ async function main(): Promise<void> {
     },
   });
   const events = new EventStore({ stateDir: config.stateDir }, liveEvents);
+  const preflightSteps = new PreflightStepStore({ stateDir: config.stateDir });
   const missionStore = new MissionStore({ stateDir: config.stateDir });
   const claimLedger = new ClaimLedgerStore({ stateDir: config.stateDir });
   const worktrees = new WorktreeManager({
@@ -53,7 +57,16 @@ async function main(): Promise<void> {
     baseBranch: config.baseBranch,
   });
   const artifacts = new ArtifactsStore({ stateDir: config.stateDir });
-  const graphify = new GraphifyManager({ stateDir: config.stateDir });
+  const graphifyInstaller = new GraphifyAutoInstaller({
+    stateDir: config.stateDir,
+    liveEvents,
+    cwd: config.repoRoot,
+  });
+  const graphify = new GraphifyManager({
+    stateDir: config.stateDir,
+    installer: graphifyInstaller,
+    graphify: config.graphify,
+  });
 
   void graphify.ensureInitialized(config.repoRoot)
     .then((result) => {
@@ -95,6 +108,7 @@ async function main(): Promise<void> {
     createAgentSession,
     store: artifacts,
     eventStore: events,
+    preflightSteps,
     claimLedger,
     claimPublisher: liveEvents,
     graphify,
@@ -110,6 +124,17 @@ async function main(): Promise<void> {
   };
 
   const cancellation = new CancellationRegistry();
+  const workflow = new TaskWorkflowService({
+    runs,
+    events,
+    artifacts,
+    missionStore,
+    worktrees,
+    phaseDeps,
+    retryCap: config.retryCap,
+    cancellation,
+    graphify,
+  });
   const scheduler = new TaskScheduler({
     runs,
     events,
@@ -118,21 +143,14 @@ async function main(): Promise<void> {
     retryCap: config.retryCap,
     cancellation,
     graphify,
+    workflow,
     logger: log.child({ component: "scheduler" }),
   });
+  workflow.setScheduler(scheduler);
 
-  // Recovery sweep: re-enqueue every non-terminal task so the agent picks up
-  // where it left off after a restart. The run-loop is idempotent on JSONL
-  // state (cursor recomputes from events).
-  for (const t of activeTasks) {
-    if (t.status === "brainstorming" && t.worktreePath) {
-      const gate = await deriveBrainstormGate(t.worktreePath, t.id, artifacts);
-      if (gate === "awaiting_user") continue; // gated on user
-    }
-    scheduler.enqueue(t.id);
-  }
+  const recovered = await workflow.recoverRunnableTasks();
   log.info(
-    { recovered: activeTasks.length },
+    { recovered },
     "scheduler recovery sweep complete",
   );
 
@@ -145,8 +163,11 @@ async function main(): Promise<void> {
     claimLedger,
     scheduler,
     cancellation,
+    workflow,
     pinoLogger: pinoRoot,
     liveEvents,
+    preflightSteps,
+    graphifyInstaller,
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   log.info({ port: config.port }, "orchestrator listening");

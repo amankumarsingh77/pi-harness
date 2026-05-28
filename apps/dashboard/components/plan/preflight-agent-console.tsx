@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { AgentEvent } from "@pi-harness/shared";
+import type { AgentEvent, PreflightStep } from "@pi-harness/shared";
 import type { PlanJsonlEvent } from "@/lib/api";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
@@ -15,6 +15,7 @@ type AgentSummary = {
   readonly events: readonly AgentEvent[];
   readonly findingsBody: string | null;
   readonly meta: readonly string[];
+  readonly step: PreflightStep | null;
 };
 
 type DrawerTab = "timeline" | "findings" | "raw";
@@ -25,12 +26,14 @@ export function PreflightAgentConsole({
   research,
   planEvents,
   liveEvents,
+  preflightSteps = [],
 }: {
   readonly taskId: string;
   readonly canCancelRun: boolean;
   readonly research: Record<string, string | null>;
   readonly planEvents: readonly PlanJsonlEvent[];
   readonly liveEvents: readonly AgentEvent[];
+  readonly preflightSteps?: readonly PreflightStep[];
 }) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [tab, setTab] = useState<DrawerTab>("timeline");
@@ -46,9 +49,10 @@ export function PreflightAgentConsole({
           research,
           lifecycleEvents,
           liveEvents,
+          preflightSteps,
         }),
       ),
-    [research, lifecycleEvents, liveEvents],
+    [research, lifecycleEvents, liveEvents, preflightSteps],
   );
   const selectedSummary =
     selectedAgent === null
@@ -58,6 +62,7 @@ export function PreflightAgentConsole({
   const counts = {
     done: summaries.filter((summary) => summary.kind === "done").length,
     progress: summaries.filter((summary) => summary.kind === "progress").length,
+    fallback: summaries.filter((summary) => summary.kind === "fallback").length,
     queued: summaries.filter((summary) => summary.kind === "intake").length,
     blocked: summaries.filter((summary) => summary.kind === "blocked").length,
   };
@@ -89,6 +94,7 @@ export function PreflightAgentConsole({
         </div>
         <div className="whitespace-nowrap font-mono text-[11px] text-fg-mute">
           {counts.done} done · {counts.progress} live · {counts.queued} queued
+          {counts.fallback > 0 ? ` · ${counts.fallback} fallback` : ""}
           {counts.blocked > 0 ? ` · ${counts.blocked} blocked` : ""}
         </div>
       </section>
@@ -306,19 +312,24 @@ function buildAgentSummary({
   research,
   lifecycleEvents,
   liveEvents,
+  preflightSteps,
 }: {
   readonly name: string;
   readonly research: Record<string, string | null>;
   readonly lifecycleEvents: readonly PlanJsonlEvent[];
   readonly liveEvents: readonly AgentEvent[];
+  readonly preflightSteps: readonly PreflightStep[];
 }): AgentSummary {
-  const kind = deriveKind(name, research, lifecycleEvents);
+  const kind = deriveKind(name, research, lifecycleEvents, preflightSteps);
   const agentEvents = liveEvents.filter((event) => eventHasSubagent(event, name));
   const ended = latestEnded(name, lifecycleEvents);
   const started = latestStarted(name, lifecycleEvents);
+  const step = latestStep(name, preflightSteps);
   const durationMs =
-    ended?.durationMs ?? (started ? Math.max(0, Date.now() - new Date(started.ts).getTime()) : 0);
-  const cost = ended?.costUsd ?? 0;
+    ended?.durationMs ??
+    stepDurationMs(step) ??
+    (started ? Math.max(0, Date.now() - new Date(started.ts).getTime()) : 0);
+  const cost = ended?.costUsd ?? step?.costUsd ?? 0;
   const toolCalls = agentEvents.filter((event) => event.kind === "tool_call").length;
   const findingsBody = research[name] ?? null;
 
@@ -327,7 +338,8 @@ function buildAgentSummary({
     kind,
     events: agentEvents,
     findingsBody,
-    meta: buildMeta({ kind, durationMs, cost, toolCalls }),
+    step,
+    meta: buildMeta({ kind, durationMs, cost, toolCalls, error: step?.error ?? null }),
   };
 }
 
@@ -336,17 +348,20 @@ function buildMeta({
   durationMs,
   cost,
   toolCalls,
+  error,
 }: {
   readonly kind: DotKind;
   readonly durationMs: number;
   readonly cost: number;
   readonly toolCalls: number;
+  readonly error: string | null;
 }): readonly string[] {
   const status = kind === "intake" ? "queued" : kind === "progress" ? "live" : kind;
   return [
     durationMs > 0 ? `${status} · ${formatDuration(durationMs)}` : status,
     cost > 0 ? `$${cost.toFixed(3)}` : null,
     toolCalls > 0 ? `${toolCalls} call${toolCalls === 1 ? "" : "s"}` : null,
+    error ? shortError(error) : null,
   ].filter((item): item is string => item !== null);
 }
 
@@ -420,12 +435,25 @@ function latestEnded(
   return null;
 }
 
-function statusIconKind(kind: DotKind): "intake" | "progress" | "done" | "blocked" {
+function latestStep(subagent: string, steps: readonly PreflightStep[]): PreflightStep | null {
+  return [...steps].reverse().find((step) => step.subagent === subagent) ?? null;
+}
+
+function stepDurationMs(step: PreflightStep | null): number | null {
+  if (!step) return null;
+  const startedAt = toEventDate(step.startedAt).getTime();
+  const endedAt = step.endedAt ? toEventDate(step.endedAt).getTime() : Date.now();
+  return Math.max(0, endedAt - startedAt);
+}
+
+function statusIconKind(kind: DotKind): "intake" | "progress" | "review" | "done" | "blocked" {
+  if (kind === "fallback") return "review";
   return kind;
 }
 
 function emptyTextFor(kind: DotKind): string {
   if (kind === "intake") return "waiting for this preflight agent to start";
+  if (kind === "fallback") return "fallback findings were written after bounded retry";
   return "no tool calls yet";
 }
 
@@ -435,7 +463,12 @@ function findingsPreview(summary: AgentSummary): string {
   }
   if (summary.kind === "intake") return "No findings yet.";
   if (summary.kind === "progress") return "Live: findings will appear once the agent finishes.";
+  if (summary.kind === "fallback") return "Fallback findings written after bounded retry.";
   return "Findings were not written.";
+}
+
+function shortError(error: string): string {
+  return error.length > 72 ? `${error.slice(0, 69)}...` : error;
 }
 
 function formatDuration(ms: number): string {

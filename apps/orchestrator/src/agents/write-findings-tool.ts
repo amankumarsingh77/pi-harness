@@ -49,7 +49,7 @@ export function makeWriteFindingsTool(deps: {
     name: "write_findings",
     label: "Write findings",
     description:
-      "Persist your findings document. Accepts a single `body` argument (the full markdown). The path is pre-bound to your assigned findings file — call this exactly once when you are done researching.",
+      "Persist your findings document. Accepts a single `body` argument (the full markdown). The path is pre-bound to your assigned findings file; repeated calls overwrite the same file so you can checkpoint early and finalize later.",
     parameters: WriteFindingsParams,
     async execute(_id, params) {
       await mkdir(dirname(path), { recursive: true });

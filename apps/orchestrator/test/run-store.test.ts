@@ -33,7 +33,7 @@ describe("RunStore", () => {
     const { runs: store } = createBareTestStores();
     const a = await store.createTask({ title: "a" });
     await store.createTask({ title: "b" });
-    await store.updateTaskStatus(a.id, "brainstorming");
+    await store.updateTask(a.id, { status: "brainstorming" });
 
     const back = await store.listTasksByStatus("backlog");
     const brain = await store.listTasksByStatus("brainstorming");
@@ -86,7 +86,7 @@ describe("RunStore", () => {
     await store.createTask({ title: "a" });
     await store.createTask({ title: "b" });
     const t = await store.createTask({ title: "c" });
-    await store.updateTaskStatus(t.id, "executing");
+    await store.updateTask(t.id, { status: "executing" });
 
     const counts = await store.countByStatus();
     expect(counts.backlog).toBe(2);

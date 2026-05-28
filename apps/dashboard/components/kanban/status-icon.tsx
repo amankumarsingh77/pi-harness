@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import type { TaskStatus } from "@pi-harness/shared";
+import { taskStatusVisualKind, type TaskStatus } from "@pi-harness/shared";
 
 export type StatusKind =
   | "intake"
@@ -8,22 +8,6 @@ export type StatusKind =
   | "blocked"
   | "shipping"
   | "done";
-
-const KIND_FOR_STATUS: Record<TaskStatus, StatusKind> = {
-  backlog: "intake",
-  brainstorming: "progress",
-  brainstorm_failed: "blocked",
-  planning: "progress",
-  plan_failed: "blocked",
-  executing: "progress",
-  code_failed: "blocked",
-  verifying: "progress",
-  verification_failed: "blocked",
-  ready_to_ship: "shipping",
-  pr_failed: "blocked",
-  done: "done",
-  cancelled: "blocked",
-};
 
 const COLOR_FOR_KIND: Record<StatusKind, string> = {
   intake: "var(--color-st-idle)",
@@ -35,7 +19,7 @@ const COLOR_FOR_KIND: Record<StatusKind, string> = {
 };
 
 export function statusKindFor(status: TaskStatus): StatusKind {
-  return KIND_FOR_STATUS[status];
+  return taskStatusVisualKind(status);
 }
 
 const LIVE_KINDS: ReadonlySet<StatusKind> = new Set(["progress"]);

@@ -32,9 +32,16 @@ export function DashboardLiveProvider({ children }: { children: React.ReactNode 
       const parsed = parseLiveEnvelope(ev.data, "run.updated");
       if (parsed) applyRunUpdated(queryClient, parsed.payload);
     };
+    const onGraphifyStatusUpdated = (ev: MessageEvent<string>) => {
+      const parsed = parseLiveEnvelope(ev.data, "graphify.status.updated");
+      if (parsed) {
+        queryClient.setQueryData(queryKeys.graphifyStatus, { status: parsed.payload });
+      }
+    };
     es.addEventListener("dashboard.snapshot", onSnapshot);
     es.addEventListener("task.updated", onTaskUpdated);
     es.addEventListener("run.updated", onRunUpdated);
+    es.addEventListener("graphify.status.updated", onGraphifyStatusUpdated);
     return () => es.close();
   }, [queryClient]);
 

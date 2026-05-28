@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "@pi-harness/shared";
@@ -109,6 +109,109 @@ describe("runPlan", () => {
       "graphify_explain",
       "graphify_stats",
     ]);
+  });
+
+  it("continues to the planner after soft preflight agents fall back", async () => {
+    const researchDir = join(cwd, ".harness", "T-1", "research");
+    await Promise.all(
+      PREFLIGHT_SUBAGENTS.map((subagent) =>
+        unlink(join(researchDir, `${subagent}.md`)).catch(() => {}),
+      ),
+    );
+    const promptTexts: string[] = [];
+    const createAgentSession = async (opts: AgentSessionOptions): Promise<AgentSession> => {
+      const writeFindings = (opts.customTools ?? []).find(
+        (tool) => tool.name === "write_findings",
+      ) as
+        | (NonNullable<AgentSessionOptions["customTools"]>[number] & {
+            __subagent: string;
+          })
+        | undefined;
+      if (writeFindings) {
+        const subagent = writeFindings.__subagent;
+        if (subagent === "codebase-scout") {
+          return {
+            async prompt() {
+              await writeFindings.execute(
+                "test-write",
+                { body: "# codebase-scout\n\nok\n" },
+                undefined,
+                undefined,
+                undefined as never,
+              );
+              return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
+            },
+            async abort() {},
+            async close() {},
+          } satisfies AgentSession;
+        }
+        return {
+          async prompt() {
+            return new Promise(() => {});
+          },
+          async abort() {},
+          async close() {},
+        } satisfies AgentSession;
+      }
+      return {
+        async prompt(text) {
+          promptTexts.push(text);
+          return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
+        },
+        async abort() {},
+        async close() {},
+      } satisfies AgentSession;
+    };
+
+    const first = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession,
+      ticketTitle: "Fallback preflight",
+      ticketDescription: "Soft agents hang.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+      preflightSubagentTimeoutMs: 5,
+      preflightRetrySubagentTimeoutMs: 5,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(first.ready).toBe(false);
+    expect(promptTexts).toHaveLength(0);
+    expect(await readFile(join(researchDir, "integration-scanner.md"), "utf8")).toContain("Fallback finding");
+    expect(await readFile(join(researchDir, "precedent-locator.md"), "utf8")).toContain("Fallback finding");
+
+    const second = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession,
+      ticketTitle: "Fallback preflight",
+      ticketDescription: "Soft agents hang.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    expect(second.ok).toBe(true);
+    expect(promptTexts).toHaveLength(1);
+    expect(promptTexts[0]).toContain("Begin the plan phase");
   });
 
   it("recovers a stale planner_started event instead of no-oping", async () => {

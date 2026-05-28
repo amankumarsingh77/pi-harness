@@ -102,4 +102,26 @@ describe("git_history tool", () => {
     expect(result.details.ok).toBe(false);
     expect(result.details.error).toContain("commit");
   });
+
+  it("enforces an optional call budget", async () => {
+    const tool = makeGitHistoryTool({ cwd, maxCalls: 1 });
+    const first = await tool.execute(
+      "git-history",
+      { action: "is_repo" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const second = await tool.execute(
+      "git-history",
+      { action: "is_repo" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(first.details.ok).toBe(true);
+    expect(second.details.ok).toBe(false);
+    expect(second.details.error).toContain("call budget exceeded");
+  });
 });

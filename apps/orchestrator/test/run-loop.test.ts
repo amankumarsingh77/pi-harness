@@ -83,6 +83,58 @@ describe("runLoop", () => {
     expect(runPhase).toHaveBeenCalledTimes(1);
   });
 
+  it("marks brainstorm run as running before invoking the phase driver", async () => {
+    const t = await runs.createTask({ title: "brainstorm-running" });
+    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
+
+    vi.mocked(runPhase).mockImplementation(async () => {
+      const runId = vi.mocked(runPhase).mock.calls[0]![1].runId;
+      await expect(runs.getRun(runId)).resolves.toMatchObject({ status: "running" });
+      return {
+        ok: true,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    });
+
+    await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+  });
+
+  it("marks plan run as running before invoking the phase driver", async () => {
+    const t = await runs.createTask({ title: "plan-running" });
+    await runs.updateTask(t.id, { status: "planning", workflow: "backend-feature" });
+
+    vi.mocked(runPhase).mockImplementation(async () => {
+      const runId = vi.mocked(runPhase).mock.calls[0]![1].runId;
+      await expect(runs.getRun(runId)).resolves.toMatchObject({ status: "running" });
+      return {
+        ok: true,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    });
+
+    await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+  });
+
   it("brainstorm non-progress failure ends the run and moves task to brainstorm_failed", async () => {
     const t = await runs.createTask({ title: "stuck-brainstorm" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
@@ -247,27 +299,36 @@ describe("runLoop", () => {
     expect(passedDeps.cwd).toContain(t.id);
   });
 
-  it("initializes Graphify before dispatching the phase agent", async () => {
-    const t = await runs.createTask({ title: "graphify-first" });
+  it("does not block phase dispatch on Graphify initialization", async () => {
+    const t = await runs.createTask({ title: "graphify-nonblocking" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
-    const ordering: string[] = [];
+    let graphifyStarted = false;
+    let finishGraphify: (() => void) | undefined;
+    const graphifyDone = new Promise<Awaited<ReturnType<GraphifyLifecycle["ensureInitialized"]>>>(
+      (resolve) => {
+        finishGraphify = () => {
+          resolve({
+            ok: true,
+            action: "initialize",
+            cwd: "",
+            status: graphifyStatus(""),
+            stdout: "",
+            stderr: "",
+            skipped: false,
+          });
+        };
+      },
+    );
     const graphify = fakeGraphify({
       async ensureInitialized(cwd) {
-        ordering.push(`graphify:${cwd.includes(t.id)}`);
-        return {
-          ok: true,
-          action: "initialize",
-          cwd,
-          status: graphifyStatus(cwd),
-          stdout: "",
-          stderr: "",
-          skipped: false,
-        };
+        graphifyStarted = cwd.includes(t.id);
+        return graphifyDone;
       },
     });
 
     vi.mocked(runPhase).mockImplementation(async () => {
-      ordering.push("runPhase");
+      const runId = vi.mocked(runPhase).mock.calls[0]![1].runId;
+      await expect(runs.getRun(runId)).resolves.toMatchObject({ status: "running" });
       return {
         ok: true,
         costUsd: 0,
@@ -287,10 +348,12 @@ describe("runLoop", () => {
       graphify,
     });
 
-    expect(ordering).toEqual(["graphify:true", "runPhase"]);
+    expect(graphifyStarted).toBe(true);
+    expect(runPhase).toHaveBeenCalledTimes(1);
+    finishGraphify?.();
   });
 
-  it("fails the current phase when Graphify initialization fails", async () => {
+  it("continues the current phase when Graphify initialization fails", async () => {
     const t = await runs.createTask({ title: "graphify-missing" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
     const graphify = fakeGraphify({
@@ -306,6 +369,12 @@ describe("runLoop", () => {
         };
       },
     });
+    vi.mocked(runPhase).mockResolvedValue({
+      ok: true,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
 
     const after = await runLoop({
       task: await runs.getTask(t.id),
@@ -318,8 +387,11 @@ describe("runLoop", () => {
       graphify,
     });
 
-    expect(after.status).toBe("brainstorm_failed");
-    expect(runPhase).not.toHaveBeenCalled();
+    expect(after.status).toBe("brainstorming");
+    expect(runPhase).toHaveBeenCalledTimes(1);
+    const list = await runs.listRuns(t.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.status).toBe("running");
   });
 
   it("re-dispatch reuses the same worktree (idempotent ensure)", async () => {

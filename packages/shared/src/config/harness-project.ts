@@ -6,6 +6,14 @@ export type ContainerRuntime = z.infer<typeof ContainerRuntimeSchema>;
 export const WebProviderSchema = z.enum(["tinyfish", "searxng"]);
 export type WebProvider = z.infer<typeof WebProviderSchema>;
 
+export const GraphifyProviderConfigSchema = z.object({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  baseUrl: z.string().url(),
+  apiKeyEnv: z.string().min(1),
+});
+export type GraphifyProviderConfig = z.infer<typeof GraphifyProviderConfigSchema>;
+
 export const HarnessProjectConfigSchema = z.object({
   repoRoot: z.string().min(1),
   baseBranch: z.string().min(1),
@@ -15,6 +23,7 @@ export const HarnessProjectConfigSchema = z.object({
   dashboardPort: z.number().int().min(1).max(65535),
   orchestratorPort: z.number().int().min(1).max(65535),
   webProvider: WebProviderSchema,
+  graphify: GraphifyProviderConfigSchema,
 });
 export type HarnessProjectConfig = z.infer<typeof HarnessProjectConfigSchema>;
 
@@ -27,6 +36,14 @@ export type HarnessProjectConfigInput = {
   readonly dashboardPort?: number;
   readonly orchestratorPort?: number;
   readonly webProvider?: WebProvider;
+  readonly graphify?: Partial<GraphifyProviderConfig>;
+};
+
+export const DEFAULT_GRAPHIFY_PROVIDER_CONFIG: GraphifyProviderConfig = {
+  provider: "crofai",
+  model: "deepseek-v4-pro",
+  baseUrl: "https://crof.ai/v1",
+  apiKeyEnv: "CROFAI_API_KEY",
 };
 
 export const DEFAULT_HARNESS_PROJECT_CONFIG: HarnessProjectConfig = {
@@ -38,6 +55,7 @@ export const DEFAULT_HARNESS_PROJECT_CONFIG: HarnessProjectConfig = {
   dashboardPort: 3000,
   orchestratorPort: 4000,
   webProvider: "tinyfish",
+  graphify: DEFAULT_GRAPHIFY_PROVIDER_CONFIG,
 };
 
 export function defineHarnessConfig(config: HarnessProjectConfigInput): HarnessProjectConfigInput {
@@ -52,6 +70,10 @@ export function mergeHarnessProjectConfig(config: HarnessProjectConfigInput): Ha
     ...config,
     stateDir,
     worktreesDir,
+    graphify: {
+      ...DEFAULT_GRAPHIFY_PROVIDER_CONFIG,
+      ...(config.graphify ?? {}),
+    },
   });
 }
 
@@ -67,6 +89,7 @@ export function parseHarnessProjectEnv(
     ...(parsePort("dashboardPort", env["DASHBOARD_PORT"])),
     ...(parsePort("orchestratorPort", env["ORCHESTRATOR_PORT"] ?? env["PORT"])),
     ...(parseWebProvider(env["PI_WEB_PROVIDER"])),
+    ...(parseGraphifyProvider(env)),
   };
 }
 
@@ -99,4 +122,16 @@ function parseWebProvider(
 ): Partial<Pick<HarnessProjectConfigInput, "webProvider">> {
   const parsed = WebProviderSchema.safeParse(raw);
   return parsed.success ? { webProvider: parsed.data } : {};
+}
+
+function parseGraphifyProvider(
+  env: Readonly<Record<string, string | undefined>>,
+): Partial<Pick<HarnessProjectConfigInput, "graphify">> {
+  const graphify = {
+    ...(env["GRAPHIFY_PROVIDER"] ? { provider: env["GRAPHIFY_PROVIDER"] } : {}),
+    ...(env["GRAPHIFY_MODEL"] ? { model: env["GRAPHIFY_MODEL"] } : {}),
+    ...(env["GRAPHIFY_BASE_URL"] ? { baseUrl: env["GRAPHIFY_BASE_URL"] } : {}),
+    ...(env["GRAPHIFY_API_KEY_ENV"] ? { apiKeyEnv: env["GRAPHIFY_API_KEY_ENV"] } : {}),
+  };
+  return Object.keys(graphify).length > 0 ? { graphify } : {};
 }

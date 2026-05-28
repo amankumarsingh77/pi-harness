@@ -8,13 +8,11 @@ export type TransitionAction =
   | { type: "user_request_brainstorm_changes"; comment: string }
   | { type: "user_approve_plan" }
   | { type: "user_request_plan_changes"; comment: string }
-  | { type: "user_approve_scenarios" }
   | { type: "user_cancel_current_phase" }
   | { type: "user_cancel" }
   | { type: "user_retry_failed" }
   | { type: "agent_phase_succeeded"; phase: Phase }
-  | { type: "agent_phase_failed"; phase: Phase; retryCap: number }
-  | { type: "agent_brainstorm_ready" };
+  | { type: "agent_phase_failed"; phase: Phase; retryCap: number };
 
 export type TransitionResult =
   | { ok: true; task: Task }
@@ -38,14 +36,6 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
     case "user_start_brainstorm":
       if (task.status !== "backlog") return reject("must be in backlog");
       return advance("brainstorming", { workflow: action.workflow });
-
-    case "agent_brainstorm_ready":
-      // Subagent produced design+spec with status: ready. The gate is now
-      // derived from artifact frontmatter + JSONL events (see
-      // deriveBrainstormGate); the state machine no longer stores a flag.
-      // Task stays in brainstorming until the user approves.
-      if (task.status !== "brainstorming") return reject("must be in brainstorming");
-      return advance("brainstorming");
 
     case "user_approve_brainstorm":
       // The route validates the gate is open (deriveBrainstormGate ===
@@ -74,12 +64,6 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
       // artifacts to draft. The state machine just keeps the task in planning.
       if (task.status !== "planning") return reject("must be in planning");
       return advance("planning");
-
-    case "user_approve_scenarios":
-      // v1 scenarios are reviewed in the same step as the plan; this is reserved
-      // for v2 when scenario review becomes its own step.
-      if (task.status !== "planning") return reject("must be in planning");
-      return advance("executing");
 
     case "user_cancel_current_phase":
       if (task.status !== "brainstorming" && task.status !== "planning") {
@@ -110,10 +94,7 @@ export function transition(task: Task, action: TransitionAction): TransitionResu
     }
 
     case "agent_phase_succeeded": {
-      // Brainstorm has its own gate — it never auto-advances. The run-loop
-      // dispatches `agent_brainstorm_ready` instead when artifacts are ready.
-      // We accept `agent_phase_succeeded` for brainstorm here as a no-op so
-      // legacy callers (and tests) don't break, but it does NOT advance.
+      // Brainstorm has its own gate — it never auto-advances.
       if (action.phase === "brainstorm") {
         if (task.status !== "brainstorming") return reject("expected brainstorming");
         return advance("brainstorming");

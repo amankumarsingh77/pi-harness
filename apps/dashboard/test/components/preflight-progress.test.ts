@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlanJsonlEvent } from "@/lib/api";
+import type { PreflightStep } from "@pi-harness/shared";
 import { deriveKind } from "@/components/plan/preflight-progress";
 
 const subagent = "codebase-scout";
@@ -64,5 +65,28 @@ describe("deriveKind", () => {
     ];
 
     expect(deriveKind(subagent, research(null), events)).toBe("progress");
+  });
+
+  it("prefers durable fallback step state over legacy event-derived status", () => {
+    const steps: PreflightStep[] = [
+      {
+        taskId: "task-1",
+        runId: "run-1",
+        attemptId: "attempt-1:fallback",
+        subagent,
+        status: "fallback_succeeded",
+        required: false,
+        artifactPath: "/tmp/codebase-scout.md",
+        startedAt: new Date("2026-05-12T20:02:00.000Z"),
+        endedAt: new Date("2026-05-12T20:03:00.000Z"),
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        error: "timed out",
+        fallbackReason: "timed out",
+      },
+    ];
+
+    expect(deriveKind(subagent, research("# fallback"), [started("s1")], steps)).toBe("fallback");
   });
 });

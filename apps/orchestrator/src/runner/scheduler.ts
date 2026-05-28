@@ -7,6 +7,7 @@ import { silentLogger, type Logger } from "../domain/logger.js";
 import { mkEvent } from "../domain/events.js";
 import { runLoop } from "./run-loop.js";
 import type { GraphifyLifecycle } from "../agents/graphify-manager.js";
+import type { TaskWorkflowService } from "../services/task-workflow-service.js";
 
 export type SchedulerDeps = {
   runs: RunStore;
@@ -16,6 +17,7 @@ export type SchedulerDeps = {
   retryCap: number;
   cancellation: CancellationRegistry;
   graphify?: GraphifyLifecycle;
+  workflow?: TaskWorkflowService;
   logger?: Logger;
 };
 
@@ -117,6 +119,7 @@ export class TaskScheduler {
         retryCap: this.deps.retryCap,
         cancellation: this.deps.cancellation,
         ...(this.deps.graphify !== undefined ? { graphify: this.deps.graphify } : {}),
+        ...(this.deps.workflow !== undefined ? { workflow: this.deps.workflow } : {}),
         enqueue: (id: string) => this.enqueue(id),
       });
       log.debug({ durationMs: Date.now() - startedAt }, "tick complete");

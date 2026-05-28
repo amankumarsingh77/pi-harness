@@ -1,6 +1,7 @@
 "use client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { GraphifyInstallBanner } from "@/components/graphify-install-banner";
 import { DashboardLiveProvider } from "./dashboard-live-provider";
 
 export function QueryProvider({ children }: { children: React.ReactNode }) {
@@ -12,7 +13,10 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
   );
   return (
     <QueryClientProvider client={client}>
-      <DashboardLiveProvider>{children}</DashboardLiveProvider>
+      <DashboardLiveProvider>
+        {children}
+        <GraphifyInstallBanner />
+      </DashboardLiveProvider>
     </QueryClientProvider>
   );
 }

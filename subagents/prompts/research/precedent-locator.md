@@ -18,7 +18,7 @@ The caller provides the ticket digest and `# Current blast-radius.yaml`. Use the
 - Use `git_history` for read-only git history: repository check, commit logs, commit stats, and file-at-commit inspection.
 - Use `grep`, `find`, `ls`, and `read` only for local docs and lightweight confirmation.
 - Do not use bash. Do not fetch, pull, checkout, reset, rebase, push, or modify files.
-- Persist the final markdown with `write_findings` exactly once.
+- Persist a concise markdown checkpoint with `write_findings` early, then overwrite it with final findings if you learn more.
 
 ## Process
 

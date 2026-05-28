@@ -6,6 +6,7 @@ import type {
 } from "@pi-harness/pi-bridge";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import type { EventStore } from "../adapters/event-store.js";
+import type { PreflightStepStore } from "../adapters/preflight-step-store.js";
 import { PhaseEventLogStore } from "../adapters/phase-event-log-store.js";
 import { BrainstormEventBus } from "../agents/brainstorm-event-bus.js";
 import { runBrainstorm } from "../agents/brainstorm.js";
@@ -31,6 +32,7 @@ export type PhaseDeps = {
   createAgentSession: (opts: AgentSessionOptions) => Promise<AgentSession>;
   store: ArtifactsStore;
   eventStore: EventStore;
+  preflightSteps?: PreflightStepStore;
   claimLedger?: ClaimLedgerStore;
   claimPublisher?: ClaimPublisher;
   graphify?: GraphifyLifecycle;
@@ -153,6 +155,7 @@ export async function runPhase(
         store: deps.store,
         bus,
         eventStore: deps.eventStore,
+        ...(deps.preflightSteps !== undefined ? { preflightSteps: deps.preflightSteps } : {}),
         phaseModel: input.phaseModel,
         sessionPath: input.sessionPath,
         createAgentSession: deps.createAgentSession,

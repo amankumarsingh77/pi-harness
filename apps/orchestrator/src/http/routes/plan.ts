@@ -7,15 +7,12 @@ import type { TaskScheduler } from "../../runner/scheduler.js";
 import type { CancellationRegistry } from "../../runner/cancellation.js";
 import type { TaskMutationLock } from "../../runner/task-mutation-lock.js";
 import type { EventStore } from "../../adapters/event-store.js";
+import type { PreflightStepStore } from "../../adapters/preflight-step-store.js";
 import { readJsonl } from "../../adapters/jsonl-writer.js";
-import {
-  PhaseEventLogStore,
-  type PlanPhaseEventInput,
-} from "../../adapters/phase-event-log-store.js";
 import { ValidationError } from "../../domain/errors.js";
 import { derivePlanGate } from "../../agents/plan-gate.js";
-import { scaffoldPlan } from "../../runner/scaffold-plan.js";
 import { PREFLIGHT_SUBAGENTS } from "../../agents/plan-preflight.js";
+import type { TaskWorkflowService } from "../../services/task-workflow-service.js";
 
 const EditPlanArtifactSchema = z.object({
   // Plan-phase edit-in-place is scoped to plan.md only — scenarios.yaml is
@@ -40,16 +37,13 @@ export function registerPlanRoutes(
     runs: RunStore;
     artifacts: ArtifactsStore;
     events?: EventStore;
+    preflightSteps?: PreflightStepStore;
     scheduler?: TaskScheduler;
     cancellation?: CancellationRegistry;
     mutationLock: TaskMutationLock;
+    workflow: TaskWorkflowService;
   },
 ): void {
-  const phaseEvents = new PhaseEventLogStore({
-    ...(deps.events !== undefined ? { events: deps.events } : {}),
-    runs: deps.runs,
-  });
-
   app.get<{ Params: { id: string } }>("/api/tasks/:id/plan", async (req) => {
     const task = await deps.runs.getTask(req.params.id);
     const cwd = task.worktreePath;
@@ -63,11 +57,16 @@ export function registerPlanRoutes(
         executionDag: null,
         research: emptyResearch(),
         events: [],
+        preflightSteps: [],
+        preflightBlockedReason: null,
         lastBlocked: null,
       };
     }
 
-    const [plan, scenarios, blastRadius, executionDag, events, gate, research] = await Promise.all([
+    const latestPlanRun = [...(await deps.runs.listRuns(task.id))]
+      .reverse()
+      .find((run) => run.phase === "plan") ?? null;
+    const [plan, scenarios, blastRadius, executionDag, events, gate, research, preflightSteps] = await Promise.all([
       deps.artifacts.readArtifact(cwd, task.id, "plan"),
       deps.artifacts.readArtifact(cwd, task.id, "scenarios"),
       deps.artifacts.readArtifact(cwd, task.id, "blast-radius"),
@@ -75,6 +74,9 @@ export function registerPlanRoutes(
       readJsonl(join(cwd, ".harness", task.id, "plan.jsonl")),
       derivePlanGate(cwd, task.id, deps.artifacts),
       readResearch(cwd, task.id),
+      latestPlanRun && deps.preflightSteps
+        ? deps.preflightSteps.latestForRun(latestPlanRun.id)
+        : Promise.resolve([]),
     ]);
 
     return {
@@ -86,6 +88,8 @@ export function registerPlanRoutes(
       executionDag,
       research,
       events,
+      preflightSteps,
+      preflightBlockedReason: derivePreflightBlockedReason(preflightSteps),
       lastBlocked: deriveLastBlocked(events),
     };
   });
@@ -160,45 +164,11 @@ export function registerPlanRoutes(
       }
       throw e;
     }
-    return deps.mutationLock.runExclusive(req.params.id, async () => {
-      const task = await deps.runs.getTask(req.params.id);
-      if (task.status !== "planning") {
-        reply.code(409);
-        return {
-          error: "not_planning",
-          message: `task is in ${task.status}; edits only apply during planning`,
-        };
-      }
-      if (!task.worktreePath) {
-        reply.code(409);
-        return { error: "no_worktree", message: "task has no worktree yet" };
-      }
-
-      const prior = await deps.artifacts.readArtifact(task.worktreePath, task.id, parsed.kind);
-      const sizeDelta = parsed.body.length - (prior?.body.length ?? 0);
-
-      const { commitSha, artifactRevisionId } = await deps.artifacts.applyHumanEdit(
-        task.worktreePath,
-        task.id,
-        parsed.kind,
-        parsed.body,
-      );
-
-      await phaseEvents.publish({
-        phase: "plan",
-        worktreePath: task.worktreePath,
-        taskId: task.id,
-        input: {
-          kind: "plan_artifact_edited",
-          artifact: parsed.kind,
-          commitSha,
-          artifactRevisionId,
-          sizeDelta,
-        },
-      });
-
-      deps.scheduler?.enqueue(task.id);
-      return { ok: true, commitSha, artifactRevisionId };
+    void reply;
+    return deps.workflow.editPlanArtifact({
+      taskId: req.params.id,
+      kind: parsed.kind,
+      body: parsed.body,
     });
   });
 
@@ -219,79 +189,8 @@ export function registerPlanRoutes(
       }
       throw e;
     }
-    return deps.mutationLock.runExclusive(req.params.id, async () => {
-      const task = await deps.runs.getTask(req.params.id);
-      if (task.status !== "planning") {
-        reply.code(409);
-        return {
-          error: "not_planning",
-          message: `task is in ${task.status}; restart only applies during planning`,
-        };
-      }
-      if (!task.worktreePath) {
-        reply.code(409);
-        return { error: "no_worktree", message: "task has no worktree yet" };
-      }
-
-      deps.cancellation?.abort(task.id);
-      if (deps.scheduler) {
-        await deps.scheduler.cancelAndDrain(task.id);
-      }
-
-      const restartRun =
-        (await deps.runs.findActiveRun(task.id, "plan")) ??
-        (await deps.runs.findLatestRun(task.id, "plan", "cancelled"));
-      if (!restartRun) {
-        reply.code(409);
-        return {
-          error: "no_active_run",
-          message: "no active or cancelled plan run to restart",
-        };
-      }
-      if (restartRun.status !== "cancelled") {
-        await deps.runs.updateRun(restartRun.id, {
-          status: "cancelled",
-          endedAt: new Date(),
-        });
-      }
-
-      await deps.artifacts.archiveCurrentRun(task.worktreePath, task.id, restartRun.id, "plan");
-
-      const branch = task.branchName ?? `pi/${task.id}`;
-      await scaffoldPlan({
-        cwd: task.worktreePath,
-        taskId: task.id,
-        branch,
-        store: deps.artifacts,
-      });
-
-      const newRun = await deps.runs.createRun({ taskId: task.id, phase: "plan" });
-      const note = parsed.note?.trim();
-      const inputs: PlanPhaseEventInput[] = [
-        {
-          kind: "plan_system",
-          systemKind: "session_reset",
-          data: {
-            archivedRunId: restartRun.id,
-            ...(note ? { note } : {}),
-          },
-        },
-      ];
-      await phaseEvents.publishMany({
-        phase: "plan",
-        worktreePath: task.worktreePath,
-        taskId: task.id,
-        runId: newRun.id,
-        inputs,
-      });
-      deps.scheduler?.enqueue(task.id);
-
-      return {
-        ok: true,
-        archivedRunId: restartRun.id,
-        newRunId: newRun.id,
-      };
-    });
+    void reply;
+    return deps.workflow.restartPlan(req.params.id, parsed.note);
   });
 }
 
@@ -326,6 +225,18 @@ export function deriveLastBlocked(
     }
   }
   return blocked;
+}
+
+export function derivePreflightBlockedReason(
+  steps: readonly { readonly subagent: string; readonly status: string; readonly required: boolean; readonly error: string | null }[],
+): string | null {
+  const blocked = steps.filter(
+    (step) =>
+      step.required &&
+      (step.status === "failed" || step.status === "timed_out" || step.status === "cancelled"),
+  );
+  if (blocked.length === 0) return null;
+  return `preflight: hard required findings failed (${blocked.map((step) => step.subagent).join(", ")})`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -93,10 +93,6 @@ export class RunStore {
     return updated;
   }
 
-  async updateTaskStatus(id: string, status: TaskStatus): Promise<Task> {
-    return this.updateTask(id, { status });
-  }
-
   async listTasks(): Promise<Task[]> {
     return [...(await this.taskMap()).values()].sort(byDate((task) => task.createdAt));
   }

@@ -36,6 +36,35 @@ describe("api", () => {
     await expect(a.getTask("nope")).rejects.toBeInstanceOf(ApiError);
   });
 
+  it("getGraphifyStatus hydrates updatedAt", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        status: {
+          status: "installing",
+          reason: "missing_cli",
+          message: "Graphify CLI not found",
+          updatedAt: "2026-05-21T00:00:00.000Z",
+        },
+      }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    const result = await a.getGraphifyStatus();
+
+    expect(result.status?.updatedAt).toBeInstanceOf(Date);
+    expect(result.status?.updatedAt.toISOString()).toBe("2026-05-21T00:00:00.000Z");
+    expect(fetchSpy).toHaveBeenCalledWith("http://x/api/graphify/status", expect.any(Object));
+  });
+
+  it("getGraphifyStatus accepts an empty status", async () => {
+    const a = api({
+      baseUrl: "http://x",
+      fetch: async () => Response.json({ status: null }),
+    });
+
+    await expect(a.getGraphifyStatus()).resolves.toEqual({ status: null });
+  });
+
   it("createTask POSTs body", async () => {
     const fetchSpy = vi.fn(async () =>
       Response.json({

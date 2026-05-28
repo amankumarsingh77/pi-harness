@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AgentEvent, Artifact, Run, Task } from "@pi-harness/shared";
+import type { AgentEvent, Artifact, PreflightStep, Run, Task } from "@pi-harness/shared";
 import { PlanApprovalGate } from "@/components/plan/approval-gate";
 import { PlanConsole } from "@/components/plan/plan-console";
 import { buildLogRows } from "@/components/plan/plan-log-rows";
@@ -45,6 +45,23 @@ describe("PlanConsole", () => {
     expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("live");
     expect(screen.getByRole("article", { name: "claim-verifier preflight agent" })).toHaveTextContent("queued");
     expect(screen.getByRole("article", { name: "precedent-locator preflight agent" })).toHaveTextContent("blocked");
+  });
+
+  it("shows fallback preflight state from durable step data", () => {
+    renderConsole({
+      preflightSteps: [
+        preflightStep({
+          subagent: "integration-scanner",
+          status: "fallback_succeeded",
+          error: "preflight subagent integration-scanner timed out after 300000ms",
+          fallbackReason: "preflight subagent integration-scanner timed out after 300000ms",
+        }),
+      ],
+    });
+
+    expect(screen.getByText(/1 fallback/)).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("fallback");
+    expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("timed out");
   });
 
   it("shows phase cancel in the plan header and on active preflight agents", () => {
@@ -270,6 +287,7 @@ function renderConsole(
     readonly liveEvents?: readonly AgentEvent[];
     readonly executionDag?: Artifact | null;
     readonly lastBlocked?: { reason: string; ts: string } | null;
+    readonly preflightSteps?: readonly PreflightStep[];
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -300,6 +318,7 @@ function renderConsole(
             "claim-verifier": null,
           }}
           planEvents={planEvents}
+          preflightSteps={opts.preflightSteps ?? []}
           liveEvents={opts.liveEvents ?? liveEvents}
           connected={true}
           plannerLogDefaultOpen
@@ -308,6 +327,29 @@ function renderConsole(
       </PlanEventsProvider>
     </QueryClientProvider>,
   );
+}
+
+function preflightStep(
+  patch: Partial<PreflightStep> & Pick<PreflightStep, "subagent" | "status">,
+): PreflightStep {
+  const { subagent, status, ...rest } = patch;
+  return {
+    taskId: "task-1",
+    runId: "run-1",
+    attemptId: "attempt-1",
+    subagent,
+    status,
+    required: false,
+    artifactPath: `/tmp/${subagent}.md`,
+    startedAt: new Date("2026-05-12T20:00:00.000Z"),
+    endedAt: new Date("2026-05-12T20:01:00.000Z"),
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    error: null,
+    fallbackReason: null,
+    ...rest,
+  };
 }
 
 const planEvents: readonly PlanJsonlEvent[] = [

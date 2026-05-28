@@ -60,7 +60,7 @@ Add provider keys:
 
 ```bash
 cp .env.harness.example .env.harness
-# Fill CROFAI_API_KEY, or configure another provider in harness.config.ts.
+# Fill CROFAI_API_KEY. Agent phases and Graphify use CrofAI by default.
 ```
 
 Start the local runtime:
@@ -181,7 +181,8 @@ available. Agent work runs in `.harness/worktrees/<taskId>` on branches named
 - **Missing Podman:** install/start Podman, or install Docker and rerun
   `pi-harness init`.
 - **Missing API key:** copy `.env.harness.example` to `.env.harness` and fill
-  `CROFAI_API_KEY`, or configure another provider.
+  `CROFAI_API_KEY`. Override `GRAPHIFY_*` only when routing Graphify through
+  another OpenAI-compatible endpoint.
 - **Port conflict:** set `dashboardPort` or `orchestratorPort` in
   `harness.config.ts`.
 - **Non-main base branch:** edit `baseBranch` in `harness.config.ts`; worktrees

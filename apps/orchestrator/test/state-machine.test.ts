@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import type { Task } from "@pi-harness/shared";
+import {
+  cancelablePhaseForTaskStatus,
+  isBlockedTaskStatus,
+  isRunningTaskStatus,
+  phaseForTaskStatus,
+  taskPhaseLabel,
+  taskStatusLabel,
+  type Task,
+} from "@pi-harness/shared";
 import { transition, canStart } from "../src/domain/state-machine.js";
 
 function mkTask(status: Task["status"], overrides: Partial<Task> = {}): Task {
@@ -41,13 +49,6 @@ describe("transition", () => {
   it("agent_phase_succeeded: brainstorming stays in brainstorming (gate is derived elsewhere)", () => {
     const t = mkTask("brainstorming", { workflow: "backend-feature" });
     const r = transition(t, { type: "agent_phase_succeeded", phase: "brainstorm" });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.task.status).toBe("brainstorming");
-  });
-
-  it("agent_brainstorm_ready: brainstorming stays in brainstorming", () => {
-    const t = mkTask("brainstorming", { workflow: "backend-feature" });
-    const r = transition(t, { type: "agent_brainstorm_ready" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.task.status).toBe("brainstorming");
   });
@@ -201,5 +202,24 @@ describe("canStart", () => {
   });
   it("returns false at cap", () => {
     expect(canStart({ runningCount: 2, cap: 2 })).toBe(false);
+  });
+});
+
+describe("task lifecycle metadata", () => {
+  it("centralizes phase routing and UI status classification", () => {
+    expect(phaseForTaskStatus("planning")).toBe("plan");
+    expect(phaseForTaskStatus("plan_failed")).toBeNull();
+    expect(cancelablePhaseForTaskStatus("planning")).toBe("plan");
+    expect(cancelablePhaseForTaskStatus("executing")).toBeNull();
+
+    expect(isRunningTaskStatus("planning")).toBe(true);
+    expect(isRunningTaskStatus("plan_failed")).toBe(false);
+    expect(isBlockedTaskStatus("plan_failed")).toBe(true);
+    expect(isBlockedTaskStatus("cancelled")).toBe(false);
+
+    expect(taskStatusLabel("planning")).toBe("needs input");
+    expect(taskStatusLabel("ready_to_ship")).toBe("running");
+    expect(taskPhaseLabel("planning")).toBe("plan");
+    expect(taskPhaseLabel("backlog")).toBe("intake");
   });
 });

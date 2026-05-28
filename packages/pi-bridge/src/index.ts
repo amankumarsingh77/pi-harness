@@ -1,4 +1,4 @@
-export { __resetAuthCache } from "./auth.js";
+export { __resetAuthCache, loadEnvHarness } from "./auth.js";
 export {
   createAgentSession,
   AuthError,
