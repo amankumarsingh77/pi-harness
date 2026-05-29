@@ -79,7 +79,6 @@ export const orchestrator: Api = {
   getPlanBundle: (taskId) => real.getPlanBundle(taskId),
   getMission: (taskId) => real.getMission(taskId),
   runVerifier: (taskId, payload) => real.runVerifier(taskId, payload),
-  getGraphifyStatus: () => real.getGraphifyStatus(),
   getPlanDiff: (taskId, kind) => real.getPlanDiff(taskId, kind),
   submitPlanArtifactEdit: (taskId, payload) => real.submitPlanArtifactEdit(taskId, payload),
   restartPlan: (taskId, payload) => real.restartPlan(taskId, payload),

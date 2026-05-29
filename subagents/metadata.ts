@@ -32,12 +32,7 @@ export type CustomTool =
   | "pi_web_search"
   | "pi_web_fetch"
   | "write_findings"
-  | "git_history"
-  | "graphify_query"
-  | "graphify_path"
-  | "graphify_explain"
-  | "graphify_stats"
-  | "graphify_refresh";
+  | "git_history";
 
 export type SubagentMeta = {
   name: string;
@@ -70,10 +65,6 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
       "reply_to_user",
       "pi_web_search",
       "pi_web_fetch",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ],
     invokedBy: ["brainstorm"],
     framing: "",
@@ -85,13 +76,7 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "phase",
     promptFile: "plan.md",
     allowedTools: ["read", "grep", "find", "write"],
-    customTools: [
-      "mark_ready",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
-    ],
+    customTools: ["mark_ready"],
     invokedBy: ["plan"],
     framing: "",
     description: "Reads research findings, authors plan.md + scenarios.yaml",
@@ -102,13 +87,7 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     promptDir: "phase",
     promptFile: "code.md",
     allowedTools: ["read", "grep", "find", "ls", "bash", "edit"],
-    customTools: [
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
-      "graphify_refresh",
-    ],
+    customTools: [],
     invokedBy: ["code"],
     framing: "",
     description: "Executes one execution DAG node without committing",
@@ -121,10 +100,6 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: [
       "write_findings",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ],
     invokedBy: ["plan"],
     framing:
@@ -141,10 +116,6 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
       "pi_web_search",
       "pi_web_fetch",
       "write_findings",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ],
     invokedBy: ["brainstorm"],
     framing:
@@ -159,10 +130,6 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     allowedTools: ["read", "grep", "find", "ls"],
     customTools: [
       "write_findings",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ],
     invokedBy: ["plan"],
     framing:
@@ -178,10 +145,6 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     customTools: [
       "git_history",
       "write_findings",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ],
     invokedBy: ["plan"],
     framing:
@@ -197,10 +160,6 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     customTools: [
       "git_history",
       "write_findings",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ],
     invokedBy: ["plan"],
     framing: "",

@@ -32,7 +32,6 @@ import { InvalidTransitionError, WorkflowConflictError, WorkflowHttpError } from
 import { scaffoldBrainstorm } from "../runner/scaffold-brainstorm.js";
 import { scaffoldPlan } from "../runner/scaffold-plan.js";
 import type { PhaseDeps, PhaseOutput } from "../runner/phase-prompts.js";
-import type { GraphifyLifecycle } from "../agents/graphify-manager.js";
 
 type SchedulerHandle = Pick<TaskScheduler, "enqueue" | "cancelAndDrain">;
 
@@ -81,7 +80,6 @@ type TaskWorkflowServiceDeps = {
   readonly worktrees?: WorktreeManager;
   readonly phaseDeps?: PhaseDeps;
   readonly retryCap?: number;
-  readonly graphify?: GraphifyLifecycle;
   readonly enqueue?: (taskId: string) => void;
 };
 
@@ -448,7 +446,6 @@ export class TaskWorkflowService {
 
     const worktree = await this.ensureWorktree(task);
     const updatedTask = await this.persistWorktree(task, worktree);
-    this.warmGraphify(worktree.path);
 
     if (phase === "brainstorm") {
       return this.prepareBrainstorm(updatedTask, worktree);
@@ -817,10 +814,6 @@ export class TaskWorkflowService {
       worktreePath: worktree.path,
       branchName: branch,
     });
-  }
-
-  private warmGraphify(cwd: string): void {
-    void this.deps.graphify?.ensureInitialized(cwd).catch(() => {});
   }
 
   private async isPausedByCancellation(taskId: string, phase: Phase): Promise<boolean> {

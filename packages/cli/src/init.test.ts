@@ -113,7 +113,35 @@ describe("createInitPlan", () => {
     expect(renderHarnessConfig(config)).not.toContain("databaseUrl");
     expect(renderHarnessConfig(config)).toContain("export default {");
     expect(renderHarnessConfig(config)).toContain("baseBranch: \"trunk\"");
-    expect(renderHarnessConfig(config)).toContain("model: \"deepseek-v4-pro\"");
     expect(renderComposeFile(config)).not.toContain("postgres");
+  });
+
+  it("does not generate retired Graphify config or env defaults", async () => {
+    const dir = await tempProject();
+    try {
+      const plan = await createInitPlan({
+        cwd: dir,
+        env: {},
+        execFile: async (cmd, args) => {
+          if (cmd === "git" && args.join(" ") === "rev-parse --show-toplevel") {
+            return { ok: true, stdout: `${dir}\n`, stderr: "" };
+          }
+          if (cmd === "git" && args.join(" ") === "symbolic-ref --short HEAD") {
+            return { ok: true, stdout: "main\n", stderr: "" };
+          }
+          if (cmd === "podman" && args[0] === "--version") {
+            return { ok: true, stdout: "podman version 5\n", stderr: "" };
+          }
+          return { ok: false, stdout: "", stderr: "missing" };
+        },
+      });
+
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) return;
+      expect(plan.files.find((file) => file.path === "harness.config.ts")?.content).not.toContain("graphify");
+      expect(plan.files.find((file) => file.path === ".env.harness.example")?.content).not.toContain("GRAPHIFY_");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

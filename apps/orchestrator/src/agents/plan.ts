@@ -43,11 +43,6 @@ import {
   type PreflightSubagent,
   type PreflightSubagentEvent,
 } from "./plan-preflight.js";
-import {
-  GRAPHIFY_QUERY_TOOL_NAMES,
-  makeGraphifyQueryTools,
-} from "./graphify-tools.js";
-import type { GraphifyLifecycle } from "./graphify-manager.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -71,7 +66,6 @@ export type PlanOpts = {
   ticketTitle: string;
   ticketDescription: string;
   signal?: AbortSignal;
-  graphify?: GraphifyLifecycle;
   // Mutable per-run state that survives multiple ticks within the same Run
   // (mark_ready may dispatch claim-verifier across multiple tool calls in
   // one turn). The run-loop creates this once per run and threads it through.
@@ -619,12 +613,10 @@ async function runPlannerStage(
           ...cvDef.allowedTools,
           "git_history",
           "write_findings",
-          ...GRAPHIFY_QUERY_TOOL_NAMES,
         ],
         customTools: [
           makeGitHistoryTool({ cwd: opts.cwd }),
           makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
-          ...makeGraphifyQueryTools({ cwd: opts.cwd }),
         ],
         onEvent: cvForward,
       });
@@ -706,8 +698,8 @@ async function runPlannerStage(
         : {}),
       systemPrompt,
       sessionPath,
-      tools: [...planDef.allowedTools, "mark_ready", ...GRAPHIFY_QUERY_TOOL_NAMES],
-      customTools: [markReadyTool, ...makeGraphifyQueryTools({ cwd: opts.cwd })],
+      tools: [...planDef.allowedTools, "mark_ready"],
+      customTools: [markReadyTool],
       onEvent: (e: PiBridgeEvent) => {
         // Forward planner-session bridge events to EventStore (no subagent
         // tag — the dashboard treats untagged events as planner output).
