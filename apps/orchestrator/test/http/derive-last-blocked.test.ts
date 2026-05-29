@@ -20,11 +20,11 @@ describe("deriveLastBlocked", () => {
         kind: "plan_system",
         systemKind: "blocked",
         ts: "2026-05-21T00:01:00Z",
-        data: { reason: "planner timed out after 300000ms" },
+        data: { reason: "planner blocked by provider error" },
       },
     ];
     expect(deriveLastBlocked(events)).toEqual({
-      reason: "planner timed out after 300000ms",
+      reason: "planner blocked by provider error",
       ts: "2026-05-21T00:01:00Z",
     });
   });

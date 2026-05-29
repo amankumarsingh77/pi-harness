@@ -74,7 +74,6 @@ export type PlanOpts = {
   // driver wires its own forwarder that tags events with the subagent name
   // and pushes them to EventStore.
   onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
-  plannerTimeoutMs?: number;
   preflightSubagentTimeoutMs?: number;
   preflightRetrySubagentTimeoutMs?: number;
 };
@@ -91,7 +90,6 @@ export type PlanResult = {
 
 type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
 
-export const PLANNER_TIMEOUT_MS = 5 * 60 * 1000;
 const PLANNER_RECOVERY_CAP = 2;
 
 // Drives one plan tick. Two-stage shape:
@@ -523,9 +521,8 @@ async function runPlannerStage(
   });
 
   // Inner abort controller for any claim-verifier dispatch fired during this
-  // planner turn. Fires when the planner timeout elapses or when the outer
-  // run signal aborts — so a slow audit can't run past the planner's budget
-  // (the original bug: 179s of audit work landed after a 300s timeout).
+  // planner turn. Fires when the outer run signal aborts so a slow audit
+  // cannot run past a cancelled planner turn.
   const innerAbort = new AbortController();
   if (opts.signal?.aborted) innerAbort.abort();
   opts.signal?.addEventListener("abort", () => innerAbort.abort(), { once: true });
@@ -765,12 +762,7 @@ async function runPlannerStage(
 
   let usage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
   try {
-    usage = await promptWithTimeout({
-      session,
-      promptText: input.prompt,
-      timeoutMs: opts.plannerTimeoutMs ?? PLANNER_TIMEOUT_MS,
-      onTimeout: () => innerAbort.abort(),
-    });
+    usage = await session.prompt(input.prompt);
   } catch (err) {
     signal?.removeEventListener("abort", onAbort);
     innerAbort.abort();
@@ -851,29 +843,6 @@ async function runPlannerStage(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   };
-}
-
-async function promptWithTimeout(input: {
-  readonly session: AgentSession;
-  readonly promptText: string;
-  readonly timeoutMs: number;
-  readonly onTimeout?: () => void;
-}): Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      input.session.prompt(input.promptText),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          void input.session.abort().catch(() => {});
-          input.onTimeout?.();
-          reject(new Error(`planner timed out after ${input.timeoutMs}ms`));
-        }, input.timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 function numField(e: JsonlEvent, k: string): number | null {
