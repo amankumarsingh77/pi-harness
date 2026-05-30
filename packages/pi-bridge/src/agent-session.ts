@@ -181,7 +181,6 @@ export async function createAgentSession(
     settled: boolean;
   };
   let pending: Pending | null = null;
-  const maxTurns = opts.maxTurns;
   const pendingToolCalls = new Map<string, string[]>();
 
   const settle = (fn: (p: Pending) => void): void => {

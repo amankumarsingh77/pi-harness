@@ -229,6 +229,30 @@ describe("runPreflight", () => {
     expect(result.results).toHaveLength(1);
   });
 
+  it("uses the selected planning model for every preflight subagent session", async () => {
+    const createOpts: AgentSessionOptions[] = [];
+    const writer = makeFakeWriter();
+    const selectedPlanModel = {
+      provider: "crofai",
+      model: "kimi-k2.6",
+      thinkingLevel: "high" as const,
+    };
+
+    await runPreflight(
+      baseOpts({
+        phaseModel: selectedPlanModel,
+        createAgentSession: async (opts) => {
+          createOpts.push(opts);
+          return writer(opts);
+        },
+      }),
+    );
+
+    expect(createOpts.length).toBeGreaterThan(0);
+    expect(createOpts.every((opts) => opts.model.provider === selectedPlanModel.provider)).toBe(true);
+    expect(createOpts.every((opts) => opts.model.model === selectedPlanModel.model)).toBe(true);
+  });
+
   it("a session that returns without write_findings fails the subagent", async () => {
     const result = await runPreflight(
       baseOpts({

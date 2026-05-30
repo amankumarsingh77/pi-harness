@@ -61,6 +61,7 @@ describe("brainstorm integration flow", () => {
     await writeFile(join(repo, "README.md"), "init\n");
     await repoGit.add("README.md");
     await repoGit.commit("init");
+    await repoGit.raw(["branch", "-M", "main"]);
     worktrees = new WorktreeManager({ repoRoot: repo, worktreesDir: join(scratch, "wts") });
     store = new ArtifactsStore();
 

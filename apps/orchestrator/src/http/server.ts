@@ -24,6 +24,7 @@ import { registerPlanRoutes } from "./routes/plan.js";
 import { registerLiveEventStream } from "./routes/live.js";
 import { registerMissionRoutes } from "./routes/mission.js";
 import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/verifier.js";
+import { registerModelOptionRoutes } from "./routes/model-options.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -96,6 +97,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
   registerHealth(app);
+  registerModelOptionRoutes(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,

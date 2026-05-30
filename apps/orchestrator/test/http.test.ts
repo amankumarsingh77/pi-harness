@@ -1152,6 +1152,44 @@ describe("http", () => {
     expect(fetched.phaseModels).toEqual({ brainstorm: { thinkingLevel: "high" } });
   });
 
+  it("POST /api/tasks persists phaseModels at creation time", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "pm-create",
+        phaseModels: {
+          brainstorm: { provider: "openai", model: "gpt-5.1" },
+          plan: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high" },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.phaseModels).toEqual({
+      brainstorm: { provider: "openai", model: "gpt-5.1" },
+      plan: { provider: "crofai", model: "kimi-k2.6", thinkingLevel: "high" },
+    });
+    const fetched = await runs.getTask(body.id);
+    expect(fetched.phaseModels).toEqual(body.phaseModels);
+  });
+
+  it("GET /api/model-options returns providers without secret values", async () => {
+    try {
+      process.env["CROFAI_API_KEY"] = "secret-crofai-key";
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/model-options",
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.providers.map((provider: { id: string }) => provider.id)).toContain("crofai");
+      expect(JSON.stringify(body)).not.toContain("secret-crofai-key");
+    } finally {
+      delete process.env["CROFAI_API_KEY"];
+    }
+  });
+
   it("PATCH /api/tasks/:id phaseModels after first run returns 409 phase_models_frozen", async () => {
     const t = await runs.createTask({ title: "pm-frozen" });
     await runs.createRun({ taskId: t.id, phase: "brainstorm" });

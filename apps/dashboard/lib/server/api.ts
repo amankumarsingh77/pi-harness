@@ -23,6 +23,7 @@ const real = api({ baseUrl: ORCHESTRATOR_URL });
 export const orchestrator: Api = {
   listTasks: () => real.listTasks(),
   createTask: (input) => real.createTask(input),
+  getModelOptions: () => real.getModelOptions(),
   transitionTask: (id, action) => real.transitionTask(id, action),
   getTask: (id) => real.getTask(id),
   listEvents: async (runId) => {

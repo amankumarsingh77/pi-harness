@@ -21,6 +21,7 @@
     "test": "turbo run test --concurrency=1",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
+    "db:migrate": "node -e \"console.log('No database migrations configured')\"",
     "audit:dead": "knip",
     "audit:dupes": "jscpd --config .jscpd.json apps packages subagents",
     "audit:deps": "depcruise apps packages subagents --config .dependency-cruiser.mjs --output-type err",

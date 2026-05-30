@@ -17,12 +17,10 @@ import type { MissionStore } from "../adapters/mission-store.js";
 import {
   PhaseEventLogStore,
   type BrainstormPhaseEventInput,
-  type PlanPhaseEventInput,
 } from "../adapters/phase-event-log-store.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import { deriveBrainstormGate } from "../agents/brainstorm-gate.js";
 import { derivePlanGate } from "../agents/plan-gate.js";
-import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
 import type { TaskMutationLock } from "../runner/task-mutation-lock.js";
 import type { WorktreeInfo, WorktreeManager } from "../adapters/worktree.js";
@@ -33,7 +31,10 @@ import { scaffoldBrainstorm } from "../runner/scaffold-brainstorm.js";
 import { scaffoldPlan } from "../runner/scaffold-plan.js";
 import type { PhaseDeps, PhaseOutput } from "../runner/phase-prompts.js";
 
-type SchedulerHandle = Pick<TaskScheduler, "enqueue" | "cancelAndDrain">;
+type SchedulerHandle = {
+  readonly enqueue: (taskId: string) => void;
+  readonly cancelAndDrain: (taskId: string) => Promise<void>;
+};
 
 type TaskPatch = {
   readonly title?: string;
@@ -55,6 +56,7 @@ type CreateTaskInput = {
   readonly description?: string;
   readonly priority?: TaskPriority;
   readonly tags?: readonly string[];
+  readonly phaseModels?: Partial<Record<Phase, PhaseModelPatch>>;
 };
 
 export type PreparedPhase =
@@ -106,7 +108,15 @@ export class TaskWorkflowService {
   }
 
   async createTask(input: CreateTaskInput): Promise<Task> {
-    const task = await this.deps.runs.createTask(input);
+    const task = await this.deps.runs.createTask({
+      title: input.title,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.phaseModels !== undefined
+        ? { phaseModels: normalizePhaseModelPatch(input.phaseModels) }
+        : {}),
+    });
     await this.deps.missionStore?.ensureMission(task);
     return task;
   }
