@@ -16,16 +16,6 @@ export type RunStoreOpts = {
   readonly stateDir: string;
 };
 
-type TaskEntry = {
-  readonly type: "task.upsert";
-  readonly task: SerializedTask;
-};
-
-type RunEntry = {
-  readonly type: "run.upsert";
-  readonly run: SerializedRun;
-};
-
 type SerializedTask = Omit<Task, "createdAt" | "updatedAt"> & {
   readonly createdAt: string;
   readonly updatedAt: string;

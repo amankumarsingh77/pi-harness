@@ -18,7 +18,10 @@ export function TaskCostStrip({
   liveRunId: string | null;
 }) {
   const live = useOptionalRunLiveEvents();
-  const liveEvents = liveRunId ? live?.events ?? [] : [];
+  const liveEvents = useMemo(
+    () => (liveRunId ? live?.events ?? [] : []),
+    [live?.events, liveRunId],
+  );
 
   const liveUsage = useMemo(() => latestUsage(liveEvents), [liveEvents]);
 

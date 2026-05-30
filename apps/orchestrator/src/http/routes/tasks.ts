@@ -66,7 +66,7 @@ export function registerTaskRoutes(
     return t;
   });
 
-  app.patch<{ Params: { id: string } }>("/api/tasks/:id", async (req, reply) => {
+  app.patch<{ Params: { id: string } }>("/api/tasks/:id", async (req) => {
     let patch;
     try {
       patch = UpdateTaskSchema.parse(req.body);
@@ -87,7 +87,7 @@ export function registerTaskRoutes(
 
   app.post<{ Params: { id: string } }>(
     "/api/tasks/:id/transitions",
-    async (req, reply) => {
+    async (req) => {
       let action;
       try {
         action = TransitionSchema.parse(req.body);

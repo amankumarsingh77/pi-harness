@@ -17,7 +17,6 @@ import type { MissionStore } from "../adapters/mission-store.js";
 import {
   PhaseEventLogStore,
   type BrainstormPhaseEventInput,
-  type PlanPhaseEventInput,
 } from "../adapters/phase-event-log-store.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import { deriveBrainstormGate } from "../agents/brainstorm-gate.js";

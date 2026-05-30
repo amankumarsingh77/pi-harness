@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { PlanEventBus } from "../../src/agents/plan-event-bus.js";
-import type { PhaseEventLogStore } from "../../src/adapters/phase-event-log-store.js";
 
 describe("PlanEventBus", () => {
   it("delegates plan events to the centralized phase event log", async () => {
@@ -8,7 +7,7 @@ describe("PlanEventBus", () => {
       publish: vi.fn(async () => null),
     };
     const bus = new PlanEventBus({
-      phaseEvents: phaseEvents as unknown as PhaseEventLogStore,
+      phaseEvents,
       worktreePath: "/worktree",
       runId: "r1",
       taskId: "T-1",
