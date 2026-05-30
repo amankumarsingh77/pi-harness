@@ -6,12 +6,16 @@ import { Topbar } from "@/components/topbar";
 import { orchestrator } from "@/lib/server/api";
 import { PriorityPicker } from "@/components/new-task/priority-picker";
 import { TagInput } from "@/components/new-task/tag-input";
+import { StageModelSelector } from "@/components/new-task/stage-model-selector";
 import { createTask } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewTaskPage() {
-  const { counts } = await orchestrator.listTasks();
+  const [{ counts }, modelCatalog] = await Promise.all([
+    orchestrator.listTasks(),
+    orchestrator.getModelOptions(),
+  ]);
   const inFlight =
     (counts.brainstorming ?? 0) +
     (counts.planning ?? 0) +
@@ -82,24 +86,7 @@ export default async function NewTaskPage() {
               <TagInput name="tags" />
             </Field>
 
-            <div className="mt-5 flex items-center gap-2.5 border-t border-line pt-4">
-              <span className="flex-1 font-mono text-[11px] leading-[1.6] text-fg-subtle">
-                Creating a task does <span className="text-fg-body">not</span> start a run — no
-                worktree, no LLM tokens spent.
-              </span>
-              <Link
-                href={"/" as Route}
-                className="rounded-md border border-line bg-transparent px-3.5 py-2 text-[13px] font-medium text-fg-body transition-colors hover:border-line-hover hover:bg-white/[0.03]"
-              >
-                Cancel
-              </Link>
-              <button
-                type="submit"
-                className="rounded-md border-0 bg-st-progress px-3.5 py-2 text-[13px] font-medium text-white transition-[filter] hover:brightness-110"
-              >
-                Create task
-              </button>
-            </div>
+            <StageModelSelector initialCatalog={modelCatalog} />
           </div>
         </form>
       </main>

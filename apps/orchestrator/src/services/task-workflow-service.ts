@@ -56,6 +56,7 @@ type CreateTaskInput = {
   readonly description?: string;
   readonly priority?: TaskPriority;
   readonly tags?: readonly string[];
+  readonly phaseModels?: Partial<Record<Phase, PhaseModelPatch>>;
 };
 
 export type PreparedPhase =
@@ -108,7 +109,15 @@ export class TaskWorkflowService {
   }
 
   async createTask(input: CreateTaskInput): Promise<Task> {
-    const task = await this.deps.runs.createTask(input);
+    const task = await this.deps.runs.createTask({
+      title: input.title,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.phaseModels !== undefined
+        ? { phaseModels: normalizePhaseModelPatch(input.phaseModels) }
+        : {}),
+    });
     await this.deps.missionStore?.ensureMission(task);
     return task;
   }

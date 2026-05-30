@@ -1,5 +1,7 @@
 import type {
   DashboardSummary,
+  Phase,
+  PhaseModelConfig,
   Task,
   Run,
   AgentEvent,
@@ -261,8 +263,11 @@ export type Api = {
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
   createTask: (
     input: Pick<Task, "title"> &
-      Partial<Pick<Task, "description" | "priority" | "tags">>,
+      Partial<Pick<Task, "description" | "priority" | "tags">> & {
+        phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
+      },
   ) => Promise<Task>;
+  getModelOptions: () => Promise<ModelCatalog>;
   transitionTask: (
     id: string,
     action:
@@ -342,6 +347,42 @@ export type TaskListResult = {
   readonly summary: DashboardSummary;
 };
 
+export type ModelCatalogCredential =
+  | {
+      kind: "env";
+      configured: boolean;
+      requiredEnvVars: readonly string[];
+    }
+  | {
+      kind: "oauth";
+      configured: boolean;
+      label: string;
+    }
+  | {
+      kind: "ambient";
+      configured: boolean;
+      label: string;
+    };
+
+export type ModelCatalogModel = {
+  id: string;
+  label: string;
+  reasoning: boolean;
+  contextWindow: number;
+  maxTokens: number;
+};
+
+export type ModelCatalogProvider = {
+  id: string;
+  label: string;
+  credential: ModelCatalogCredential;
+  models: readonly ModelCatalogModel[];
+};
+
+export type ModelCatalog = {
+  providers: readonly ModelCatalogProvider[];
+};
+
 export type BrainstormDiff = {
   kind: "design" | "spec";
   baseline: { commit: string; body: string } | null;
@@ -382,6 +423,7 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       hydrateTask(
         await send<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
       ),
+    getModelOptions: () => send<ModelCatalog>("/api/model-options"),
     transitionTask: async (id, action) => {
       const r = await send<{ task: Task }>(`/api/tasks/${id}/transitions`, {
         method: "POST",

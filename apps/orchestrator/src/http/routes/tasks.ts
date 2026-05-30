@@ -60,6 +60,7 @@ export function registerTaskRoutes(
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
       priority: parsed.priority,
       tags: parsed.tags,
+      ...(parsed.phaseModels !== undefined ? { phaseModels: parsed.phaseModels } : {}),
     });
     reply.code(201);
     return t;

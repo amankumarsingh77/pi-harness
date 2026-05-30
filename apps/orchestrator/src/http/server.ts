@@ -26,6 +26,7 @@ import { registerLiveEventStream } from "./routes/live.js";
 import { registerMissionRoutes } from "./routes/mission.js";
 import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/verifier.js";
 import { registerGraphifyRoutes } from "./routes/graphify.js";
+import { registerModelOptionRoutes } from "./routes/model-options.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -102,6 +103,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   registerGraphifyRoutes(app, {
     ...(deps.graphifyInstaller ? { installer: deps.graphifyInstaller } : {}),
   });
+  registerModelOptionRoutes(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,
