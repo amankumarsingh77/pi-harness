@@ -49,7 +49,6 @@ export const VerifierRunRequestSchema = z
     mode: VerifierRunModeSchema.default("pending"),
   })
   .strict();
-export type VerifierRunRequest = z.infer<typeof VerifierRunRequestSchema>;
 
 const SkippedReasonSchema = z.enum([
   "not_scenario_claim",

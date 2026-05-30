@@ -5,8 +5,7 @@ import type { PhaseDeps } from "./phase-prompts.js";
 import type { CancellationRegistry } from "./cancellation.js";
 import { silentLogger, type Logger } from "../domain/logger.js";
 import { mkEvent } from "../domain/events.js";
-import { runLoop } from "./run-loop.js";
-import type { TaskWorkflowService } from "../services/task-workflow-service.js";
+import { runLoop, type RunLoopWorkflow } from "./run-loop.js";
 
 export type SchedulerDeps = {
   runs: RunStore;
@@ -15,7 +14,7 @@ export type SchedulerDeps = {
   worktrees: WorktreeManager;
   retryCap: number;
   cancellation: CancellationRegistry;
-  workflow?: TaskWorkflowService;
+  workflow?: RunLoopWorkflow;
   logger?: Logger;
 };
 
