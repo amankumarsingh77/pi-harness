@@ -9,7 +9,6 @@ import { ClaimLedgerStore, MissionStore } from "../adapters/mission-store.js";
 import type { ClaimLedgerStore as ClaimLedgerStoreType, MissionStore as MissionStoreType } from "../adapters/mission-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
-import type { GraphifyAutoInstaller } from "../agents/graphify-installer.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
 import { TaskMutationLock } from "../runner/task-mutation-lock.js";
@@ -25,7 +24,6 @@ import { registerPlanRoutes } from "./routes/plan.js";
 import { registerLiveEventStream } from "./routes/live.js";
 import { registerMissionRoutes } from "./routes/mission.js";
 import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/verifier.js";
-import { registerGraphifyRoutes } from "./routes/graphify.js";
 import { registerModelOptionRoutes } from "./routes/model-options.js";
 
 export type ServerDeps = {
@@ -51,7 +49,6 @@ export type ServerDeps = {
   missionStore?: MissionStoreType;
   claimLedger?: ClaimLedgerStoreType;
   verifierRunners?: VerifierRouteRunners;
-  graphifyInstaller?: Pick<GraphifyAutoInstaller, "status">;
   workflow?: TaskWorkflowService;
 };
 
@@ -100,9 +97,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
   registerHealth(app);
-  registerGraphifyRoutes(app, {
-    ...(deps.graphifyInstaller ? { installer: deps.graphifyInstaller } : {}),
-  });
   registerModelOptionRoutes(app);
   registerTaskRoutes(app, {
     runs: deps.runs,

@@ -17,7 +17,6 @@ export const queryKeys = {
   brainstormBundle: (taskId: string) => ["tasks", taskId, "brainstorm"] as const,
   planBundle: (taskId: string) => ["tasks", taskId, "plan"] as const,
   mission: (taskId: string) => ["tasks", taskId, "mission"] as const,
-  graphifyStatus: ["graphify", "status"] as const,
   artifact: (taskId: string, name: "brainstorm" | "plan" | "proof-report") =>
     ["tasks", taskId, "artifacts", name] as const,
 };
@@ -50,10 +49,6 @@ export const queries = {
   getMission: (taskId: string) => ({
     queryKey: queryKeys.mission(taskId),
     queryFn: () => proxied.getMission(taskId),
-  }),
-  getGraphifyStatus: () => ({
-    queryKey: queryKeys.graphifyStatus,
-    queryFn: () => proxied.getGraphifyStatus(),
   }),
   getArtifact: <T,>(taskId: string, name: "brainstorm" | "plan" | "proof-report") => ({
     queryKey: queryKeys.artifact(taskId, name),

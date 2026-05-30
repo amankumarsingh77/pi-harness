@@ -7,7 +7,6 @@ import type {
   GateUpdatedPayload,
   ClaimsUpdatedPayload,
   DashboardSummary,
-  GraphifyInstallState,
   LiveEventEnvelope,
   LiveEventKind,
   LiveEventPayloadByKind,
@@ -83,16 +82,6 @@ export class LiveEventStore {
       scope: "task",
       taskId,
       kind: "claims.updated",
-      payload,
-    });
-  }
-
-  publishGraphifyStatus(
-    payload: GraphifyInstallState,
-  ): Promise<LiveEventEnvelope<"graphify.status.updated">> {
-    return this.publish({
-      scope: "dashboard",
-      kind: "graphify.status.updated",
       payload,
     });
   }
@@ -227,7 +216,6 @@ function decodePayload(kind: string, payload: unknown): LiveEventPayloadByKind[L
   if (kind === "run.updated") return decodeRunPayload(payload);
   if (kind === "agent.event.appended") return decodeAgentEventPayload(payload);
   if (kind === "dashboard.snapshot") return decodeDashboardPayload(payload);
-  if (kind === "graphify.status.updated") return decodeGraphifyStatusPayload(payload);
   return payload as LiveEventPayloadByKind[LiveEventKind];
 }
 
@@ -298,14 +286,6 @@ function decodeAgentEventPayload(payload: unknown): AgentEvent {
     ...payload,
     ts: parseDate(payload["ts"]) ?? new Date(0),
   } as AgentEvent;
-}
-
-function decodeGraphifyStatusPayload(payload: unknown): GraphifyInstallState {
-  if (!isRecord(payload)) return payload as GraphifyInstallState;
-  return {
-    ...payload,
-    updatedAt: parseDate(payload["updatedAt"]) ?? new Date(0),
-  } as GraphifyInstallState;
 }
 
 function derivedEvents(event: AgentEvent): readonly PublishInput<LiveEventKind>[] {

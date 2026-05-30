@@ -39,21 +39,6 @@ describe("live-event-client", () => {
     expect(parsed?.payload.ts).toBeInstanceOf(Date);
   });
 
-  it("hydrates graphify status update timestamps into Date values", () => {
-    const parsed = parseLiveEnvelope(
-      JSON.stringify(envelope("graphify.status.updated", {
-        status: "installing",
-        reason: "missing_cli",
-        message: "Graphify CLI not found",
-        updatedAt: "2026-05-21T00:00:02.000Z" as unknown as Date,
-      })),
-      "graphify.status.updated",
-    );
-
-    expect(parsed?.ts).toBeInstanceOf(Date);
-    expect(parsed?.payload.updatedAt).toBeInstanceOf(Date);
-  });
-
   it("dedupes and sorts envelopes by sequence", () => {
     const first = envelope("agent.event.appended", agentPayload({ id: "event-1" }), 2);
     const second = envelope("agent.event.appended", agentPayload({ id: "event-2" }), 1);

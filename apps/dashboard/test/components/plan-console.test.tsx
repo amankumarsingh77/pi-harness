@@ -160,14 +160,14 @@ describe("PlanConsole", () => {
   it("renders the blocked banner with the failure reason when lastBlocked is set", () => {
     renderConsole({
       lastBlocked: {
-        reason: "planner timed out after 300000ms",
+        reason: "planner blocked by provider error",
         ts: "2026-05-21T18:58:41.000Z",
       },
     });
 
     const banner = screen.getByTestId("plan-blocked-banner");
     expect(banner).toHaveTextContent("plan blocked");
-    expect(banner).toHaveTextContent("planner timed out after 300000ms");
+    expect(banner).toHaveTextContent("planner blocked by provider error");
   });
 
   it("omits the blocked banner when lastBlocked is null", () => {
