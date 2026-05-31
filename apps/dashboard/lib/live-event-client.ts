@@ -1,6 +1,5 @@
 import type {
   AgentEvent,
-  GraphifyInstallState,
   LiveEventEnvelope,
   LiveEventKind,
 } from "@pi-harness/shared";
@@ -73,21 +72,10 @@ function hydrateAnyLiveEnvelope(envelope: AnyLiveEventEnvelope): AnyLiveEventEnv
       payload: hydrateAgentEvent(envelope.payload),
     };
   }
-  if (envelope.kind === "graphify.status.updated") {
-    return {
-      ...envelope,
-      ts: toDate(envelope.ts),
-      payload: hydrateGraphifyStatus(envelope.payload),
-    };
-  }
   return {
     ...envelope,
     ts: toDate(envelope.ts),
   };
-}
-
-function hydrateGraphifyStatus(status: GraphifyInstallState): GraphifyInstallState {
-  return { ...status, updatedAt: toDate(status.updatedAt) };
 }
 
 function isLiveEventEnvelope(value: unknown): value is LiveEventEnvelope {

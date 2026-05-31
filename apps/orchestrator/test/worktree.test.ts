@@ -20,6 +20,7 @@ beforeEach(async () => {
   await writeFile(join(repo, "README.md"), "init");
   await git.add("README.md");
   await git.commit("init");
+  await git.raw(["branch", "-M", "main"]);
 });
 
 afterEach(async () => {

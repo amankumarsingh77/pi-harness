@@ -156,7 +156,7 @@ function taskFixture(overrides: Partial<Task> = {}): Task {
 function fakeRuns(task: Task): RunStore {
   return {
     getTask: vi.fn(async () => task),
-  } as unknown as RunStore;
+  } as RunStore;
 }
 
 function fakeEvents(): EventStore {
@@ -168,5 +168,5 @@ function fakeLiveEvents(published: unknown[] = []): LiveEventStore {
     publishClaimsUpdated: vi.fn(async (_taskId: string, payload: unknown) => {
       published.push(payload);
     }),
-  } as unknown as LiveEventStore;
+  } as LiveEventStore;
 }

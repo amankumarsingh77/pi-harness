@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import type { Phase, Run, Task, TaskPriority, TaskStatus } from "@pi-harness/shared";
+import type { Phase, PhaseModelConfig, Run, Task, TaskPriority, TaskStatus } from "@pi-harness/shared";
 import { TASK_STATUSES } from "@pi-harness/shared";
 import { NotFoundError } from "../domain/errors.js";
 import { appendJsonl, readJsonl } from "./jsonl-writer.js";
@@ -14,16 +14,6 @@ export type RunStoreObserver = {
 
 export type RunStoreOpts = {
   readonly stateDir: string;
-};
-
-type TaskEntry = {
-  readonly type: "task.upsert";
-  readonly task: SerializedTask;
-};
-
-type RunEntry = {
-  readonly type: "run.upsert";
-  readonly run: SerializedRun;
 };
 
 type SerializedTask = Omit<Task, "createdAt" | "updatedAt"> & {
@@ -53,6 +43,7 @@ export class RunStore {
     description?: string;
     priority?: TaskPriority;
     tags?: readonly string[];
+    phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
   }): Promise<Task> {
     const now = new Date();
     const task: Task = {
@@ -66,7 +57,7 @@ export class RunStore {
       retryCount: 0,
       priority: input.priority ?? "none",
       tags: [...(input.tags ?? [])],
-      phaseModels: {},
+      phaseModels: input.phaseModels ?? {},
       createdAt: now,
       updatedAt: now,
     };

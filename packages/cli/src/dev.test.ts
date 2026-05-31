@@ -116,4 +116,40 @@ export default defineHarnessConfig({
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("rejects stale Graphify config blocks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-harness-config-"));
+    try {
+      await mkdir(join(dir, ".git"));
+      await writeFile(
+        join(dir, "harness.config.ts"),
+        `export default {
+  repoRoot: ${JSON.stringify(dir)},
+  baseBranch: "main",
+  graphify: {
+    provider: "custom",
+    model: "model-x",
+    baseUrl: "https://models.example/v1",
+    apiKeyEnv: "CUSTOM_API_KEY",
+  },
+};
+`,
+      );
+
+      const result = await loadProjectConfig({
+        cwd: dir,
+        env: {},
+        execFile: async (cmd, args) => {
+          if (cmd === "git" && args.join(" ") === "rev-parse --show-toplevel") {
+            return { ok: true, stdout: `${dir}\n`, stderr: "" };
+          }
+          return { ok: false, stdout: "", stderr: "unexpected" };
+        },
+      });
+
+      expect(result).toMatchObject({ ok: false, error: "invalid_config" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

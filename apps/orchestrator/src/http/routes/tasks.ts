@@ -60,12 +60,13 @@ export function registerTaskRoutes(
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
       priority: parsed.priority,
       tags: parsed.tags,
+      ...(parsed.phaseModels !== undefined ? { phaseModels: parsed.phaseModels } : {}),
     });
     reply.code(201);
     return t;
   });
 
-  app.patch<{ Params: { id: string } }>("/api/tasks/:id", async (req, reply) => {
+  app.patch<{ Params: { id: string } }>("/api/tasks/:id", async (req) => {
     let patch;
     try {
       patch = UpdateTaskSchema.parse(req.body);
@@ -86,7 +87,7 @@ export function registerTaskRoutes(
 
   app.post<{ Params: { id: string } }>(
     "/api/tasks/:id/transitions",
-    async (req, reply) => {
+    async (req) => {
       let action;
       try {
         action = TransitionSchema.parse(req.body);

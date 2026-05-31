@@ -7,11 +7,6 @@ type SerializedPreflightStep = Omit<PreflightStep, "startedAt" | "endedAt"> & {
   readonly endedAt: string | null;
 };
 
-type PreflightStepEntry = {
-  readonly type: "preflight_step.upsert";
-  readonly step: SerializedPreflightStep;
-};
-
 export type PreflightStepStoreOpts = {
   readonly stateDir: string;
 };

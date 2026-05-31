@@ -5,9 +5,7 @@ import type { PhaseDeps } from "./phase-prompts.js";
 import type { CancellationRegistry } from "./cancellation.js";
 import { silentLogger, type Logger } from "../domain/logger.js";
 import { mkEvent } from "../domain/events.js";
-import { runLoop } from "./run-loop.js";
-import type { GraphifyLifecycle } from "../agents/graphify-manager.js";
-import type { TaskWorkflowService } from "../services/task-workflow-service.js";
+import { runLoop, type RunLoopWorkflow } from "./run-loop.js";
 
 export type SchedulerDeps = {
   runs: RunStore;
@@ -16,8 +14,7 @@ export type SchedulerDeps = {
   worktrees: WorktreeManager;
   retryCap: number;
   cancellation: CancellationRegistry;
-  graphify?: GraphifyLifecycle;
-  workflow?: TaskWorkflowService;
+  workflow?: RunLoopWorkflow;
   logger?: Logger;
 };
 
@@ -118,7 +115,6 @@ export class TaskScheduler {
         worktrees: this.deps.worktrees,
         retryCap: this.deps.retryCap,
         cancellation: this.deps.cancellation,
-        ...(this.deps.graphify !== undefined ? { graphify: this.deps.graphify } : {}),
         ...(this.deps.workflow !== undefined ? { workflow: this.deps.workflow } : {}),
         enqueue: (id: string) => this.enqueue(id),
       });

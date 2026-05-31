@@ -1,5 +1,7 @@
 import type {
   DashboardSummary,
+  Phase,
+  PhaseModelConfig,
   Task,
   Run,
   AgentEvent,
@@ -11,7 +13,6 @@ import type {
   ClaimEvent,
   MissionEvent,
   MissionPacket,
-  GraphifyInstallState,
   PreflightStep,
   ChatThread,
   ChatMessage,
@@ -292,8 +293,11 @@ export type Api = {
   listRunFiles: (runId: string) => Promise<{ files: RunFile[] }>;
   createTask: (
     input: Pick<Task, "title"> &
-      Partial<Pick<Task, "description" | "priority" | "tags">>,
+      Partial<Pick<Task, "description" | "priority" | "tags">> & {
+        phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
+      },
   ) => Promise<Task>;
+  getModelOptions: () => Promise<ModelCatalog>;
   transitionTask: (
     id: string,
     action:
@@ -354,7 +358,6 @@ export type Api = {
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
   getMission: (taskId: string) => Promise<MissionBundle>;
   runVerifier: (taskId: string, payload?: VerifierRunRequest) => Promise<VerifierRunResult>;
-  getGraphifyStatus: () => Promise<{ status: GraphifyInstallState | null }>;
   getPlanDiff: (taskId: string, kind: "plan") => Promise<PlanDiff>;
   submitPlanArtifactEdit: (
     taskId: string,
@@ -381,6 +384,42 @@ export type TaskListResult = {
   readonly counts: Record<string, number>;
   readonly humanInterventionTaskIds: readonly string[];
   readonly summary: DashboardSummary;
+};
+
+export type ModelCatalogCredential =
+  | {
+      kind: "env";
+      configured: boolean;
+      requiredEnvVars: readonly string[];
+    }
+  | {
+      kind: "oauth";
+      configured: boolean;
+      label: string;
+    }
+  | {
+      kind: "ambient";
+      configured: boolean;
+      label: string;
+    };
+
+export type ModelCatalogModel = {
+  id: string;
+  label: string;
+  reasoning: boolean;
+  contextWindow: number;
+  maxTokens: number;
+};
+
+export type ModelCatalogProvider = {
+  id: string;
+  label: string;
+  credential: ModelCatalogCredential;
+  models: readonly ModelCatalogModel[];
+};
+
+export type ModelCatalog = {
+  providers: readonly ModelCatalogProvider[];
 };
 
 export type BrainstormDiff = {
@@ -423,6 +462,7 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       hydrateTask(
         await send<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
       ),
+    getModelOptions: () => send<ModelCatalog>("/api/model-options"),
     transitionTask: async (id, action) => {
       const r = await send<{ task: Task }>(`/api/tasks/${id}/transitions`, {
         method: "POST",
@@ -500,10 +540,6 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
         method: "POST",
         body: JSON.stringify(payload),
       }),
-    getGraphifyStatus: async () => {
-      const r = await send<{ status: GraphifyInstallState | null }>("/api/graphify/status");
-      return { status: r.status ? hydrateGraphifyStatus(r.status) : null };
-    },
     getPlanDiff: (taskId, kind) =>
       send<PlanDiff>(`/api/tasks/${taskId}/plan/diff?kind=${kind}`),
     submitPlanArtifactEdit: (taskId, payload) =>
@@ -598,13 +634,6 @@ function hydrateDashboardSummary(summary: DashboardSummary): DashboardSummary {
   return {
     ...summary,
     lastEventAt: summary.lastEventAt ? toDate(summary.lastEventAt) : null,
-  };
-}
-
-function hydrateGraphifyStatus(status: GraphifyInstallState): GraphifyInstallState {
-  return {
-    ...status,
-    updatedAt: toDate(status.updatedAt),
   };
 }
 

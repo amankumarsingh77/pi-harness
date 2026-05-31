@@ -17,13 +17,6 @@ function normalizeTags(rawTags: readonly string[]): string[] {
   return [...unique];
 }
 
-export const CreateTaskSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().max(10_000).optional(),
-  priority: z.enum(TASK_PRIORITIES).default("none"),
-  tags: z.array(z.string().max(40)).max(16).optional().transform((tags) => normalizeTags(tags ?? [])),
-});
-
 // Partial<PhaseModelConfig>: every field optional so a patch can flip a single
 // knob (e.g. just thinkingLevel) without restating provider/model.
 const PhaseModelOverrideSchema = z
@@ -40,6 +33,14 @@ const PhaseModelOverrideSchema = z
 export const PhaseModelsPatchSchema = z
   .record(z.enum(PHASES), PhaseModelOverrideSchema)
   .refine((v) => v !== null && typeof v === "object" && !Array.isArray(v));
+
+export const CreateTaskSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(10_000).optional(),
+  priority: z.enum(TASK_PRIORITIES).default("none"),
+  tags: z.array(z.string().max(40)).max(16).optional().transform((tags) => normalizeTags(tags ?? [])),
+  phaseModels: PhaseModelsPatchSchema.optional(),
+});
 
 export const UpdateTaskSchema = z
   .object({

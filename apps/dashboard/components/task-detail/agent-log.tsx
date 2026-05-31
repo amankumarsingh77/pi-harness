@@ -41,7 +41,10 @@ export function AgentLog({
   const endRef = useRef<HTMLDivElement>(null);
 
   const runLive = useOptionalRunLiveEvents();
-  const liveEvents = live && runId !== "—" ? runLive?.events ?? [] : [];
+  const liveEvents = useMemo(
+    () => (live && runId !== "—" ? runLive?.events ?? [] : []),
+    [live, runId, runLive?.events],
+  );
 
   const merged = useMemo(
     () => mergeById(events, liveEvents),

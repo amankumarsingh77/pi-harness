@@ -77,12 +77,6 @@ export function renderHarnessConfig(config: HarnessProjectConfig): string {
   dashboardPort: ${config.dashboardPort},
   orchestratorPort: ${config.orchestratorPort},
   webProvider: ${JSON.stringify(config.webProvider)},
-  graphify: {
-    provider: ${JSON.stringify(config.graphify.provider)},
-    model: ${JSON.stringify(config.graphify.model)},
-    baseUrl: ${JSON.stringify(config.graphify.baseUrl)},
-    apiKeyEnv: ${JSON.stringify(config.graphify.apiKeyEnv)},
-  },
 };
 `;
 }
@@ -102,15 +96,8 @@ export function renderComposeFile(config: HarnessProjectConfig): string {
 }
 
 function renderEnvHarnessExample(config: HarnessProjectConfig): string {
-  return `# Required for the default phase config and Graphify provider (crofai).
+  return `# Required for the default phase config provider (crofai).
 CROFAI_API_KEY=
-
-# Graphify defaults. Override these only if routing Graphify through another
-# OpenAI-compatible endpoint.
-GRAPHIFY_PROVIDER=${config.graphify.provider}
-GRAPHIFY_MODEL=${config.graphify.model}
-GRAPHIFY_BASE_URL=${config.graphify.baseUrl}
-GRAPHIFY_API_KEY_ENV=${config.graphify.apiKeyEnv}
 
 # Optional provider keys.
 OPENCODE_API_KEY=

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,17 +97,9 @@ describe("runPlan", () => {
       "find",
       "write",
       "mark_ready",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ]);
     expect(createOpts[0]!.customTools?.map((tool) => tool.name)).toEqual([
       "mark_ready",
-      "graphify_query",
-      "graphify_path",
-      "graphify_explain",
-      "graphify_stats",
     ]);
   });
 
@@ -333,41 +325,59 @@ describe("runPlan", () => {
     expect(await readPlanJsonl()).toContain("\"systemKind\":\"blocked\"");
   });
 
-  it("times out planner sessions and publishes a blocked event", async () => {
+  it("does not timeout planner sessions", async () => {
+    vi.useFakeTimers();
     let aborted = false;
-
-    const result = await runPlan({
-      taskId: "T-1",
-      runId: "r-1",
-      cwd,
-      store,
-      bus: makeBus(),
-      eventStore: new InMemoryEventStore() as never,
-      phaseModel: {
-        provider: "anthropic",
-        model: "claude-opus-4-7",
-        thinkingLevel: "high",
-      },
-      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
-      createAgentSession: async () => ({
-        async prompt() {
-          return new Promise(() => {});
-        },
-        async abort() {
-          aborted = true;
-        },
-        async close() {},
-      }),
-      ticketTitle: "Timeout",
-      ticketDescription: "Planner hangs.",
-      claimVerifierState: { attempts: 0, cap: 2 },
-      plannerTimeoutMs: 5,
+    let finishPrompt: ((usage: { costUsd: number; inputTokens: number; outputTokens: number }) => void) | undefined;
+    let markPromptStarted: (() => void) | undefined;
+    const promptStarted = new Promise<void>((resolve) => {
+      markPromptStarted = resolve;
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("planner timed out");
-    expect(aborted).toBe(true);
-    expect(await readPlanJsonl()).toContain("\"systemKind\":\"blocked\"");
+    try {
+      const resultPromise = runPlan({
+        taskId: "T-1",
+        runId: "r-1",
+        cwd,
+        store,
+        bus: makeBus(),
+        eventStore: new InMemoryEventStore() as never,
+        phaseModel: {
+          provider: "anthropic",
+          model: "claude-opus-4-7",
+          thinkingLevel: "high",
+        },
+        sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+        createAgentSession: async () => ({
+          async prompt() {
+            markPromptStarted?.();
+            return new Promise<{ costUsd: number; inputTokens: number; outputTokens: number }>((resolve) => {
+              finishPrompt = resolve;
+            });
+          },
+          async abort() {
+            aborted = true;
+          },
+          async close() {},
+        }),
+        ticketTitle: "No planner timeout",
+        ticketDescription: "Planner may run for longer than five minutes.",
+        claimVerifierState: { attempts: 0, cap: 2 },
+      });
+
+      await promptStarted;
+      await vi.advanceTimersByTimeAsync(6 * 60 * 1000);
+      expect(aborted).toBe(false);
+      finishPrompt?.({ costUsd: 0, inputTokens: 1, outputTokens: 1 });
+
+      const result = await resultPromise;
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(aborted).toBe(false);
+      expect(await readPlanJsonl()).not.toContain("\"systemKind\":\"blocked\"");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

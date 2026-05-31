@@ -41,7 +41,7 @@ export class PlanEventBus {
 
 type PlanEventBusOpts =
   | {
-      readonly phaseEvents: PhaseEventLogStore;
+      readonly phaseEvents: Pick<PhaseEventLogStore, "publish">;
       readonly worktreePath: string;
       readonly runId: string;
       readonly taskId: string;

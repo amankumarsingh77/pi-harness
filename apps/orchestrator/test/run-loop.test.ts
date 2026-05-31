@@ -14,7 +14,6 @@ import { runLoop } from "../src/runner/run-loop.js";
 import { runPhase, type PhaseDeps } from "../src/runner/phase-prompts.js";
 import { CancellationRegistry } from "../src/runner/cancellation.js";
 import { ArtifactsStore } from "../src/agents/artifacts-store.js";
-import type { GraphifyLifecycle, GraphifyStatus } from "../src/agents/graphify-manager.js";
 import { createBareTestStores, resetTestStore } from "./helpers/stores.js";
 
 const phaseDepsBase: PhaseDeps = {
@@ -47,6 +46,7 @@ describe("runLoop", () => {
     await writeFile(join(repo, "README.md"), "init\n");
     await repoGit.add("README.md");
     await repoGit.commit("init");
+    await repoGit.raw(["branch", "-M", "main"]);
     worktrees = new WorktreeManager({ repoRoot: repo, worktreesDir: join(scratch, "worktrees") });
   });
 
@@ -299,101 +299,6 @@ describe("runLoop", () => {
     expect(passedDeps.cwd).toContain(t.id);
   });
 
-  it("does not block phase dispatch on Graphify initialization", async () => {
-    const t = await runs.createTask({ title: "graphify-nonblocking" });
-    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
-    let graphifyStarted = false;
-    let finishGraphify: (() => void) | undefined;
-    const graphifyDone = new Promise<Awaited<ReturnType<GraphifyLifecycle["ensureInitialized"]>>>(
-      (resolve) => {
-        finishGraphify = () => {
-          resolve({
-            ok: true,
-            action: "initialize",
-            cwd: "",
-            status: graphifyStatus(""),
-            stdout: "",
-            stderr: "",
-            skipped: false,
-          });
-        };
-      },
-    );
-    const graphify = fakeGraphify({
-      async ensureInitialized(cwd) {
-        graphifyStarted = cwd.includes(t.id);
-        return graphifyDone;
-      },
-    });
-
-    vi.mocked(runPhase).mockImplementation(async () => {
-      const runId = vi.mocked(runPhase).mock.calls[0]![1].runId;
-      await expect(runs.getRun(runId)).resolves.toMatchObject({ status: "running" });
-      return {
-        ok: true,
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-      };
-    });
-
-    await runLoop({
-      task: await runs.getTask(t.id),
-      runs,
-      events,
-      phaseDeps: phaseDepsBase,
-      worktrees,
-      retryCap: 2,
-      cancellation: new CancellationRegistry(),
-      graphify,
-    });
-
-    expect(graphifyStarted).toBe(true);
-    expect(runPhase).toHaveBeenCalledTimes(1);
-    finishGraphify?.();
-  });
-
-  it("continues the current phase when Graphify initialization fails", async () => {
-    const t = await runs.createTask({ title: "graphify-missing" });
-    await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
-    const graphify = fakeGraphify({
-      async ensureInitialized(cwd) {
-        return {
-          ok: false,
-          action: "initialize",
-          cwd,
-          code: "missing_cli",
-          message: "Graphify CLI not found",
-          stdout: "",
-          stderr: "",
-        };
-      },
-    });
-    vi.mocked(runPhase).mockResolvedValue({
-      ok: true,
-      costUsd: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-    });
-
-    const after = await runLoop({
-      task: await runs.getTask(t.id),
-      runs,
-      events,
-      phaseDeps: phaseDepsBase,
-      worktrees,
-      retryCap: 2,
-      cancellation: new CancellationRegistry(),
-      graphify,
-    });
-
-    expect(after.status).toBe("brainstorming");
-    expect(runPhase).toHaveBeenCalledTimes(1);
-    const list = await runs.listRuns(t.id);
-    expect(list).toHaveLength(1);
-    expect(list[0]!.status).toBe("running");
-  });
-
   it("re-dispatch reuses the same worktree (idempotent ensure)", async () => {
     const t = await runs.createTask({ title: "reentry" });
     await runs.updateTask(t.id, { status: "brainstorming", workflow: "backend-feature" });
@@ -505,46 +410,3 @@ describe("runLoop", () => {
     expect(after.retryCount).toBe(1);
   });
 });
-
-function fakeGraphify(
-  overrides: Partial<GraphifyLifecycle>,
-): GraphifyLifecycle {
-  return {
-    async ensureInitialized(cwd) {
-      return {
-        ok: true,
-        action: "initialize",
-        cwd,
-        status: graphifyStatus(cwd),
-        stdout: "",
-        stderr: "",
-        skipped: true,
-      };
-    },
-    async update(cwd) {
-      return {
-        ok: true,
-        action: "update",
-        cwd,
-        status: graphifyStatus(cwd),
-        stdout: "",
-        stderr: "",
-        skipped: false,
-      };
-    },
-    async status(cwd) {
-      return graphifyStatus(cwd);
-    },
-    ...overrides,
-  };
-}
-
-function graphifyStatus(cwd: string): GraphifyStatus {
-  return {
-    graphPath: join(cwd, "graphify-out", "graph.json"),
-    exists: true,
-    valid: true,
-    nodeCount: 1,
-    edgeCount: 0,
-  };
-}
