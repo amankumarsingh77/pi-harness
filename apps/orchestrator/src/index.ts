@@ -9,6 +9,8 @@ import { PreflightStepStore } from "./adapters/preflight-step-store.js";
 import { ClaimLedgerStore, MissionStore } from "./adapters/mission-store.js";
 import { WorktreeManager } from "./adapters/worktree.js";
 import { ArtifactsStore } from "./agents/artifacts-store.js";
+import { DesignSystemStore } from "./agents/design-system-store.js";
+import { MockRenderer } from "./agents/mock-renderer.js";
 import { createPinoLogger, fromPino } from "./domain/logger.js";
 import { reconcileWorktrees } from "./runner/janitor.js";
 import { TaskScheduler } from "./runner/scheduler.js";
@@ -56,6 +58,8 @@ async function main(): Promise<void> {
     baseBranch: config.baseBranch,
   });
   const artifacts = new ArtifactsStore({ stateDir: config.stateDir });
+  const designSystem = new DesignSystemStore({ stateDir: config.stateDir });
+  const mockRenderer = new MockRenderer();
 
   const allTasks = await runs.listTasks();
   const activeTasks = allTasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
@@ -73,6 +77,8 @@ async function main(): Promise<void> {
     onEvent: () => {},
     createAgentSession,
     store: artifacts,
+    designSystem,
+    mockRenderer,
     eventStore: events,
     preflightSteps,
     claimLedger,
