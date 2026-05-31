@@ -81,9 +81,9 @@ function buildSteps(taskId: string, runs: Run[], hasMerged: boolean): RailStep[]
 }
 
 // A phase step links to its detail page only when output exists. Brainstorm/
-// plan unlock as soon as their run starts (the pages handle in-flight state).
-// Verify requires the code phase to have at least started, since the proof
-// report is written by the verifier consuming code's worktree state.
+// plan/code unlock as soon as their run starts (the pages handle in-flight
+// state). Verify requires the code phase to have at least started, since the
+// proof report is written by the verifier consuming code's worktree state.
 function deepLinkFor(taskId: string, phase: Phase, runs: Run[]): Route | undefined {
   const r = runs.find((x) => x.phase === phase);
   switch (phase) {
@@ -91,6 +91,8 @@ function deepLinkFor(taskId: string, phase: Phase, runs: Run[]): Route | undefin
       return r ? (`/tasks/${taskId}/brainstorm` as Route) : undefined;
     case "plan":
       return r ? (`/tasks/${taskId}/plan` as Route) : undefined;
+    case "code":
+      return r ? (`/tasks/${taskId}/code` as Route) : undefined;
     case "verify": {
       const codeRun = runs.find((x) => x.phase === "code");
       return codeRun && codeRun.status !== "pending"

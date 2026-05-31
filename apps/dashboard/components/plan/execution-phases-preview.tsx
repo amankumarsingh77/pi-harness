@@ -1,32 +1,12 @@
 "use client";
 
 import type { Artifact } from "@pi-harness/shared";
-
-type PreviewNode = {
-  readonly id: string;
-  readonly title: string;
-  readonly phase: string;
-  readonly kind: string;
-  readonly lane: string;
-  readonly safety: "parallel-safe" | "exclusive";
-  readonly dependsOn: readonly string[];
-};
-
-type DraftNode = {
-  id?: string;
-  title?: string;
-  phase?: string;
-  kind?: string;
-  lane?: string;
-  safety?: "parallel-safe" | "exclusive";
-  dependsOn?: string[];
-};
-
-type PhaseGroup = {
-  readonly name: string;
-  readonly nodes: readonly PreviewNode[];
-  readonly policy: "parallel" | "sequential";
-};
+import {
+  parseExecutionDag,
+  groupNodesByPhase,
+  type ParsedDagNode,
+  type PhaseGroup,
+} from "@/lib/code/parse-execution-dag";
 
 export function ExecutionPhasesPreview({
   artifact,
@@ -35,7 +15,7 @@ export function ExecutionPhasesPreview({
   readonly artifact: Artifact | null;
   readonly onExpand: () => void;
 }) {
-  const parsed = artifact ? parseExecutionDagPreview(artifact.body) : [];
+  const parsed = artifact ? groupNodesByPhase(parseExecutionDag(artifact.body).nodes) : [];
   const nodeCount = parsed.reduce((total, phase) => total + phase.nodes.length, 0);
 
   return (
@@ -115,7 +95,7 @@ function PhaseRow({
   );
 }
 
-function NodeChip({ node }: { readonly node: PreviewNode }) {
+function NodeChip({ node }: { readonly node: ParsedDagNode }) {
   return (
     <div className="min-w-0 rounded-[7px] border border-line bg-white/[0.015] px-2.5 py-2">
       <div className="flex items-center gap-2">
@@ -128,92 +108,4 @@ function NodeChip({ node }: { readonly node: PreviewNode }) {
       </div>
     </div>
   );
-}
-
-function parseExecutionDagPreview(body: string): readonly PhaseGroup[] {
-  const nodes = parseNodes(body);
-  if (nodes.length === 0) return [];
-
-  const phases = new Map<string, PreviewNode[]>();
-  for (const node of nodes) {
-    phases.set(node.phase, [...(phases.get(node.phase) ?? []), node]);
-  }
-
-  return [...phases.entries()].map(([name, phaseNodes]) => ({
-    name,
-    nodes: phaseNodes,
-    policy: phaseNodes.length > 1 && phaseNodes.every((node) => node.safety === "parallel-safe")
-      ? "parallel"
-      : "sequential",
-  }));
-}
-
-function parseNodes(body: string): readonly PreviewNode[] {
-  const nodes: PreviewNode[] = [];
-  let current: DraftNode | null = null;
-
-  for (const rawLine of body.split("\n")) {
-    const line = rawLine.trim();
-    const id = line.match(/^-\s+id:\s*(C-\d+)/)?.[1];
-    if (id) {
-      if (current) pushNode(nodes, current);
-      current = {
-        id,
-        title: id,
-        phase: "Implementation",
-        kind: "task",
-        lane: "general",
-        safety: "exclusive",
-        dependsOn: [],
-      };
-      continue;
-    }
-    if (!current) continue;
-    assignScalar(current, line);
-  }
-
-  if (current) pushNode(nodes, current);
-  return nodes;
-}
-
-function assignScalar(node: DraftNode, line: string): void {
-  const [key, ...rest] = line.split(":");
-  if (!key || rest.length === 0) return;
-  const value = rest.join(":").trim();
-  if (key === "title") node.title = cleanYamlValue(value);
-  else if (key === "phase") node.phase = cleanYamlValue(value);
-  else if (key === "kind") node.kind = cleanYamlValue(value);
-  else if (key === "lane") node.lane = cleanYamlValue(value);
-  else if (key === "safety" && (value === "parallel-safe" || value === "exclusive")) {
-    node.safety = value;
-  } else if (key === "dependsOn") {
-    node.dependsOn = parseInlineList(value);
-  }
-}
-
-function parseInlineList(value: string): string[] {
-  if (value === "[]") return [];
-  if (!value.startsWith("[") || !value.endsWith("]")) return [];
-  return value
-    .slice(1, -1)
-    .split(",")
-    .map((part) => cleanYamlValue(part.trim()))
-    .filter((part) => part.length > 0);
-}
-
-function cleanYamlValue(value: string): string {
-  return value.replace(/^["']|["']$/g, "");
-}
-
-function pushNode(nodes: PreviewNode[], node: DraftNode): void {
-  if (!node.id) return;
-  nodes.push({
-    id: node.id,
-    title: node.title ?? node.id,
-    phase: node.phase ?? "Implementation",
-    kind: node.kind ?? "task",
-    lane: node.lane ?? "general",
-    safety: node.safety ?? "exclusive",
-    dependsOn: node.dependsOn ?? [],
-  });
 }
