@@ -14,8 +14,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import type { ChatModelSelection, ChatThinkingLevel, ChatThread } from "@pi-harness/shared";
+import type {
+  ChatModelSelection,
+  ChatThinkingLevel,
+  ChatThread,
+  DashboardSummary,
+} from "@pi-harness/shared";
 import { DEFAULT_PHASE_MODELS } from "@pi-harness/shared";
+import { Topbar } from "@/components/topbar";
 import { ChatRail } from "@/components/chat/chat-rail";
 import { ChatEmptyState } from "@/components/chat/chat-empty-state";
 import { ChatComposer } from "@/components/chat/chat-composer";
@@ -29,6 +35,8 @@ type Props = {
   readonly threads: readonly ChatThread[];
   /** Full provider + model catalog (fetched server-side). */
   readonly providers: readonly Provider[];
+  /** Board telemetry for the top nav (running/review/blocked counts). */
+  readonly summary?: DashboardSummary;
 };
 
 /** Default model for a brand-new thread (mirrors the orchestrator default). */
@@ -42,7 +50,7 @@ function defaultModel(): ChatModelSelection {
   return { provider: m.provider, model: m.model, thinkingLevel: level };
 }
 
-export function ChatPageClient({ threads, providers }: Props) {
+export function ChatPageClient({ threads, providers, summary }: Props) {
   const router = useRouter();
   const createThread = useMutation(mutations.createChatThread());
   const [model, setModel] = useState<ChatModelSelection>(defaultModel);
@@ -81,43 +89,47 @@ export function ChatPageClient({ threads, providers }: Props) {
   }
 
   return (
-    <div className="flex h-[100dvh] min-h-0 overflow-hidden">
-      {/* Rail */}
-      <div className="hidden w-[220px] flex-none lg:block">
-        <ChatRail
-          threads={threads}
-          activeThreadId={null}
-          onNewChat={handleNewChat}
-          onSelectThread={handleSelectThread}
-        />
-      </div>
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
+      <Topbar {...(summary ? { summary } : {})} branch="main" />
 
-      {/* Empty state + composer */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="no-scrollbar flex-1 overflow-y-auto">
-          <ChatEmptyState onPromptSelect={startThread} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Rail */}
+        <div className="hidden w-[220px] flex-none lg:block">
+          <ChatRail
+            threads={threads}
+            activeThreadId={null}
+            onNewChat={handleNewChat}
+            onSelectThread={handleSelectThread}
+          />
         </div>
 
-        <ChatComposer
-          streaming={false}
-          onSend={startThread}
-          onStop={() => {}}
-          modelPicker={
-            <ModelPicker
-              providers={providerEntries}
-              selected={model}
-              onSelect={handleModelSelect}
-              openUp
-            />
-          }
-          thinkingPicker={
-            <ThinkingPicker
-              level={model.thinkingLevel}
-              onSelect={handleThinkingSelect}
-              openUp
-            />
-          }
-        />
+        {/* Empty state + composer */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="no-scrollbar flex-1 overflow-y-auto">
+            <ChatEmptyState onPromptSelect={startThread} />
+          </div>
+
+          <ChatComposer
+            streaming={false}
+            onSend={startThread}
+            onStop={() => {}}
+            modelPicker={
+              <ModelPicker
+                providers={providerEntries}
+                selected={model}
+                onSelect={handleModelSelect}
+                openUp
+              />
+            }
+            thinkingPicker={
+              <ThinkingPicker
+                level={model.thinkingLevel}
+                onSelect={handleThinkingSelect}
+                openUp
+              />
+            }
+          />
+        </div>
       </div>
     </div>
   );

@@ -34,9 +34,10 @@ export default async function ChatThreadPage({
   const detail = await getChatThreadOrNull(threadId);
   if (!detail.thread) notFound();
 
-  const [{ threads }, { providers }] = await Promise.all([
+  const [{ threads }, { providers }, { summary }] = await Promise.all([
     orchestrator.listChatThreads().catch(() => ({ threads: [] })),
     orchestrator.getProviders().catch(() => ({ providers: [] })),
+    orchestrator.listTasks().catch(() => ({ summary: undefined })),
   ]);
 
   return (
@@ -47,6 +48,7 @@ export default async function ChatThreadPage({
         threads={threads}
         activeThreadId={threadId}
         providers={providers}
+        {...(summary ? { summary } : {})}
       />
     </Suspense>
   );

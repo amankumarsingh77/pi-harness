@@ -14,10 +14,11 @@ export const dynamic = "force-dynamic";
  * REQ-001, REQ-002, REQ-003
  */
 export default async function ChatPage() {
-  const [{ threads }, { providers }] = await Promise.all([
+  const [{ threads }, { providers }, { summary }] = await Promise.all([
     orchestrator.listChatThreads(),
     orchestrator.getProviders(),
+    orchestrator.listTasks(),
   ]);
 
-  return <ChatPageClient threads={threads} providers={providers} />;
+  return <ChatPageClient threads={threads} providers={providers} summary={summary} />;
 }

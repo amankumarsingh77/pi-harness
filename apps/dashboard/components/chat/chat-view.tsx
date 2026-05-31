@@ -16,9 +16,16 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import type { ChatMessage, ChatModelSelection, ChatThread, ChatThinkingLevel } from "@pi-harness/shared";
+import type {
+  ChatMessage,
+  ChatModelSelection,
+  ChatThread,
+  ChatThinkingLevel,
+  DashboardSummary,
+} from "@pi-harness/shared";
 import { queries } from "@/lib/client/queries";
 import { useQueryClient } from "@tanstack/react-query";
+import { Topbar } from "@/components/topbar";
 import { ChatRail } from "./chat-rail";
 import { ChatTranscript } from "./chat-transcript";
 import { ChatComposer } from "./chat-composer";
@@ -38,12 +45,14 @@ type Props = {
   readonly activeThreadId: string;
   /** Full provider + model catalog (fetched server-side). */
   readonly providers: readonly Provider[];
+  /** Board telemetry for the top nav (running/review/blocked counts). */
+  readonly summary?: DashboardSummary;
 };
 
 /**
  * ChatView — client shell for the active chat thread.
  */
-export function ChatView({ thread, initialMessages, threads, activeThreadId, providers }: Props) {
+export function ChatView({ thread, initialMessages, threads, activeThreadId, providers, summary }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
@@ -203,19 +212,22 @@ export function ChatView({ thread, initialMessages, threads, activeThreadId, pro
   }, [searchParams, thread.id]);
 
   return (
-    <div className="relative flex h-[100dvh] min-h-0 overflow-hidden">
-      {/* Rail */}
-      <div className="hidden w-[220px] flex-none lg:block">
-        <ChatRail
-          threads={threads}
-          activeThreadId={activeThreadId}
-          onNewChat={handleNewChat}
-          onSelectThread={handleSelectThread}
-        />
-      </div>
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
+      <Topbar {...(summary ? { summary } : {})} branch="main" />
 
-      {/* Main chat area */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* Rail */}
+        <div className="hidden w-[220px] flex-none lg:block">
+          <ChatRail
+            threads={threads}
+            activeThreadId={activeThreadId}
+            onNewChat={handleNewChat}
+            onSelectThread={handleSelectThread}
+          />
+        </div>
+
+        {/* Main chat area */}
+        <div className="flex min-h-0 flex-1 flex-col">
         {/* Transcript or empty state */}
         {messages.length === 0 && !active ? (
           <div className="no-scrollbar flex-1 overflow-y-auto">
@@ -250,6 +262,7 @@ export function ChatView({ thread, initialMessages, threads, activeThreadId, pro
             />
           }
         />
+        </div>
       </div>
     </div>
   );

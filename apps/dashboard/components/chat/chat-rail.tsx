@@ -109,15 +109,8 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
       aria-label="Chat history"
       className="flex min-h-0 flex-col border-r border-[var(--color-line)] bg-[var(--color-bg)]"
     >
-      {/* header */}
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-[var(--color-line)] px-[14px]">
-        <span className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-[var(--color-fg)]">
-          <span className="h-[7px] w-[7px] rotate-45 bg-[var(--color-fg)]" />
-          pi-harness
-        </span>
-      </div>
-
-      {/* new chat button */}
+      {/* new chat button — the global top nav carries the brand, so the rail
+          starts directly with the thread controls. */}
       <div className="px-[10px] pb-[6px] pt-[10px]">
         <button
           type="button"
