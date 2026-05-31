@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
   DesignSystemManifestSchema,
@@ -50,5 +51,80 @@ export class DesignSystemStore {
     const tokensCss = existsSync(this.tokensPath(cwd)) ? await readFile(this.tokensPath(cwd), "utf8") : "";
     const designMd = existsSync(this.designMdPath(cwd)) ? await readFile(this.designMdPath(cwd), "utf8") : "";
     return { exists: true, tokensCss, designMd, manifest };
+  }
+
+  private writeChain: Promise<unknown> = Promise.resolve();
+
+  private async atomicWrite(path: string, data: string | Buffer): Promise<void> {
+    const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+    await writeFile(tmp, data);
+    await rename(tmp, path);
+  }
+
+  async writePromotion(
+    cwd: string,
+    input: {
+      tokensCss: string;
+      designMdDelta: string;
+      summary: string;
+      task: string;
+      exemplar: { title: string; pngBytes: Buffer; promotedMockId: string };
+    },
+  ): Promise<{ tokenVersion: number; exemplarId: string }> {
+    const run = this.writeChain.then(() => this.writePromotionUnsafe(cwd, input));
+    // keep the chain alive even if this promotion rejects
+    this.writeChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async writePromotionUnsafe(
+    cwd: string,
+    input: {
+      tokensCss: string;
+      designMdDelta: string;
+      summary: string;
+      task: string;
+      exemplar: { title: string; pngBytes: Buffer; promotedMockId: string };
+    },
+  ): Promise<{ tokenVersion: number; exemplarId: string }> {
+    await mkdir(this.galleryDir(cwd), { recursive: true });
+    const current = await this.read(cwd);
+    const tokenVersion = current.manifest.tokenVersion + 1;
+    const exemplarId = `ex_${randomUUID().slice(0, 8)}`;
+    const updatedAt = new Date().toISOString();
+
+    await this.atomicWrite(join(this.galleryDir(cwd), `${exemplarId}.png`), input.exemplar.pngBytes);
+    await this.atomicWrite(
+      join(this.galleryDir(cwd), `${exemplarId}.meta.json`),
+      `${JSON.stringify(
+        { id: exemplarId, title: input.exemplar.title, promotedFromTask: input.task, promotedMockId: input.exemplar.promotedMockId, tokenVersion },
+        null,
+        2,
+      )}\n`,
+    );
+    await this.atomicWrite(this.tokensPath(cwd), input.tokensCss);
+    const nextDesignMd = current.designMd
+      ? `${current.designMd.trimEnd()}\n\n${input.designMdDelta}\n`
+      : `${input.designMdDelta}\n`;
+    await this.atomicWrite(this.designMdPath(cwd), nextDesignMd);
+
+    const manifest = {
+      tokenVersion,
+      updatedAt,
+      exemplars: [
+        ...current.manifest.exemplars,
+        {
+          id: exemplarId,
+          title: input.exemplar.title,
+          png: `gallery/${exemplarId}.png`,
+          promotedFromTask: input.task,
+          promotedMockId: input.exemplar.promotedMockId,
+          tokenVersion,
+        },
+      ],
+      history: [...current.manifest.history, { tokenVersion, task: input.task, summary: input.summary }],
+    };
+    await this.atomicWrite(this.manifestPath(cwd), `${JSON.stringify(manifest, null, 2)}\n`);
+    return { tokenVersion, exemplarId };
   }
 }
