@@ -13,6 +13,9 @@ import type {
   MissionPacket,
   GraphifyInstallState,
   PreflightStep,
+  ChatThread,
+  ChatMessage,
+  ChatModelSelection,
 } from "@pi-harness/shared";
 
 // "awaiting_user" exactly when the artifacts on disk are status: ready AND
@@ -255,6 +258,34 @@ export type RunFile = {
   state: "live" | "settled";
 };
 
+export type ChatThreadDetail = {
+  thread: ChatThread;
+  messages: ChatMessage[];
+};
+
+/** A model in the provider catalog (serializable mirror of the bridge type). */
+export type ChatProviderModel = {
+  id: string;
+  name: string;
+  contextWindow: number;
+  cost: { input: number; output: number };
+  reasoning: boolean;
+};
+
+/** A provider + its models + whether a credential is configured. */
+export type ChatProvider = {
+  id: string;
+  name: string;
+  authenticated: boolean;
+  auth: "api-key" | "oauth";
+  models: ChatProviderModel[];
+};
+
+export type PostMessageResult = {
+  userMessage: ChatMessage;
+  assistantMessageId: string;
+};
+
 export type Api = {
   listTasks: () => Promise<TaskListResult>;
   getTask: (id: string) => Promise<{ task: Task; runs: Run[] }>;
@@ -333,6 +364,16 @@ export type Api = {
     taskId: string,
     payload: { note?: string },
   ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
+  // ── Chat ──────────────────────────────────────────────────────────────────
+  createChatThread: (
+    input: { title?: string; model?: ChatModelSelection },
+  ) => Promise<ChatThread>;
+  listChatThreads: () => Promise<{ threads: ChatThread[] }>;
+  listChatProviders: () => Promise<{ providers: ChatProvider[] }>;
+  getChatThread: (threadId: string) => Promise<ChatThreadDetail>;
+  postChatMessage: (threadId: string, payload: { text: string }) => Promise<PostMessageResult>;
+  updateChatModel: (threadId: string, model: ChatModelSelection) => Promise<ChatThread>;
+  stopChatTurn: (threadId: string) => Promise<{ stopped: boolean }>;
 };
 
 export type TaskListResult = {
@@ -481,6 +522,47 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
           body: JSON.stringify(payload),
         },
       ),
+    // ── Chat ──────────────────────────────────────────────────────────────────
+    createChatThread: async (input) => {
+      const r = await send<ChatThread>("/api/chat/threads", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      return hydrateChatThread(r);
+    },
+    listChatThreads: async () => {
+      const r = await send<{ threads: ChatThread[] }>("/api/chat/threads");
+      return { threads: r.threads.map(hydrateChatThread) };
+    },
+    listChatProviders: () => send<{ providers: ChatProvider[] }>("/api/chat/providers"),
+    getChatThread: async (threadId) => {
+      const r = await send<ChatThreadDetail>(`/api/chat/threads/${threadId}`);
+      return {
+        thread: hydrateChatThread(r.thread),
+        messages: r.messages.map(hydrateChatMessage),
+      };
+    },
+    postChatMessage: async (threadId, payload) => {
+      const r = await send<PostMessageResult>(
+        `/api/chat/threads/${threadId}/messages`,
+        { method: "POST", body: JSON.stringify(payload) },
+      );
+      return {
+        userMessage: hydrateChatMessage(r.userMessage),
+        assistantMessageId: r.assistantMessageId,
+      };
+    },
+    updateChatModel: async (threadId, model) => {
+      const r = await send<ChatThread>(
+        `/api/chat/threads/${threadId}/model`,
+        { method: "PATCH", body: JSON.stringify(model) },
+      );
+      return hydrateChatThread(r);
+    },
+    stopChatTurn: (threadId) =>
+      send<{ stopped: boolean }>(`/api/chat/threads/${threadId}/stop`, {
+        method: "POST",
+      }),
   };
 }
 
@@ -523,5 +605,20 @@ function hydrateGraphifyStatus(status: GraphifyInstallState): GraphifyInstallSta
   return {
     ...status,
     updatedAt: toDate(status.updatedAt),
+  };
+}
+
+function hydrateChatThread(t: ChatThread): ChatThread {
+  return {
+    ...t,
+    createdAt: toDate(t.createdAt),
+    updatedAt: toDate(t.updatedAt),
+  };
+}
+
+function hydrateChatMessage(m: ChatMessage): ChatMessage {
+  return {
+    ...m,
+    createdAt: toDate(m.createdAt),
   };
 }

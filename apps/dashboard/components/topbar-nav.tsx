@@ -9,12 +9,14 @@ export function TopbarNav() {
   const pathname = usePathname();
   const isRuns = pathname?.startsWith("/runs") ?? false;
   const isScenarios = pathname?.startsWith("/scenarios") ?? false;
-  const isBoard = !isRuns && !isScenarios;
+  const isChat = pathname?.startsWith("/chat") ?? false;
+  const isBoard = !isRuns && !isScenarios && !isChat;
   return (
     <nav className="hidden items-center gap-0.5 sm:flex" aria-label="Primary">
       <NavLink href="/" active={isBoard}>Board</NavLink>
       <NavLink href="/runs" active={isRuns}>Runs</NavLink>
       <NavLink href="/scenarios" active={isScenarios}>Scenarios</NavLink>
+      <NavLink href="/chat" active={isChat}>Chat</NavLink>
     </nav>
   );
 }

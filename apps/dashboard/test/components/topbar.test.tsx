@@ -6,8 +6,10 @@ const router = vi.hoisted(() => ({
   push: vi.fn(),
 }));
 
+const pathname = vi.hoisted(() => ({ value: "/" }));
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => pathname.value,
   useRouter: () => router,
 }));
 
@@ -24,6 +26,7 @@ const summary = {
 describe("Topbar", () => {
   beforeEach(() => {
     router.push.mockReset();
+    pathname.value = "/";
   });
 
   it("renders the two-level navigation and focused telemetry", () => {
@@ -67,5 +70,19 @@ describe("Topbar", () => {
     render(<Topbar summary={summary} />);
     fireEvent.keyDown(document, { key: "n" });
     expect(router.push).toHaveBeenCalledWith("/tasks/new");
+  });
+
+  it("renders a Chat nav link in the primary navigation (REQ-001)", () => {
+    render(<Topbar summary={summary} />);
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(nav).toHaveTextContent("Chat");
+  });
+
+  it("marks Chat link active when pathname starts with /chat", () => {
+    pathname.value = "/chat";
+    render(<Topbar summary={summary} />);
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const chatLink = within(nav).getByText("Chat").closest("a");
+    expect(chatLink).toHaveAttribute("aria-current", "page");
   });
 });
