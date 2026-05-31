@@ -11,6 +11,9 @@ import { join } from "node:path";
 import { ValidationError } from "../../domain/errors.js";
 import { deriveBrainstormGate } from "../../agents/brainstorm-gate.js";
 import type { TaskWorkflowService } from "../../services/task-workflow-service.js";
+import { distillTokensStub } from "../../agents/promote-distill.js";
+import { TokenDiffSchema } from "../../agents/design-system-types.js";
+import type { DesignSystemStore } from "../../agents/design-system-store.js";
 
 const AnswerEntrySchema = z
   .object({
@@ -62,6 +65,8 @@ export function registerBrainstormRoutes(
     cancellation?: CancellationRegistry;
     mutationLock: TaskMutationLock;
     workflow: TaskWorkflowService;
+    designSystem: DesignSystemStore;
+    designRootCwd: string;
   },
 ): void {
   app.get<{ Params: { id: string } }>("/api/tasks/:id/brainstorm", async (req, reply) => {
@@ -273,6 +278,85 @@ export function registerBrainstormRoutes(
     },
   );
 
+  // PNG for a rendered mock page
+  app.get<{ Params: { id: string; mockId: string; pageId: string; viewport: string } }>(
+    "/api/tasks/:id/brainstorm/mocks/:mockId/pages/:pageId/png/:viewport",
+    async (req, reply) => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (!task.worktreePath) { reply.code(409); return { error: "no_worktree" }; }
+      const vp = req.params.viewport === "mobile" ? "mobile" : "desktop";
+      const png = await deps.artifacts.readBrainstormMockPng(task.worktreePath, task.id, req.params.mockId, req.params.pageId, vp);
+      if (!png) { reply.code(404); return { error: "render_not_found" }; }
+      reply.type("image/png");
+      return png;
+    },
+  );
+
+  // Promote: distill only, return diff (no write)
+  app.post<{ Params: { id: string; mockId: string } }>(
+    "/api/tasks/:id/brainstorm/mocks/:mockId/promote",
+    async (req, reply) => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (!task.worktreePath) { reply.code(409); return { error: "no_worktree" }; }
+      const manifest = await deps.artifacts.readBrainstormMockManifest(task.worktreePath, task.id);
+      const mock = manifest.mocks.find((m) => m.mockId === req.params.mockId);
+      if (!mock) { reply.code(404); return { error: "mock_not_found" }; }
+      const firstPage = mock.pages[0];
+      if (!firstPage) { reply.code(404); return { error: "mock_page_not_found" }; }
+      const ds = await deps.designSystem.read(task.worktreePath);
+      const html = (await deps.artifacts.readBrainstormMockHtml(task.worktreePath, task.id, mock.mockId, firstPage.pageId)) ?? "";
+      return distillTokensStub({ mockHtml: html, currentTokensCss: ds.tokensCss, fromVersion: ds.manifest.tokenVersion, title: mock.title });
+    },
+  );
+
+  // Promote confirm: write + commit + publish
+  app.post<{ Params: { id: string; mockId: string } }>(
+    "/api/tasks/:id/brainstorm/mocks/:mockId/promote/confirm",
+    async (req, reply) => {
+      const task = await deps.runs.getTask(req.params.id);
+      if (!task.worktreePath) { reply.code(409); return { error: "no_worktree" }; }
+      let diff: import("../../agents/design-system-types.js").TokenDiff;
+      try {
+        diff = TokenDiffSchema.parse(req.body);
+      } catch (e) {
+        if (e instanceof ZodError) { throw new ValidationError("invalid token diff body", { issues: e.issues }); }
+        throw e;
+      }
+      const manifest = await deps.artifacts.readBrainstormMockManifest(task.worktreePath, task.id);
+      const mock = manifest.mocks.find((m) => m.mockId === req.params.mockId);
+      if (!mock) { reply.code(404); return { error: "mock_not_found" }; }
+      const firstPage = mock.pages[0];
+      if (!firstPage) { reply.code(404); return { error: "mock_page_not_found" }; }
+      const desktopPng = await deps.artifacts.readBrainstormMockPng(task.worktreePath, task.id, mock.mockId, firstPage.pageId, "desktop");
+      const ds = await deps.designSystem.read(task.worktreePath);
+      const nextTokensCss = applyTokenDiff(ds.tokensCss, diff);
+      const { tokenVersion, exemplarId } = await deps.designSystem.writePromotion(task.worktreePath, {
+        tokensCss: nextTokensCss,
+        designMdDelta: diff.designMdDelta,
+        summary: diff.summary,
+        task: task.id,
+        exemplar: { title: mock.title, pngBytes: desktopPng ?? Buffer.alloc(0), promotedMockId: mock.mockId },
+      });
+      await deps.designSystem.commitToMain(task.worktreePath, `design(system): promote ${mock.title} (v${tokenVersion})`);
+      return { ok: true, tokenVersion, exemplarId };
+    },
+  );
+
+  // Design system snapshot (project-level, lives at repo root)
+  app.get("/api/design", async () => {
+    return deps.designSystem.read(deps.designRootCwd);
+  });
+
+  app.get<{ Params: { exemplarId: string } }>(
+    "/api/design/gallery/:exemplarId/png",
+    async (req, reply) => {
+      const buf = await deps.designSystem.readExemplarPng(deps.designRootCwd, req.params.exemplarId);
+      if (!buf) { reply.code(404); return { error: "exemplar_not_found" }; }
+      reply.type("image/png");
+      return buf;
+    },
+  );
+
   app.post<{ Params: { id: string; mockId: string } }>(
     "/api/tasks/:id/brainstorm/mocks/:mockId/edit",
     async (req, reply) => {
@@ -325,6 +409,18 @@ export function registerBrainstormRoutes(
       return deps.workflow.restartBrainstorm(req.params.id, parsed.note);
     },
   );
+}
+
+function applyTokenDiff(currentCss: string, diff: { changes: { name: string; after: string | null }[] }): string {
+  let css = currentCss.trim();
+  if (!css) css = ":root{}";
+  for (const c of diff.changes) {
+    if (c.after === null) continue;
+    const re = new RegExp(`(${c.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:\\s*)[^;]+;`);
+    if (re.test(css)) css = css.replace(re, `$1${c.after};`);
+    else css = css.replace(/:root\s*{/, `:root{${c.name}:${c.after};`);
+  }
+  return css;
 }
 
 const RestartSchema = z.object({

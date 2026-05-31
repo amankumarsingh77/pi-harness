@@ -130,6 +130,8 @@ async function main(): Promise<void> {
     events,
     runsDir: config.runsDir,
     stateDir: config.stateDir,
+    designSystem,
+    designRootCwd: config.repoRoot,
     missionStore,
     claimLedger,
     scheduler,

@@ -9,6 +9,8 @@ import { ClaimLedgerStore, MissionStore } from "../adapters/mission-store.js";
 import type { ClaimLedgerStore as ClaimLedgerStoreType, MissionStore as MissionStoreType } from "../adapters/mission-store.js";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
 import { ArtifactsStore as ArtifactsStoreCtor } from "../agents/artifacts-store.js";
+import type { DesignSystemStore } from "../agents/design-system-store.js";
+import { DesignSystemStore as DesignSystemStoreCtor } from "../agents/design-system-store.js";
 import type { TaskScheduler } from "../runner/scheduler.js";
 import type { CancellationRegistry } from "../runner/cancellation.js";
 import { TaskMutationLock } from "../runner/task-mutation-lock.js";
@@ -36,6 +38,10 @@ export type ServerDeps = {
   stateDir?: string;
   // Optional override for tests; production builds construct one from runsDir.
   artifacts?: ArtifactsStore;
+  // Optional in tests; production wires the project-level design system store.
+  designSystem?: DesignSystemStore;
+  // Repo root where the project-level design system lives. Defaults to cwd.
+  designRootCwd?: string;
   // Optional in tests that don't need to drive the agent. Production always
   // provides one — the transitions/answer routes call enqueue after persisting.
   scheduler?: TaskScheduler;
@@ -90,6 +96,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   const stateDir = deps.stateDir ?? ".harness";
   const artifacts = deps.artifacts ?? new ArtifactsStoreCtor({ stateDir });
+  const designSystem = deps.designSystem ?? new DesignSystemStoreCtor({ stateDir });
+  const designRootCwd = deps.designRootCwd ?? process.cwd();
   const mutationLock = deps.mutationLock ?? new TaskMutationLock();
   const missionStore = deps.missionStore ?? new MissionStore({ stateDir });
   const claimLedger = deps.claimLedger ?? new ClaimLedgerStore({ stateDir });
@@ -145,6 +153,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     events: deps.events,
     workflow,
     mutationLock,
+    designSystem,
+    designRootCwd,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });

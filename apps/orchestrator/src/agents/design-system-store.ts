@@ -147,6 +147,11 @@ export class DesignSystemStore {
     return { tokenVersion, exemplarId };
   }
 
+  async readExemplarPng(cwd: string, exemplarId: string): Promise<Buffer | null> {
+    const p = join(this.galleryDir(cwd), `${exemplarId}.png`);
+    return existsSync(p) ? readFile(p) : null;
+  }
+
   async commitToMain(cwd: string, message: string): Promise<void> {
     const root = resolve(cwd);
     await execFileAsync("git", ["add", "--", this.designDir(cwd)], { cwd: root });
