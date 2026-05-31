@@ -408,11 +408,12 @@ function forwardCodeBridgeEvent(opts: CodeOpts, nodeId: string, event: PiBridgeE
   if (event.kind === "message_delta") {
     next = mkEvent({ ...base, kind: "message_delta", text: event.text });
   } else if (event.kind === "tool_call") {
-    next = mkEvent({ ...base, kind: "tool_call", tool: event.tool, input: event.input });
+    next = mkEvent({ ...base, kind: "tool_call", callId: event.callId, tool: event.tool, input: event.input });
   } else if (event.kind === "tool_result") {
     next = mkEvent({
       ...base,
       kind: "tool_result",
+      callId: event.callId,
       tool: event.tool,
       ok: event.ok,
       ...(event.output !== undefined ? { output: event.output } : {}),

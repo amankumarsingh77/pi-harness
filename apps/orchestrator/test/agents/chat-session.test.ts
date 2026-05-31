@@ -8,13 +8,12 @@
  * REQ-010, REQ-011, REQ-013, REQ-014, REQ-031, REQ-032, REQ-050, REQ-052
  * EDGE-002, EDGE-004
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import type { AgentSession, AgentSessionOptions, PiBridgeEvent } from "@pi-harness/pi-bridge";
-import type { ChatModelSelection, ChatStreamFrame } from "@pi-harness/shared";
+import type { ChatModelSelection } from "@pi-harness/shared";
 import { runChatTurn, type CreateAgentSessionFn } from "../../src/agents/chat-session.js";
 import { ChatSessionStore } from "../../src/adapters/chat-store.js";
 
@@ -92,23 +91,6 @@ function makeFakeCreateSession(
   };
 
   return { createAgentSession, state };
-}
-
-// ── Helper: collect all frames for a thread ───────────────────────────────────
-
-async function waitForFrames(
-  threadStore: ChatSessionStore,
-  threadId: string,
-  count: number,
-  timeoutMs = 2000,
-): Promise<ChatStreamFrame[]> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const frames = await threadStore.listFramesAfter(threadId, 0);
-    if (frames.length >= count) return frames;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  return threadStore.listFramesAfter(threadId, 0);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -271,7 +253,6 @@ describe("runChatTurn — happy path event mapping (REQ-011, REQ-013)", () => {
     });
 
     const { messages } = await store.getThread(thread.id);
-    const msg = messages.find((m) => m.id === assistantMsg.id);
     // The driver re-appends a finalized message with status complete
     // getThread returns the latest snapshot, so the last append with this id wins
     // We check for a complete message with usage

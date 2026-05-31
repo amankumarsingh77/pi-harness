@@ -206,6 +206,7 @@ function hrefForPhase(taskId: string, phase: Phase, runs: readonly Run[]): Route
       return codeRun ? (`/tasks/${taskId}/verify` as Route) : undefined;
     }
     case "code":
+      return run ? (`/tasks/${taskId}/code` as Route) : undefined;
     case "pr":
       return undefined;
   }
