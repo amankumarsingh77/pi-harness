@@ -77,6 +77,25 @@ describe("runCode", () => {
     );
   });
 
+  it("preserves callId on forwarded tool_call and tool_result events", async () => {
+    await writeDag([node({ id: "C-001", writes: ["src/a.ts"] })]);
+
+    await runCode({
+      ...baseOpts(),
+      createAgentSession: fakeCreateAgentSession(async (dagNode, opts) => {
+        opts.onEvent({ kind: "tool_call", callId: "call-xyz", tool: "read", input: { path: "src/a.ts" } });
+        opts.onEvent({ kind: "tool_result", callId: "call-xyz", tool: "read", ok: true, output: "ok" });
+        await writeAssignedFiles(dagNode);
+        opts.onEvent({ kind: "message_delta", text: "<coder-complete>" });
+      }),
+    });
+
+    const toolCall = eventStore.events.find((e) => e.kind === "tool_call");
+    const toolResult = eventStore.events.find((e) => e.kind === "tool_result");
+    expect(toolCall).toMatchObject({ callId: "call-xyz", subagent: "C-001" });
+    expect(toolResult).toMatchObject({ callId: "call-xyz", subagent: "C-001" });
+  });
+
   it("serializes exclusive nodes around other runnable work", async () => {
     await writeDag([
       node({ id: "C-001", writes: ["src/a.ts"], safety: "parallel-safe" }),
