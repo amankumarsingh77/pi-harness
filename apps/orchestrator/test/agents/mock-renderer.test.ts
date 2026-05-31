@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { screenshot, setContent, setViewportSize, route, close, newPage, newContext, launch } = vi.hoisted(() => {
+const { screenshot, setContent, setViewportSize, launch } = vi.hoisted(() => {
   const screenshot = vi.fn(async () => Buffer.from("PNGBYTES"));
   const setContent = vi.fn(async () => undefined);
   const setViewportSize = vi.fn(async () => undefined);
@@ -9,7 +9,7 @@ const { screenshot, setContent, setViewportSize, route, close, newPage, newConte
   const newPage = vi.fn(async () => ({ setContent, setViewportSize, route, screenshot, close, addStyleTag: vi.fn() }));
   const newContext = vi.fn(async () => ({ newPage, close }));
   const launch = vi.fn(async () => ({ newContext, close }));
-  return { screenshot, setContent, setViewportSize, route, close, newPage, newContext, launch };
+  return { screenshot, setContent, setViewportSize, launch };
 });
 
 vi.mock("playwright", () => ({ chromium: { launch } }));
