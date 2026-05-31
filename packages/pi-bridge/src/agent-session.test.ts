@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createAgentSession,
+  listAvailableProviders,
   AuthError,
   __resetRegistryCache,
   type PiBridgeEvent,
@@ -103,6 +104,33 @@ describe("createAgentSession", () => {
     expect(kinds).toContain("turn_end");
     const msgDelta = events.find((e) => e.kind === "message_delta");
     expect(msgDelta && "text" in msgDelta && msgDelta.text).toBe("hello");
+  });
+
+  it("thinking: thinking_delta events are forwarded as PiBridgeEvent thinking_delta", async () => {
+    const adapter = createFakeAdapter();
+    const events: PiBridgeEvent[] = [];
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: (e) => events.push(e) },
+      adapter,
+    );
+    const p = session.prompt("hi");
+    adapter.emit({
+      type: "message_update",
+      message: { role: "assistant" } as never,
+      assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "let me reason", partial: {} as never },
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "message_update",
+      message: { role: "assistant" } as never,
+      assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "", partial: {} as never },
+    } as AgentSessionEvent);
+    adapter.emit({ type: "agent_end", messages: [assistantWithUsage(1, 1, 0)] } as AgentSessionEvent);
+    await p;
+
+    const thinking = events.filter((e) => e.kind === "thinking_delta");
+    // Empty deltas are dropped (EDGE-005).
+    expect(thinking).toHaveLength(1);
+    expect(thinking[0] && "text" in thinking[0] && thinking[0].text).toBe("let me reason");
   });
 
   it("tool round-trip: emits tool_call and tool_result with structured payloads", async () => {
@@ -445,5 +473,110 @@ describe("createAgentSession", () => {
     await session.abort();
     await expect(p).rejects.toThrow("aborted");
     expect(adapter.state.abortCalls).toBe(1);
+  });
+
+  it("stream error: message_update error event emits a PiBridgeEvent error with the provider message", async () => {
+    const adapter = createFakeAdapter();
+    const events: PiBridgeEvent[] = [];
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: (e) => events.push(e) },
+      adapter,
+    );
+    const p = session.prompt("hi");
+    adapter.emit({
+      type: "message_update",
+      message: { role: "assistant" } as never,
+      assistantMessageEvent: {
+        type: "error",
+        reason: "error",
+        error: { role: "assistant", stopReason: "error", errorMessage: "upstream 429 rate limit" } as never,
+      },
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [{ role: "assistant", stopReason: "error", errorMessage: "upstream 429 rate limit" } as never],
+    } as AgentSessionEvent);
+    await p;
+
+    const err = events.find((e) => e.kind === "error");
+    expect(err && "text" in err && err.text).toBe("upstream 429 rate limit");
+    // A failed turn must NOT also report a successful turn_end.
+    expect(events.map((e) => e.kind)).not.toContain("turn_end");
+  });
+
+  it("agent_end with stopReason error (no prior stream error) still surfaces the error", async () => {
+    const adapter = createFakeAdapter();
+    const events: PiBridgeEvent[] = [];
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: (e) => events.push(e) },
+      adapter,
+    );
+    const p = session.prompt("hi");
+    adapter.emit({
+      type: "agent_end",
+      messages: [{ role: "assistant", stopReason: "error", errorMessage: "model exploded" } as never],
+    } as AgentSessionEvent);
+    await p;
+
+    const err = events.find((e) => e.kind === "error");
+    expect(err && "text" in err && err.text).toBe("model exploded");
+    expect(events.map((e) => e.kind)).not.toContain("turn_end");
+  });
+
+  it("agent_end error without errorMessage falls back to naming the stopReason", async () => {
+    const adapter = createFakeAdapter();
+    const events: PiBridgeEvent[] = [];
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: (e) => events.push(e) },
+      adapter,
+    );
+    const p = session.prompt("hi");
+    adapter.emit({
+      type: "agent_end",
+      messages: [{ role: "assistant", stopReason: "error" } as never],
+    } as AgentSessionEvent);
+    await p;
+
+    const err = events.find((e) => e.kind === "error");
+    expect(err && "text" in err && err.text).toContain("error");
+  });
+});
+
+describe("listAvailableProviders", () => {
+  it("includes built-in providers, the custom crofai provider, and reflects auth from env", () => {
+    process.env["ANTHROPIC_API_KEY"] = "test-key"; // present
+    delete process.env["CROFAI_API_KEY"]; // absent
+    const providers = listAvailableProviders();
+
+    const ids = providers.map((p) => p.id);
+    // Built-in providers from pi-ai's catalog
+    expect(ids).toContain("anthropic");
+    expect(ids).toContain("openai");
+    // Custom registered provider
+    expect(ids).toContain("crofai");
+
+    const anthropic = providers.find((p) => p.id === "anthropic");
+    expect(anthropic?.authenticated).toBe(true);
+    expect(anthropic && anthropic.models.length > 0).toBe(true);
+
+    const crofai = providers.find((p) => p.id === "crofai");
+    expect(crofai?.authenticated).toBe(false);
+    expect(crofai?.models.map((m) => m.id)).toContain("kimi-k2.6");
+  });
+
+  it("crofai authenticated when CROFAI_API_KEY is present", () => {
+    process.env["CROFAI_API_KEY"] = "crofai-test-key";
+    const providers = listAvailableProviders();
+    expect(providers.find((p) => p.id === "crofai")?.authenticated).toBe(true);
+  });
+
+  it("openai-codex exposes its full catalog (no model filtering)", () => {
+    // ChatGPT-account eligibility is a runtime OpenAI policy with no reliable
+    // static signal (e.g. gpt-5.5 works, gpt-5.2-codex doesn't), so the catalog
+    // is surfaced as-is and rejected models fall back to the chat.error notice.
+    const codex = listAvailableProviders().find((p) => p.id === "openai-codex");
+    expect(codex).toBeDefined();
+    const ids = codex?.models.map((m) => m.id) ?? [];
+    expect(ids).toContain("gpt-5.5");
   });
 });

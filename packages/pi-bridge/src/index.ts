@@ -1,6 +1,7 @@
 export { __resetAuthCache, loadEnvHarness } from "./auth.js";
 export {
   createAgentSession,
+  listAvailableProviders,
   AuthError,
   __resetRegistryCache,
   type AgentSession,
@@ -11,6 +12,8 @@ export {
   type SdkBoundary,
   type SdkBoundaryCreateOptions,
   type PiBridgeEvent,
+  type AvailableProvider,
+  type AvailableModel,
 } from "./agent-session.js";
 export {
   CROFAI_API_KEY_ENV,

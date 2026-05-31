@@ -32,6 +32,7 @@ export type { ThinkingLevel, ToolDefinition };
 // raw SDK AgentSessionEvent. Variants map 1:1 to the switch arms below.
 export type PiBridgeEvent =
   | { kind: "message_delta"; text: string }
+  | { kind: "thinking_delta"; text: string }
   | { kind: "tool_call"; callId: string; tool: string; input: unknown }
   | { kind: "tool_result"; callId: string; tool: string; ok: boolean; output?: unknown }
   | { kind: "log"; level: "info" | "warn" | "error"; text: string }
@@ -203,6 +204,21 @@ export async function createAgentSession(
         const ame = event.assistantMessageEvent;
         if (ame.type === "text_delta") {
           opts.onEvent({ kind: "message_delta", text: ame.delta });
+        } else if (ame.type === "thinking_delta") {
+          // Reasoning tokens. Forwarded so the UI can render a live "thinking"
+          // block (the SDK only emits these when thinkingLevel != "off").
+          if (ame.delta.length > 0) {
+            opts.onEvent({ kind: "thinking_delta", text: ame.delta });
+          }
+        } else if (ame.type === "error") {
+          // The assistant stream terminated with stopReason "error" (or "aborted").
+          // pi surfaces the provider/model failure here — without this arm the
+          // turn would silently report `agent_end` as a successful empty turn.
+          // "aborted" is the cooperative-cancel path handled elsewhere, so only
+          // a genuine error becomes a user-facing error event.
+          if (ame.reason === "error") {
+            opts.onEvent({ kind: "error", text: assistantErrorText(ame.error) });
+          }
         }
         // thinking_delta intentionally dropped (parking-lot per phase-2.md).
         return;
@@ -238,8 +254,18 @@ export async function createAgentSession(
         return;
       }
       case "agent_end": {
+        // A failed turn reaches agent_end with its final assistant message
+        // carrying stopReason "error". Report it as an error (the message_update
+        // error arm may not have fired for every failure shape) rather than a
+        // successful empty turn. The pending promise still resolves so prompt()
+        // unwinds; runChatTurn's `settled` guard drops the later turn_end.
+        const failed = lastAssistantError(event.messages);
         const usage = sumAssistantUsage(event.messages);
-        opts.onEvent({ kind: "turn_end", usage });
+        if (failed) {
+          opts.onEvent({ kind: "error", text: failed });
+        } else {
+          opts.onEvent({ kind: "turn_end", usage });
+        }
         settle((p) => p.resolve(usage));
         return;
       }
@@ -418,6 +444,130 @@ function looksLikeAuthFailure(message: string): boolean {
   return m.includes("api key") || m.includes("auth") || m.includes("credential");
 }
 
+// ── Provider/model catalog ────────────────────────────────────────────────────
+
+/** A single model in the catalog, in a UI-friendly (serializable) shape. */
+export type AvailableModel = {
+  readonly id: string;
+  readonly name: string;
+  /** Context window in tokens. */
+  readonly contextWindow: number;
+  /** USD per 1M tokens. */
+  readonly cost: { readonly input: number; readonly output: number };
+  readonly reasoning: boolean;
+};
+
+/** A provider plus its models and whether a credential is configured. */
+export type AvailableProvider = {
+  readonly id: string;
+  readonly name: string;
+  /** True when an API key (or OAuth login) for this provider is present. */
+  readonly authenticated: boolean;
+  /** How the provider authenticates — drives the UI hint. */
+  readonly auth: "api-key" | "oauth";
+  readonly models: readonly AvailableModel[];
+};
+
+/** Display names for built-in providers; falls back to the raw id otherwise. */
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  "openai-codex": "OpenAI Codex",
+  "azure-openai-responses": "Azure OpenAI",
+  google: "Google Gemini",
+  "google-vertex": "Google Vertex",
+  "amazon-bedrock": "Amazon Bedrock",
+  deepseek: "DeepSeek",
+  "github-copilot": "GitHub Copilot",
+  xai: "xAI",
+  groq: "Groq",
+  cerebras: "Cerebras",
+  openrouter: "OpenRouter",
+  "vercel-ai-gateway": "Vercel AI Gateway",
+  zai: "Z.AI",
+  mistral: "Mistral",
+  minimax: "MiniMax",
+  "minimax-cn": "MiniMax (CN)",
+  moonshotai: "MoonshotAI",
+  "moonshotai-cn": "MoonshotAI (CN)",
+  huggingface: "Hugging Face",
+  fireworks: "Fireworks",
+  cloudflare: "Cloudflare",
+};
+
+function providerDisplayName(id: string): string {
+  return PROVIDER_DISPLAY_NAMES[id] ?? id;
+}
+
+/**
+ * Enumerate every provider + model pi supports — the SDK's built-in catalog
+ * (via getProviders/getModels) plus our runtime-registered custom providers
+ * (CrofAI). Each provider is flagged `authenticated` when a credential is
+ * present, using the same env/OAuth resolution as session creation.
+ *
+ * Node-only (reads process.env and pi-ai's catalog). Call it server-side and
+ * pass the result to the browser — never import this into a client bundle.
+ *
+ * Ensures .env.harness is loaded first so authentication flags reflect the same
+ * keys a real session would use.
+ */
+export function listAvailableProviders(): AvailableProvider[] {
+  loadEnvHarness();
+
+  const out: AvailableProvider[] = [];
+
+  // Built-in SDK providers from the static catalog.
+  for (const provider of getProviders()) {
+    const models = getModels(provider).map(
+      (m): AvailableModel => ({
+        id: m.id,
+        name: m.name,
+        contextWindow: m.contextWindow,
+        cost: { input: m.cost.input, output: m.cost.output },
+        reasoning: m.reasoning,
+      }),
+    );
+    if (models.length === 0) continue;
+    const isOAuth = OAUTH_PROVIDERS.has(provider);
+    out.push({
+      id: provider,
+      name: providerDisplayName(provider),
+      authenticated: isOAuth ? hasOAuthCredential(provider) : apiKeyFromEnv(provider) !== undefined,
+      auth: isOAuth ? "oauth" : "api-key",
+      models,
+    });
+  }
+
+  // Custom runtime-registered providers (CrofAI). Source the model list from
+  // the provider config so we don't depend on a built registry instance.
+  for (const [providerId, envVar] of Object.entries(CUSTOM_PROVIDER_ENV)) {
+    const config = providerId === CROFAI_PROVIDER_NAME ? CROFAI_PROVIDER_CONFIG : undefined;
+    const models = (config?.models ?? []).map(
+      (m): AvailableModel => ({
+        id: m.id,
+        name: m.name,
+        contextWindow: m.contextWindow,
+        cost: { input: m.cost.input, output: m.cost.output },
+        reasoning: m.reasoning,
+      }),
+    );
+    out.push({
+      id: providerId,
+      name: config?.name ?? providerDisplayName(providerId),
+      authenticated: nonEmptyEnv(envVar) !== undefined,
+      auth: "api-key",
+      models,
+    });
+  }
+
+  // Authenticated providers first, then alphabetical — surfaces usable models
+  // at the top of the picker.
+  return out.sort((a, b) => {
+    if (a.authenticated !== b.authenticated) return a.authenticated ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 async function buildResourceLoader(
   cwd: string,
   systemPrompt: string,
@@ -429,6 +579,41 @@ async function buildResourceLoader(
   });
   await loader.reload();
   return loader;
+}
+
+/**
+ * Human-readable text for a failed assistant message. Prefers the provider's
+ * errorMessage; falls back to naming the stopReason so the UI never shows a
+ * blank error.
+ */
+function assistantErrorText(message: AssistantMessage): string {
+  const raw = message.errorMessage?.trim();
+  if (raw && raw.length > 0) return raw;
+  return `model turn failed (stopReason: ${message.stopReason})`;
+}
+
+/**
+ * Returns the error text if the last assistant message in the transcript ended
+ * with stopReason "error", else null. "aborted" is intentionally excluded — it
+ * is the cooperative-cancel path owned by abort().
+ */
+function lastAssistantError(messages: AgentMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m === undefined || !isAssistantMessage(m)) continue;
+    return m.stopReason === "error" ? assistantErrorText(m) : null;
+  }
+  return null;
+}
+
+function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
+  return (
+    typeof m === "object" &&
+    m !== null &&
+    "role" in m &&
+    (m as { role: unknown }).role === "assistant" &&
+    "stopReason" in m
+  );
 }
 
 function sumAssistantUsage(messages: AgentMessage[]): PromptUsage {
