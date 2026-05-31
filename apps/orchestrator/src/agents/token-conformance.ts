@@ -10,8 +10,11 @@ export function findTokenViolations(html: string): TokenViolation[] {
   const out: TokenViolation[] = [];
   let m: RegExpExecArray | null;
   while ((m = DECL.exec(html)) !== null) {
-    const property = m[1].toLowerCase();
-    const value = m[2].trim();
+    const rawProperty = m[1];
+    const rawValue = m[2];
+    if (rawProperty === undefined || rawValue === undefined) continue;
+    const property = rawProperty.toLowerCase();
+    const value = rawValue.trim();
     if (!CORE_PROPS.includes(property as (typeof CORE_PROPS)[number])) continue;
     if (/var\(\s*--/.test(value)) continue; // uses a token — OK
     if (value === "inherit" || value === "transparent" || value === "currentColor") continue;
