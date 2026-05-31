@@ -1,0 +1,1012 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codebase Chat · pi-harness mock (v2)</title>
+    <style>
+      :root {
+        /* Design tokens — mirror apps/dashboard/app/globals.css exactly. */
+        --color-bg: #0d0e10;
+        --color-card: #131418;
+        --color-card-hover: #181a1f;
+        --color-sub: #18181b;
+        --color-muted: #0f0f10;
+        --color-input: #0a0b0d;
+
+        --color-fg: #f7f8f8;
+        --color-fg-body: #e6e7e9;
+        --color-fg-label: #a1a1aa;
+        --color-fg-mute: #8a8f98;
+        --color-fg-subtle: #71717a;
+        --color-fg-faint: #4a4e57;
+        --color-fg-ghost: #3f3f46;
+
+        --color-border: #27272a;
+        --color-border-soft: #1f1f23;
+        --color-border-strong: #3f3f46;
+        --color-line: rgba(255, 255, 255, 0.06);
+        --color-line-hover: rgba(255, 255, 255, 0.12);
+        --color-line-strong: rgba(255, 255, 255, 0.18);
+
+        --color-st-idle: #8a8f98;
+        --color-st-progress: #5e6ad2;
+        --color-st-review: #f2c94c;
+        --color-st-blocked: #eb5757;
+        --color-st-shipping: #c084fc;
+        --color-st-done: #4cb782;
+
+        --color-green-fg: #34d399;
+        --color-red-fg: #f87171;
+        --color-amber-fg: #fbbf24;
+
+        --font-body: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--color-bg);
+        color: var(--color-fg-body);
+        font-family: var(--font-body);
+        font-size: 13px;
+        line-height: 1.5;
+        letter-spacing: -0.005em;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        font-feature-settings: "ss01", "cv11";
+      }
+      button, textarea, input { font: inherit; color: inherit; }
+      button { cursor: pointer; background: none; border: none; }
+      .mono { font-family: var(--font-mono); font-feature-settings: normal; letter-spacing: 0; }
+      ::selection { background: rgba(94, 106, 210, 0.35); }
+      .no-sb { scrollbar-width: none; }
+      .no-sb::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+      /* ───────────────────────── shell ───────────────────────── */
+      .app {
+        display: grid;
+        grid-template-columns: 248px 1fr;
+        height: 100vh;
+      }
+
+      /* ───────────────────────── chat history rail ───────────────────────── */
+      .rail {
+        border-right: 1px solid var(--color-line);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--color-bg);
+      }
+      .rail-head {
+        height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px 0 14px;
+        border-bottom: 1px solid var(--color-line);
+      }
+      .brand {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-size: 13px; font-weight: 600; color: var(--color-fg);
+        letter-spacing: -0.01em;
+      }
+      .mark { width: 7px; height: 7px; background: var(--color-fg); transform: rotate(45deg); }
+      .rail-actions { padding: 10px 10px 6px; }
+      .new-chat {
+        width: 100%;
+        height: 30px;
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px solid var(--color-line);
+        color: var(--color-fg-body);
+        font-size: 12.5px;
+        transition: background .14s, border-color .14s;
+      }
+      .new-chat:hover { background: var(--color-card-hover); border-color: var(--color-line-hover); }
+      .new-chat .k { margin-left: auto; color: var(--color-fg-faint); font-size: 10.5px; }
+      .search {
+        margin: 4px 10px 8px;
+        display: flex; align-items: center; gap: 7px;
+        height: 28px; padding: 0 9px;
+        border-radius: 6px;
+        background: var(--color-input);
+        border: 1px solid var(--color-line);
+        color: var(--color-fg-faint);
+        font-size: 12px;
+      }
+      .search input { flex: 1; background: none; border: none; outline: none; color: var(--color-fg-body); }
+      .search input::placeholder { color: var(--color-fg-faint); }
+
+      .threads { flex: 1; overflow-y: auto; min-height: 0; padding: 2px 6px 14px; }
+      .group-label {
+        padding: 12px 8px 5px;
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--color-fg-faint);
+      }
+      .thread {
+        display: block; width: 100%; text-align: left;
+        padding: 7px 8px;
+        border-radius: 6px;
+        transition: background .12s;
+      }
+      .thread:hover { background: var(--color-card-hover); }
+      .thread.active { background: var(--color-sub); }
+      .thread-row { display: flex; align-items: center; gap: 7px; }
+      .thread-title {
+        font-size: 12.5px; color: var(--color-fg-body);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .thread.active .thread-title { color: var(--color-fg); }
+      .thread-meta {
+        display: flex; gap: 8px; padding-left: 14px; margin-top: 2px;
+        font-size: 10.5px; color: var(--color-fg-faint);
+      }
+      .dot { width: 6px; height: 6px; border-radius: 99px; background: currentColor; flex: none; }
+
+      .rail-foot {
+        border-top: 1px solid var(--color-line);
+        padding: 9px 12px;
+        display: flex; align-items: center; gap: 8px;
+        font-size: 11.5px; color: var(--color-fg-mute);
+      }
+      .avatar-sm {
+        width: 22px; height: 22px; border-radius: 99px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 10px; color: var(--color-fg-body);
+        border: 1px solid var(--color-line);
+      }
+
+      /* ───────────────────────── workspace ───────────────────────── */
+      .workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+      .topbar {
+        height: 44px; flex: none;
+        display: flex; align-items: center; gap: 12px;
+        padding: 0 16px 0 18px;
+        border-bottom: 1px solid var(--color-line);
+        background: rgba(13, 14, 16, 0.85);
+        backdrop-filter: blur(8px);
+        position: relative; z-index: 30;
+      }
+      .mobile-menu { display: none; }
+      .title-block { min-width: 0; }
+      .page-title {
+        margin: 0; font-size: 13.5px; font-weight: 600; color: var(--color-fg);
+        letter-spacing: -0.01em;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .page-meta { display: flex; gap: 10px; margin-top: 1px; font-size: 10.5px; color: var(--color-fg-faint); }
+      .top-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+      .chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        height: 24px; padding: 0 9px;
+        border-radius: 9999px; border: 1px solid var(--color-line);
+        font-size: 11px; color: var(--color-fg-mute);
+      }
+      .chip.live { color: var(--color-st-progress); border-color: rgba(94, 106, 210, 0.35); }
+      .chip.live .dot { box-shadow: 0 0 6px var(--color-st-progress); animation: pulse 1.6s ease-in-out infinite; }
+      .chip.stop {
+        color: var(--color-fg-body); border-color: var(--color-line-hover);
+        transition: background .14s, border-color .14s;
+      }
+      .chip.stop:hover { background: var(--color-card-hover); border-color: var(--color-st-blocked); color: var(--color-st-blocked); }
+      .chip.stop kbd { color: var(--color-fg-faint); font-size: 10px; }
+
+      /* picker triggers — interactive chips */
+      .chip.picker { transition: background .14s, border-color .14s, color .14s; }
+      .chip.picker:hover { background: var(--color-card-hover); border-color: var(--color-line-hover); color: var(--color-fg-body); }
+      .chip.picker .caret { color: var(--color-fg-faint); }
+      .chip.picker .prov { color: var(--color-fg-faint); }
+
+      /* ───────────────────────── dropdown menus ───────────────────────── */
+      .menu-wrap { position: relative; }
+      .menu-wrap:has(.menu.open) { z-index: 45; }
+      .menu {
+        position: absolute; top: calc(100% + 7px); right: 0; z-index: 40;
+        width: 320px;
+        background: var(--color-card);
+        border: 1px solid var(--color-border);
+        border-radius: 11px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+        display: none;
+      }
+      .menu.open { display: block; }
+      .menu.thinking-menu { width: 232px; }
+      .menu-search {
+        display: flex; align-items: center; gap: 7px;
+        padding: 9px 11px; border-bottom: 1px solid var(--color-line);
+        color: var(--color-fg-faint); font-size: 12px;
+      }
+      .menu-search input { flex: 1; background: none; border: none; outline: none; color: var(--color-fg-body); }
+      .menu-search input::placeholder { color: var(--color-fg-faint); }
+      .menu-scroll { max-height: 360px; overflow-y: auto; padding: 5px; }
+      .menu-group {
+        display: flex; align-items: center; gap: 7px;
+        padding: 9px 8px 5px;
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
+        color: var(--color-fg-faint);
+      }
+      .menu-group .ico { width: 13px; height: 13px; display: inline-flex; color: var(--color-fg-mute); }
+      .menu-group .auth { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 10px; }
+      .menu-group .auth.ok { color: var(--color-st-done); }
+      .menu-group .auth.off { color: var(--color-fg-faint); }
+      .opt {
+        display: flex; align-items: center; gap: 10px; width: 100%;
+        padding: 8px 9px; border-radius: 7px; text-align: left;
+        transition: background .12s;
+      }
+      .opt:hover { background: var(--color-card-hover); }
+      .opt.sel { background: var(--color-sub); }
+      .opt .main { min-width: 0; flex: 1; }
+      .opt .name { font-size: 12.5px; color: var(--color-fg-body); display: flex; align-items: center; gap: 7px; }
+      .opt.sel .name { color: var(--color-fg); }
+      .opt .id { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-faint); margin-top: 2px; }
+      .opt .meta { display: flex; gap: 8px; margin-top: 4px; font-size: 10px; color: var(--color-fg-faint); }
+      .opt .meta b { color: var(--color-fg-mute); font-weight: 500; }
+      .tag {
+        font-size: 9.5px; padding: 1px 6px; border-radius: 4px;
+        border: 1px solid var(--color-line); color: var(--color-fg-mute);
+        letter-spacing: 0.02em;
+      }
+      .tag.reason { color: var(--color-st-shipping); border-color: rgba(192, 132, 252, 0.3); }
+      .opt .check { margin-left: auto; color: var(--color-st-progress); flex: none; opacity: 0; }
+      .opt.sel .check { opacity: 1; }
+      .menu-foot {
+        border-top: 1px solid var(--color-line); padding: 8px 11px;
+        font-size: 10.5px; color: var(--color-fg-faint);
+        display: flex; align-items: center; gap: 6px;
+      }
+      .menu-foot a { color: var(--color-fg-mute); }
+
+      /* ───────────────────────── scenario strip (mock only) ───────────────────────── */
+      .scenario-strip {
+        flex: none;
+        display: flex; align-items: center; gap: 4px;
+        padding: 7px 16px;
+        border-bottom: 1px solid var(--color-line);
+        background: var(--color-muted);
+      }
+      .scenario-strip .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-fg-faint); margin-right: 6px; }
+      .scn-btn {
+        height: 24px; padding: 0 10px;
+        border-radius: 6px; border: 1px solid transparent;
+        font-size: 11.5px; color: var(--color-fg-mute);
+        transition: background .12s, color .12s, border-color .12s;
+      }
+      .scn-btn:hover { color: var(--color-fg-body); background: var(--color-card-hover); }
+      .scn-btn.active { color: var(--color-fg); background: var(--color-sub); border-color: var(--color-line); }
+
+      /* ───────────────────────── transcript ───────────────────────── */
+      .transcript { flex: 1; overflow-y: auto; min-height: 0; }
+      .scenario { display: none; }
+      .scenario.active { display: block; }
+      .stream { max-width: 760px; margin: 0 auto; padding: 26px 24px 40px; }
+
+      .turn { display: flex; gap: 13px; margin-bottom: 26px; }
+      .avatar {
+        width: 26px; height: 26px; border-radius: 7px; flex: none;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 10.5px; font-weight: 600;
+        background: var(--color-sub); color: var(--color-fg-mute);
+        border: 1px solid var(--color-line);
+      }
+      .avatar.user { background: transparent; color: var(--color-fg-body); }
+      .avatar.pi { color: var(--color-st-progress); }
+      .body { flex: 1; min-width: 0; padding-top: 2px; }
+      .user-text { color: var(--color-fg); font-size: 13.5px; line-height: 1.55; }
+
+      /* thinking — collapsible */
+      .thinking {
+        border: 1px solid var(--color-line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.012);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .thinking summary {
+        list-style: none; cursor: pointer;
+        display: flex; align-items: center; gap: 8px;
+        padding: 8px 11px;
+        font-size: 11.5px; color: var(--color-fg-mute);
+        user-select: none;
+      }
+      .thinking summary::-webkit-details-marker { display: none; }
+      .thinking summary:hover { color: var(--color-fg-body); }
+      .chevron { transition: transform .16s; color: var(--color-fg-faint); }
+      .thinking[open] .chevron { transform: rotate(90deg); }
+      .thinking .label { color: var(--color-fg-body); }
+      .thinking .secs { margin-left: auto; color: var(--color-fg-faint); font-size: 10.5px; }
+      .thinking-body {
+        padding: 2px 13px 13px 32px;
+        font-size: 12.5px; line-height: 1.65;
+        color: var(--color-fg-mute);
+        border-top: 1px solid var(--color-line);
+        padding-top: 11px;
+      }
+      .thinking-body p { margin: 0 0 8px; }
+      .thinking-body p:last-child { margin-bottom: 0; }
+
+      /* tool calls */
+      .tools { margin-bottom: 12px; display: flex; flex-direction: column; gap: 5px; }
+      .tool {
+        border: 1px solid var(--color-line);
+        border-radius: 7px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.012);
+      }
+      .tool-head {
+        display: flex; align-items: center; gap: 9px;
+        padding: 7px 10px;
+        font-size: 11.5px;
+      }
+      .tool-glyph { color: var(--color-fg-faint); display: inline-flex; }
+      .tool-name { color: var(--color-fg); font-weight: 500; }
+      .tool-arg { color: var(--color-fg-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; font-size: 11px; }
+      .tool-status { font-size: 10.5px; padding: 2px 7px; border-radius: 5px; flex: none; }
+      .st-run { color: var(--color-st-progress); }
+      .st-run .dot { box-shadow: 0 0 5px var(--color-st-progress); animation: pulse 1.4s ease-in-out infinite; margin-right: 5px; }
+      .st-ok { color: var(--color-st-done); }
+      .st-err { color: var(--color-st-blocked); }
+      .tool-ms { color: var(--color-fg-faint); font-size: 10.5px; flex: none; }
+      .tool-out {
+        border-top: 1px solid var(--color-line);
+        padding: 8px 11px;
+        background: var(--color-input);
+        font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6;
+        color: var(--color-fg-mute);
+        white-space: pre-wrap; word-break: break-word;
+        max-height: 130px; overflow: auto;
+      }
+      .tool-out .added { color: var(--color-green-fg); }
+      .tool-out .ln { color: var(--color-fg-faint); }
+
+      /* assistant prose */
+      .prose { color: var(--color-fg-body); font-size: 13.5px; line-height: 1.65; }
+      .prose p { margin: 0 0 11px; }
+      .prose p:last-child { margin-bottom: 0; }
+      .prose strong { color: var(--color-fg); font-weight: 600; }
+      .prose code {
+        font-family: var(--font-mono); font-size: 0.86em;
+        padding: 0.1em 0.4em; border-radius: 4px;
+        background: rgba(255, 255, 255, 0.045); color: var(--color-fg);
+      }
+      .prose ol { margin: 0 0 11px; padding-left: 1.3em; }
+      .prose li { margin: 4px 0; }
+      .prose li::marker { color: var(--color-fg-faint); }
+      .prose pre {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--color-line);
+        border-radius: 7px; padding: 11px 13px; overflow-x: auto;
+        font-size: 11.5px; line-height: 1.6; margin: 0 0 11px;
+      }
+      .prose pre code { background: none; padding: 0; }
+
+      .cursor {
+        display: inline-block; width: 7px; height: 14px;
+        background: var(--color-fg); margin-left: 2px; vertical-align: text-bottom;
+        animation: blink 1s steps(1) infinite;
+      }
+      .msg-foot {
+        display: flex; align-items: center; gap: 14px;
+        margin-top: 11px; font-size: 11px; color: var(--color-fg-faint);
+      }
+      .msg-foot button { color: var(--color-fg-faint); display: inline-flex; align-items: center; gap: 5px; transition: color .12s; }
+      .msg-foot button:hover { color: var(--color-fg-body); }
+
+      /* notices */
+      .notice {
+        display: flex; align-items: flex-start; gap: 9px;
+        padding: 9px 12px; border-radius: 8px;
+        font-size: 12px; margin-top: 4px;
+      }
+      .notice.stopped { border: 1px solid var(--color-line); color: var(--color-fg-mute); background: rgba(255, 255, 255, 0.012); }
+      .notice.error { border: 1px solid rgba(235, 87, 87, 0.3); color: var(--color-red-fg); background: rgba(235, 87, 87, 0.06); }
+      .notice .act { margin-left: auto; color: var(--color-fg-body); border: 1px solid var(--color-line); padding: 3px 9px; border-radius: 6px; font-size: 11px; }
+      .notice .act:hover { background: var(--color-card-hover); }
+
+      /* empty state */
+      .empty { max-width: 660px; margin: 0 auto; padding: 64px 24px; }
+      .empty-kicker { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-fg-faint); }
+      .empty-title { font-size: 21px; font-weight: 600; color: var(--color-fg); letter-spacing: -0.02em; margin: 10px 0 8px; }
+      .empty-sub { font-size: 13px; color: var(--color-fg-mute); max-width: 460px; line-height: 1.6; }
+      .prompt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 24px; }
+      .prompt-card {
+        text-align: left; padding: 13px 14px;
+        border: 1px solid var(--color-line); border-radius: 9px;
+        color: var(--color-fg-body); font-size: 12.5px; line-height: 1.4;
+        transition: background .14s, border-color .14s;
+      }
+      .prompt-card:hover { background: var(--color-card-hover); border-color: var(--color-line-hover); }
+      .prompt-card span { display: block; margin-top: 4px; color: var(--color-fg-faint); font-size: 11px; }
+
+      /* ───────────────────────── composer ───────────────────────── */
+      .composer { flex: none; border-top: 1px solid var(--color-line); padding: 12px 24px 16px; background: var(--color-bg); }
+      .composer-inner { max-width: 760px; margin: 0 auto; }
+      .input-shell {
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        background: var(--color-input);
+        transition: border-color .14s;
+      }
+      .input-shell:focus-within { border-color: var(--color-line-strong); }
+      .input-shell textarea {
+        width: 100%; resize: none; border: none; outline: none; background: none;
+        padding: 13px 14px 4px; font-size: 13.5px; line-height: 1.5;
+        color: var(--color-fg); min-height: 24px; max-height: 200px;
+      }
+      .input-shell textarea::placeholder { color: var(--color-fg-faint); }
+      .input-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 12px; }
+      .input-pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        height: 24px; padding: 0 9px; border-radius: 6px;
+        font-size: 11px; color: var(--color-fg-mute);
+        border: 1px solid var(--color-line);
+      }
+      .input-pill:hover { background: var(--color-card-hover); color: var(--color-fg-body); }
+      .send {
+        margin-left: auto;
+        height: 28px; width: 28px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 7px; background: var(--color-fg); color: var(--color-bg);
+        transition: background .14s, transform .1s;
+      }
+      .send:hover { background: #fff; }
+      .send:active { transform: translateY(1px); }
+      .send.stop { background: var(--color-st-blocked); color: #fff; }
+      .send.stop:hover { background: #f06363; }
+      .composer-hint { display: flex; gap: 12px; margin: 8px 2px 0; font-size: 10.5px; color: var(--color-fg-faint); }
+      .composer-hint .right { margin-left: auto; }
+
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      @keyframes blink { 50% { opacity: 0; } }
+      .typing { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 4px; }
+      .typing i { width: 4px; height: 4px; border-radius: 99px; background: var(--color-fg-faint); animation: pulse 1.2s ease-in-out infinite; }
+      .typing i:nth-child(2) { animation-delay: .18s; }
+      .typing i:nth-child(3) { animation-delay: .36s; }
+
+      /* ───────────────────────── responsive ───────────────────────── */
+      @media (max-width: 860px) {
+        .app { grid-template-columns: 1fr; }
+        .rail { display: none; }
+        .mobile-menu {
+          display: inline-flex; align-items: center; gap: 6px;
+          height: 28px; padding: 0 10px; border-radius: 6px;
+          border: 1px solid var(--color-line); font-size: 12px; color: var(--color-fg-body);
+        }
+        .top-actions .chip:not(.live):not(.stop) { display: none; }
+        .prompt-grid { grid-template-columns: 1fr; }
+        .stream, .composer-inner { max-width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <!-- ════════════════ chat history rail ════════════════ -->
+      <aside class="rail" aria-label="Chat history">
+        <div class="rail-head">
+          <span class="brand"><span class="mark"></span>pi-harness</span>
+        </div>
+        <div class="rail-actions">
+          <button class="new-chat" type="button">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1.5V9.5M1.5 5.5H9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            New chat
+            <span class="k mono">⌘⇧O</span>
+          </button>
+        </div>
+        <label class="search">
+          <span class="mono">/</span>
+          <input type="text" placeholder="Search chats" />
+        </label>
+        <div class="threads no-sb">
+          <div class="group-label">Today</div>
+          <button class="thread active" type="button">
+            <div class="thread-row"><span class="dot" style="color: var(--color-st-progress)"></span><span class="thread-title">Explain the live event stream</span></div>
+            <div class="thread-meta mono"><span>main</span><span>now</span></div>
+          </button>
+          <button class="thread" type="button">
+            <div class="thread-row"><span class="dot" style="color: var(--color-st-done)"></span><span class="thread-title">Where are task phases persisted?</span></div>
+            <div class="thread-meta mono"><span>main</span><span>2h</span></div>
+          </button>
+          <button class="thread" type="button">
+            <div class="thread-row"><span class="dot" style="color: var(--color-st-blocked)"></span><span class="thread-title">Why did the auth check fail?</span></div>
+            <div class="thread-meta mono"><span>main</span><span>4h</span></div>
+          </button>
+          <div class="group-label">Earlier</div>
+          <button class="thread" type="button">
+            <div class="thread-row"><span class="dot" style="color: var(--color-fg-faint)"></span><span class="thread-title">Dashboard route map</span></div>
+            <div class="thread-meta mono"><span>feat/chat</span><span>Fri</span></div>
+          </button>
+          <button class="thread" type="button">
+            <div class="thread-row"><span class="dot" style="color: var(--color-fg-faint)"></span><span class="thread-title">pi-bridge tool definitions</span></div>
+            <div class="thread-meta mono"><span>main</span><span>Thu</span></div>
+          </button>
+          <button class="thread" type="button">
+            <div class="thread-row"><span class="dot" style="color: var(--color-fg-faint)"></span><span class="thread-title">Worktree cleanup strategy</span></div>
+            <div class="thread-meta mono"><span>main</span><span>Wed</span></div>
+          </button>
+        </div>
+        <div class="rail-foot">
+          <span class="avatar-sm">ak</span>
+          <span>aman</span>
+          <span class="mono" style="margin-left:auto; color: var(--color-fg-faint)">crofai</span>
+        </div>
+      </aside>
+
+      <!-- ════════════════ workspace ════════════════ -->
+      <main class="workspace">
+        <header class="topbar">
+          <button class="mobile-menu" type="button">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 3h9M1.5 6h9M1.5 9h9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            Chats
+          </button>
+          <div class="title-block">
+            <h1 class="page-title" id="pageTitle">Explain the live event stream</h1>
+            <div class="page-meta mono"><span>~/pi/pi-harness</span><span>main</span></div>
+          </div>
+          <div class="top-actions">
+            <!-- model picker -->
+            <div class="menu-wrap">
+              <button class="chip picker mono" type="button" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="prov" id="modelProv">crofai</span>/<span id="modelName">deepseek-v4-pro</span>
+                <svg class="caret" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M2 3.5L4.5 6L7 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="menu" id="modelMenu" role="listbox" aria-label="Model">
+                <div class="menu-search">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.3" stroke="currentColor" stroke-width="1.2"/><path d="M7.6 7.6L10 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                  <input type="text" placeholder="Search models" id="modelSearch" />
+                </div>
+                <div class="menu-scroll no-sb" id="modelList">
+                  <!-- ── CrofAI ── -->
+                  <div class="menu-group">
+                    <span class="ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5l4.3 2.5v5L6.5 11.5 2.2 9V4z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg></span>
+                    CrofAI
+                    <span class="auth ok">● connected</span>
+                  </div>
+                  <button class="opt" type="button" role="option" data-prov="crofai" data-id="kimi-k2.6" data-name="kimi-k2.6">
+                    <span class="main">
+                      <span class="name">Kimi K2.6 <span class="tag reason">reasoning</span></span>
+                      <span class="id">crofai/kimi-k2.6</span>
+                      <span class="meta"><span><b>262K</b> ctx</span><span><b>$0.50</b>/<b>$1.99</b> per M</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <button class="opt sel" type="button" role="option" data-prov="crofai" data-id="deepseek-v4-pro" data-name="deepseek-v4-pro">
+                    <span class="main">
+                      <span class="name">DeepSeek V4 Pro <span class="tag reason">reasoning</span></span>
+                      <span class="id">crofai/deepseek-v4-pro</span>
+                      <span class="meta"><span><b>1M</b> ctx</span><span><b>$0.40</b>/<b>$0.85</b> per M</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <button class="opt" type="button" role="option" data-prov="crofai" data-id="deepseek-v3.2" data-name="deepseek-v3.2">
+                    <span class="main">
+                      <span class="name">DeepSeek V3.2</span>
+                      <span class="id">crofai/deepseek-v3.2</span>
+                      <span class="meta"><span><b>164K</b> ctx</span><span><b>$0.28</b>/<b>$0.38</b> per M</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <button class="opt" type="button" role="option" data-prov="crofai" data-id="glm-4.7" data-name="glm-4.7">
+                    <span class="main">
+                      <span class="name">GLM 4.7</span>
+                      <span class="id">crofai/glm-4.7</span>
+                      <span class="meta"><span><b>203K</b> ctx</span><span><b>$0.25</b>/<b>$1.10</b> per M</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+
+                  <!-- ── Anthropic ── -->
+                  <div class="menu-group">
+                    <span class="ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5l4.3 2.5v5L6.5 11.5 2.2 9V4z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg></span>
+                    Anthropic
+                    <span class="auth ok">● connected</span>
+                  </div>
+                  <button class="opt" type="button" role="option" data-prov="anthropic" data-id="claude-opus-4-8" data-name="claude-opus-4-8">
+                    <span class="main">
+                      <span class="name">Claude Opus 4.8 <span class="tag reason">reasoning</span></span>
+                      <span class="id">anthropic/claude-opus-4-8</span>
+                      <span class="meta"><span><b>1M</b> ctx</span><span><b>$5.00</b>/<b>$25.00</b> per M</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <button class="opt" type="button" role="option" data-prov="anthropic" data-id="claude-sonnet-4-6" data-name="claude-sonnet-4-6">
+                    <span class="main">
+                      <span class="name">Claude Sonnet 4.6</span>
+                      <span class="id">anthropic/claude-sonnet-4-6</span>
+                      <span class="meta"><span><b>200K</b> ctx</span><span><b>$3.00</b>/<b>$15.00</b> per M</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+
+                  <!-- ── OpenAI (Codex OAuth) ── -->
+                  <div class="menu-group">
+                    <span class="ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5l4.3 2.5v5L6.5 11.5 2.2 9V4z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg></span>
+                    OpenAI · Codex
+                    <span class="auth off">○ sign in</span>
+                  </div>
+                  <button class="opt" type="button" role="option" data-prov="openai-codex" data-id="gpt-5-codex" data-name="gpt-5-codex">
+                    <span class="main">
+                      <span class="name">GPT-5 Codex <span class="tag reason">reasoning</span></span>
+                      <span class="id">openai-codex/gpt-5-codex</span>
+                      <span class="meta"><span><b>400K</b> ctx</span><span>OAuth — sign in to use</span></span>
+                    </span>
+                    <svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </div>
+                <div class="menu-foot">
+                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1.5l3 1.7v3.6l-3 1.7-3-1.7V3.2z" stroke="currentColor" stroke-width="1"/></svg>
+                  Keys & providers configured in <a href="#">.env.harness</a>
+                </div>
+              </div>
+            </div>
+
+            <!-- thinking-level picker -->
+            <div class="menu-wrap">
+              <button class="chip picker mono" type="button" id="thinkTrigger" aria-haspopup="listbox" aria-expanded="false">
+                thinking · <span id="thinkLevel">medium</span>
+                <svg class="caret" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M2 3.5L4.5 6L7 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="menu thinking-menu" id="thinkMenu" role="listbox" aria-label="Thinking level">
+                <div class="menu-scroll">
+                  <button class="opt" type="button" role="option" data-think="off"><span class="main"><span class="name">Off</span><span class="meta">No reasoning — fastest</span></span><svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                  <button class="opt" type="button" role="option" data-think="low"><span class="main"><span class="name">Low</span><span class="meta">Brief reasoning</span></span><svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                  <button class="opt sel" type="button" role="option" data-think="medium"><span class="main"><span class="name">Medium</span><span class="meta">Balanced — default</span></span><svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                  <button class="opt" type="button" role="option" data-think="high"><span class="main"><span class="name">High</span><span class="meta">Deep reasoning — slower</span></span><svg class="check" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.8L5 9.3L10.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <span class="chip live mono" id="liveChip"><span class="dot"></span><span id="stateLabel">streaming</span></span>
+            <button class="chip stop mono" type="button" id="stopChip">Stop <kbd>esc</kbd></button>
+          </div>
+        </header>
+
+        <!-- mock-only scenario switcher -->
+        <nav class="scenario-strip" aria-label="Mock scenarios">
+          <span class="lbl">Scenario</span>
+          <button class="scn-btn active" data-scn="empty" type="button">Empty</button>
+          <button class="scn-btn" data-scn="streaming" type="button">Streaming</button>
+          <button class="scn-btn" data-scn="tools" type="button">Tool-heavy</button>
+          <button class="scn-btn" data-scn="stopped" type="button">Stopped</button>
+          <button class="scn-btn" data-scn="error" type="button">Error</button>
+        </nav>
+
+        <section class="transcript no-sb">
+          <!-- ───────── EMPTY ───────── -->
+          <div class="scenario active" id="scn-empty">
+            <div class="empty">
+              <div class="empty-kicker">repo-scoped assistant</div>
+              <h2 class="empty-title">Ask about this codebase.</h2>
+              <p class="empty-sub">Reads the repo, traces flows, explains errors, and hands work off to a task when you're ready. Read-only by default — it never writes files from chat.</p>
+              <div class="prompt-grid">
+                <button class="prompt-card" type="button">Explain how live events reach the dashboard<span>Trace store → SSE proxy → client reducer.</span></button>
+                <button class="prompt-card" type="button">Find where Pi sessions are created<span>Show the bridge seam and SDK assumptions.</span></button>
+                <button class="prompt-card" type="button">What breaks if EventSource reconnects?<span>Duplicate, cursor, and stale-turn cases.</span></button>
+                <button class="prompt-card" type="button">Turn this thread into a task<span>Convert the discussion into an implementation ticket.</span></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ───────── STREAMING ───────── -->
+          <div class="scenario" id="scn-streaming">
+            <div class="stream">
+              <article class="turn">
+                <div class="avatar user">A</div>
+                <div class="body"><div class="user-text">How does the live event stream get from the orchestrator to the dashboard?</div></div>
+              </article>
+              <article class="turn">
+                <div class="avatar pi">pi</div>
+                <div class="body">
+                  <details class="thinking">
+                    <summary>
+                      <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3.5 2L7 5L3.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <span class="label">Thought</span>
+                      <span class="secs mono">for 6s</span>
+                    </summary>
+                    <div class="thinking-body">
+                      <p>The chain is append-only EventStore → LiveEventStore (assigns a monotonic sequence) → Fastify SSE route → Next proxy that passes the body through untouched → client reducer keyed by envelope id.</p>
+                      <p>I should emphasize that the sequence number is what makes <code>last-event-id</code> resume work, and that the proxy must not buffer.</p>
+                    </div>
+                  </details>
+                  <div class="prose">
+                    <p>The stream flows through four hops, each with one job:</p>
+                    <ol>
+                      <li><strong>LiveEventStore</strong> assigns every envelope a monotonic <code>sequence</code> and fans it out to subscribers.</li>
+                      <li>The Fastify route at <code>routes/live.ts</code> writes them as SSE frames (<code>id: &lt;sequence&gt;</code>) and emits a heartbeat every 25s.</li>
+                      <li>The Next proxy streams the upstream body verbatim with <code>x-accel-buffering: no</code> so nothing is held back<span class="cursor"></span></li>
+                    </ol>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <!-- ───────── TOOL-HEAVY ───────── -->
+          <div class="scenario" id="scn-tools">
+            <div class="stream">
+              <article class="turn">
+                <div class="avatar user">A</div>
+                <div class="body"><div class="user-text">Where are Pi agent sessions created, and what tools do they get?</div></div>
+              </article>
+              <article class="turn">
+                <div class="avatar pi">pi</div>
+                <div class="body">
+                  <details class="thinking">
+                    <summary>
+                      <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3.5 2L7 5L3.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <span class="label">Thought</span>
+                      <span class="secs mono">for 4s</span>
+                    </summary>
+                    <div class="thinking-body"><p>Grep for createAgentSession, then read the bridge to see the tool allowlist and event surface.</p></div>
+                  </details>
+
+                  <div class="tools">
+                    <div class="tool">
+                      <div class="tool-head">
+                        <span class="tool-glyph"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.3" stroke="currentColor" stroke-width="1.2"/><path d="M7.6 7.6L10 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span>
+                        <span class="tool-name mono">grep</span>
+                        <span class="tool-arg mono">"createAgentSession" --type ts</span>
+                        <span class="tool-ms mono">0.3s</span>
+                        <span class="tool-status st-ok mono">12 hits</span>
+                      </div>
+                    </div>
+
+                    <div class="tool">
+                      <div class="tool-head">
+                        <span class="tool-glyph"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 1.5h4l3 3v6h-7z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M6.5 1.5v3h3" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg></span>
+                        <span class="tool-name mono">read</span>
+                        <span class="tool-arg mono">packages/pi-bridge/src/agent-session.ts</span>
+                        <span class="tool-ms mono">0.1s</span>
+                        <span class="tool-status st-ok mono">218 lines</span>
+                      </div>
+                      <div class="tool-out"><span class="ln">28</span>  export type PiBridgeEvent =
+<span class="ln">29</span>    | { kind: "message_delta"; text: string }
+<span class="ln">30</span>    | { kind: "tool_call"; callId: string; tool: string; ... }
+<span class="ln">31</span>    | { kind: "tool_result"; callId: string; ok: boolean; ... }</div>
+                    </div>
+
+                    <div class="tool">
+                      <div class="tool-head">
+                        <span class="tool-glyph"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.3" stroke="currentColor" stroke-width="1.2"/><path d="M7.6 7.6L10 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span>
+                        <span class="tool-name mono">grep</span>
+                        <span class="tool-arg mono">"tools:" packages/pi-bridge/src/agent-session.ts</span>
+                        <span class="tool-status st-run mono"><span class="dot"></span>running</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="prose">
+                    <p>Sessions are created in one place — <code>pi-bridge</code>'s <code>createAgentSession()</code> — which wraps the SDK and translates its raw events into a typed <code>PiBridgeEvent</code> union<span class="cursor"></span></p>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <!-- ───────── STOPPED ───────── -->
+          <div class="scenario" id="scn-stopped">
+            <div class="stream">
+              <article class="turn">
+                <div class="avatar user">A</div>
+                <div class="body"><div class="user-text">Walk me through every file the run-loop touches per tick.</div></div>
+              </article>
+              <article class="turn">
+                <div class="avatar pi">pi</div>
+                <div class="body">
+                  <details class="thinking">
+                    <summary>
+                      <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3.5 2L7 5L3.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <span class="label">Thought</span>
+                      <span class="secs mono">for 3s</span>
+                    </summary>
+                    <div class="thinking-body"><p>Start from scheduler.ts, follow into run-loop.ts, enumerate the stores it writes.</p></div>
+                  </details>
+                  <div class="tools">
+                    <div class="tool">
+                      <div class="tool-head">
+                        <span class="tool-glyph"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 1.5h4l3 3v6h-7z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M6.5 1.5v3h3" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg></span>
+                        <span class="tool-name mono">read</span>
+                        <span class="tool-arg mono">apps/orchestrator/src/runner/run-loop.ts</span>
+                        <span class="tool-ms mono">0.1s</span>
+                        <span class="tool-status st-ok mono">done</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="prose">
+                    <p>Each tick the run-loop resolves the task's current phase, then dispatches to the matching agent driver. The first three stores it writes are the run-store, the phase event log, and<span style="color: var(--color-fg-faint)"> …</span></p>
+                  </div>
+                  <div class="notice stopped">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="margin-top:1px;flex:none"><rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+                    <span>Stopped by you · partial response kept. The agent had 2 more files queued.</span>
+                    <button class="act" type="button">Continue</button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <!-- ───────── ERROR ───────── -->
+          <div class="scenario" id="scn-error">
+            <div class="stream">
+              <article class="turn">
+                <div class="avatar user">A</div>
+                <div class="body"><div class="user-text">Summarize the brainstorm gate logic.</div></div>
+              </article>
+              <article class="turn">
+                <div class="avatar pi">pi</div>
+                <div class="body">
+                  <div class="notice error">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="margin-top:1px;flex:none"><path d="M6.5 1.5L12 11H1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.5 5v2.5M6.5 9h.01" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                    <span>Stream interrupted — orchestrator unreachable (503). Reconnecting from sequence <span class="mono">4182</span>… <span class="typing"><i></i><i></i><i></i></span></span>
+                    <button class="act" type="button">Retry now</button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- ════════════════ composer ════════════════ -->
+        <div class="composer">
+          <div class="composer-inner">
+            <div class="input-shell">
+              <textarea id="composer" rows="1" placeholder="Ask about the codebase…  Use @ to reference a file, / for commands"></textarea>
+              <div class="input-bar">
+                <button class="input-pill mono" type="button">@ file</button>
+                <button class="input-pill mono" type="button" id="composerModel" title="Change model"><span id="composerModelLabel">crofai/deepseek-v4-pro</span></button>
+                <button class="input-pill mono" type="button" id="composerThink" title="Change thinking level">thinking · <span id="composerThinkLabel">medium</span></button>
+                <button class="send" id="sendBtn" type="button" aria-label="Send">
+                  <svg id="sendIcon" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 11V2M3 5.5L6.5 2l3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="composer-hint">
+              <span><span class="mono">↵</span> send · <span class="mono">⇧↵</span> newline</span>
+              <span class="right">Read-only · won't modify files</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      // ── mock-only: scenario switching + send/stop toggle ──
+      const scnButtons = document.querySelectorAll(".scn-btn");
+      const stateLabel = document.getElementById("stateLabel");
+      const liveChip = document.getElementById("liveChip");
+      const stopChip = document.getElementById("stopChip");
+      const sendBtn = document.getElementById("sendBtn");
+      const sendIcon = document.getElementById("sendIcon");
+      const pageTitle = document.getElementById("pageTitle");
+
+      const META = {
+        empty:     { state: "idle",      live: false, title: "New chat" },
+        streaming: { state: "streaming", live: true,  title: "Explain the live event stream" },
+        tools:     { state: "running tools", live: true, title: "Where are Pi sessions created?" },
+        stopped:   { state: "stopped",   live: false, title: "Run-loop file touches" },
+        error:     { state: "reconnecting", live: true, title: "Brainstorm gate logic" },
+      };
+
+      function setStreaming(on) {
+        if (on) {
+          sendBtn.classList.add("stop");
+          sendIcon.innerHTML = '<rect x="3.5" y="3.5" width="6" height="6" rx="1" fill="currentColor"/>';
+          sendBtn.setAttribute("aria-label", "Stop");
+        } else {
+          sendBtn.classList.remove("stop");
+          sendIcon.innerHTML = '<path d="M6.5 11V2M3 5.5L6.5 2l3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>';
+          sendBtn.setAttribute("aria-label", "Send");
+        }
+      }
+
+      function applyScenario(scn) {
+        document.querySelectorAll(".scenario").forEach((s) => s.classList.remove("active"));
+        document.getElementById("scn-" + scn).classList.add("active");
+        scnButtons.forEach((b) => b.classList.toggle("active", b.dataset.scn === scn));
+        const m = META[scn];
+        stateLabel.textContent = m.state;
+        pageTitle.textContent = m.title;
+        liveChip.style.display = m.live ? "" : "none";
+        stopChip.style.display = m.live ? "" : "none";
+        setStreaming(m.live);
+      }
+
+      scnButtons.forEach((b) => b.addEventListener("click", () => applyScenario(b.dataset.scn)));
+      [stopChip, sendBtn].forEach((el) =>
+        el.addEventListener("click", () => {
+          if (sendBtn.classList.contains("stop")) {
+            setStreaming(false);
+            stateLabel.textContent = "stopped";
+            liveChip.style.display = "none";
+            stopChip.style.display = "none";
+          }
+        })
+      );
+
+      // ── model & thinking pickers ──
+      const modelTrigger = document.getElementById("modelTrigger");
+      const modelMenu = document.getElementById("modelMenu");
+      const thinkTrigger = document.getElementById("thinkTrigger");
+      const thinkMenu = document.getElementById("thinkMenu");
+
+      function closeMenus() {
+        modelMenu.classList.remove("open");
+        thinkMenu.classList.remove("open");
+        modelTrigger.setAttribute("aria-expanded", "false");
+        thinkTrigger.setAttribute("aria-expanded", "false");
+      }
+      function openMenu(menu, trigger) {
+        const wasOpen = menu.classList.contains("open");
+        closeMenus();
+        if (!wasOpen) {
+          menu.classList.add("open");
+          trigger.setAttribute("aria-expanded", "true");
+          const search = menu.querySelector("input");
+          if (search) setTimeout(() => search.focus(), 0);
+        }
+      }
+      function toggleMenu(e, menu, trigger) { e.stopPropagation(); openMenu(menu, trigger); }
+      modelTrigger.addEventListener("click", (e) => toggleMenu(e, modelMenu, modelTrigger));
+      thinkTrigger.addEventListener("click", (e) => toggleMenu(e, thinkMenu, thinkTrigger));
+      document.getElementById("composerModel").addEventListener("click", (e) => toggleMenu(e, modelMenu, modelTrigger));
+      document.getElementById("composerThink").addEventListener("click", (e) => toggleMenu(e, thinkMenu, thinkTrigger));
+      // click-away + esc to close; clicks inside a menu don't bubble out
+      [modelMenu, thinkMenu].forEach((m) => m.addEventListener("click", (e) => e.stopPropagation()));
+      document.addEventListener("click", closeMenus);
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+
+      // model selection
+      modelMenu.querySelectorAll(".opt").forEach((opt) => {
+        opt.addEventListener("click", () => {
+          modelMenu.querySelectorAll(".opt").forEach((o) => o.classList.remove("sel"));
+          opt.classList.add("sel");
+          const prov = opt.dataset.prov, name = opt.dataset.name;
+          document.getElementById("modelProv").textContent = prov;
+          document.getElementById("modelName").textContent = name;
+          document.getElementById("composerModelLabel").textContent = prov + "/" + name;
+          closeMenus();
+        });
+      });
+
+      // thinking selection
+      thinkMenu.querySelectorAll(".opt").forEach((opt) => {
+        opt.addEventListener("click", () => {
+          thinkMenu.querySelectorAll(".opt").forEach((o) => o.classList.remove("sel"));
+          opt.classList.add("sel");
+          const lvl = opt.dataset.think;
+          document.getElementById("thinkLevel").textContent = lvl;
+          document.getElementById("composerThinkLabel").textContent = lvl;
+          closeMenus();
+        });
+      });
+
+      // model search filter
+      const modelSearch = document.getElementById("modelSearch");
+      modelSearch.addEventListener("input", () => {
+        const q = modelSearch.value.toLowerCase();
+        modelMenu.querySelectorAll(".opt").forEach((opt) => {
+          const hay = (opt.dataset.prov + " " + opt.dataset.id + " " + opt.textContent).toLowerCase();
+          opt.style.display = hay.includes(q) ? "" : "none";
+        });
+        // hide group label if its options are all hidden
+        modelMenu.querySelectorAll(".menu-group").forEach((g) => {
+          let n = g.nextElementSibling, any = false;
+          while (n && n.classList.contains("opt")) { if (n.style.display !== "none") any = true; n = n.nextElementSibling; }
+          g.style.display = any ? "" : "none";
+        });
+      });
+
+      // auto-grow composer
+      const ta = document.getElementById("composer");
+      ta.addEventListener("input", () => {
+        ta.style.height = "auto";
+        ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+      });
+
+      applyScenario("empty");
+    </script>
+  </body>
+</html>
