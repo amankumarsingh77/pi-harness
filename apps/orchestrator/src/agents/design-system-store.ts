@@ -46,6 +46,21 @@ export class DesignSystemStore {
     return join(this.designDir(cwd), "gallery");
   }
 
+  draftDir(cwd: string, taskId: string): string {
+    return join(this.stateRoot(cwd), taskId, "design-draft");
+  }
+  private draftTokensPath(cwd: string, taskId: string): string {
+    return join(this.draftDir(cwd, taskId), "tokens.css");
+  }
+  async writeDraftTokens(cwd: string, taskId: string, css: string): Promise<void> {
+    await mkdir(this.draftDir(cwd, taskId), { recursive: true });
+    await this.atomicWrite(this.draftTokensPath(cwd, taskId), css);
+  }
+  async readDraftTokens(cwd: string, taskId: string): Promise<string> {
+    const p = this.draftTokensPath(cwd, taskId);
+    return existsSync(p) ? readFile(p, "utf8") : "";
+  }
+
   async read(cwd: string): Promise<DesignSystemSnapshot> {
     const mPath = this.manifestPath(cwd);
     if (!existsSync(mPath)) {

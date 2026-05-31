@@ -7,7 +7,10 @@ function deps() {
       writeBrainstormMock: vi.fn(async () => undefined),
       writeBrainstormMockRender: vi.fn(async () => undefined),
     },
-    designSystem: { read: vi.fn(async () => ({ tokensCss: ":root{--fg:#000;}", exists: true })) },
+    designSystem: {
+      read: vi.fn(async () => ({ tokensCss: ":root{--fg:#000;}", exists: true })),
+      readDraftTokens: vi.fn(async () => ""),
+    },
     renderer: { render: vi.fn(async () => ({ desktopPng: Buffer.from("D"), mobilePng: Buffer.from("M") })) },
     bus: { publish: vi.fn(async () => undefined) },
     cwd: "/cwd",

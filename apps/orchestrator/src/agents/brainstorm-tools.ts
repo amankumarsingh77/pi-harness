@@ -475,7 +475,7 @@ type SubmitMockRevisionDetails = { ok: boolean; revised?: string; violations?: u
 
 export function makeSubmitMocksTool(deps: {
   store: Pick<ArtifactsStore, "writeBrainstormMock" | "writeBrainstormMockRender">;
-  designSystem: Pick<DesignSystemStore, "read">;
+  designSystem: Pick<DesignSystemStore, "read" | "readDraftTokens">;
   renderer: Pick<MockRenderer, "render">;
   bus: BrainstormEventBus;
   cwd: string;
@@ -510,6 +510,7 @@ export function makeSubmitMocksTool(deps: {
       }
 
       const ds = await deps.designSystem.read(deps.cwd);
+      const tokensCss = ds.exists ? ds.tokensCss : await deps.designSystem.readDraftTokens(deps.cwd, deps.taskId);
       const mockSetId = `mset_${randomUUID()}`;
       const proposed: string[] = [];
       for (const input of params.mocks) {
@@ -536,7 +537,7 @@ export function makeSubmitMocksTool(deps: {
           input.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
         );
         for (const page of input.pages) {
-          const png = await deps.renderer.render({ html: page.html, tokensCss: ds.tokensCss });
+          const png = await deps.renderer.render({ html: page.html, tokensCss });
           await deps.store.writeBrainstormMockRender(
             deps.cwd,
             deps.taskId,
@@ -566,7 +567,7 @@ export function makeSubmitMockRevisionTool(deps: {
     ArtifactsStore,
     "writeBrainstormMock" | "writeBrainstormMockRender" | "readBrainstormMockManifest"
   >;
-  designSystem: Pick<DesignSystemStore, "read">;
+  designSystem: Pick<DesignSystemStore, "read" | "readDraftTokens">;
   renderer: Pick<MockRenderer, "render">;
   bus: BrainstormEventBus;
   cwd: string;
@@ -597,6 +598,7 @@ export function makeSubmitMockRevisionTool(deps: {
         manifest.mocks.map((mock) => mock.mockId),
       );
       const ds = await deps.designSystem.read(deps.cwd);
+      const tokensCss = ds.exists ? ds.tokensCss : await deps.designSystem.readDraftTokens(deps.cwd, deps.taskId);
       const mockSetId = `mset_${randomUUID()}`;
       const mock: BrainstormMock = {
         mockId,
@@ -622,7 +624,7 @@ export function makeSubmitMockRevisionTool(deps: {
         params.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
       );
       for (const page of params.pages) {
-        const png = await deps.renderer.render({ html: page.html, tokensCss: ds.tokensCss });
+        const png = await deps.renderer.render({ html: page.html, tokensCss });
         await deps.store.writeBrainstormMockRender(
           deps.cwd,
           deps.taskId,
