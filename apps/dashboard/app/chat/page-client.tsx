@@ -23,12 +23,12 @@ import { ModelPicker } from "@/components/chat/model-picker";
 import { ThinkingPicker } from "@/components/chat/thinking-picker";
 import { buildProviderEntries } from "@/lib/chat/available-models";
 import { mutations } from "@/lib/client/queries";
-import type { ChatProvider } from "@/lib/api";
+import type { Provider } from "@/lib/api";
 
 type Props = {
   readonly threads: readonly ChatThread[];
   /** Full provider + model catalog (fetched server-side). */
-  readonly providers: readonly ChatProvider[];
+  readonly providers: readonly Provider[];
 };
 
 /** Default model for a brand-new thread (mirrors the orchestrator default). */

@@ -27,7 +27,7 @@ import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/veri
 import { registerChatRoutes } from "./routes/chat.js";
 import { ChatSessionStore } from "../adapters/chat-store.js";
 import type { ChatSessionStore as ChatSessionStoreType } from "../adapters/chat-store.js";
-import { registerModelOptionRoutes } from "./routes/model-options.js";
+import { registerProviderRoutes } from "./routes/providers.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -104,7 +104,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
   });
   registerHealth(app);
-  registerModelOptionRoutes(app);
+  registerProviderRoutes(app);
   registerTaskRoutes(app, {
     runs: deps.runs,
     events: deps.events,

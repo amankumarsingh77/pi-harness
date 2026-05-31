@@ -36,7 +36,7 @@ export default async function ChatThreadPage({
 
   const [{ threads }, { providers }] = await Promise.all([
     orchestrator.listChatThreads().catch(() => ({ threads: [] })),
-    orchestrator.listChatProviders().catch(() => ({ providers: [] })),
+    orchestrator.getProviders().catch(() => ({ providers: [] })),
   ]);
 
   return (

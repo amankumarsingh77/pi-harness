@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChatView } from "@/components/chat/chat-view";
-import type { ChatProvider } from "@/lib/api";
+import type { Provider } from "@/lib/api";
 import type { ChatMessage, ChatModelSelection, ChatThread } from "@pi-harness/shared";
 
 const mockRouter = { push: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() };
@@ -138,15 +138,16 @@ function queryClient(): QueryClient {
   });
 }
 
-const PROVIDERS_FIXTURE: ChatProvider[] = [
+const PROVIDERS_FIXTURE: Provider[] = [
   {
     id: "crofai",
     name: "CrofAI",
     authenticated: true,
     auth: "api-key",
+    requiredEnvVars: ["CROFAI_API_KEY"],
     models: [
-      { id: "kimi-k2.6", name: "MoonshotAI: Kimi K2.6", contextWindow: 262144, cost: { input: 0.5, output: 1.99 }, reasoning: true },
-      { id: "deepseek-v4-pro", name: "DeepSeek: DeepSeek V4 Pro", contextWindow: 1_000_000, cost: { input: 0.4, output: 0.85 }, reasoning: true },
+      { id: "kimi-k2.6", name: "MoonshotAI: Kimi K2.6", reasoning: true, contextWindow: 262144, maxTokens: 262144, cost: { input: 0.5, output: 1.99 } },
+      { id: "deepseek-v4-pro", name: "DeepSeek: DeepSeek V4 Pro", reasoning: true, contextWindow: 1_000_000, maxTokens: 131_072, cost: { input: 0.4, output: 0.85 } },
     ],
   },
 ];
@@ -156,7 +157,7 @@ function renderView(
     thread?: ChatThread;
     messages?: ChatMessage[];
     threads?: ChatThread[];
-    providers?: ChatProvider[];
+    providers?: Provider[];
   } = {},
 ) {
   const thread = overrides.thread ?? makeThread();

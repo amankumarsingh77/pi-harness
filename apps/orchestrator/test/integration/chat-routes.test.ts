@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatSessionStore } from "../../src/adapters/chat-store.js";
 import { registerChatRoutes } from "../../src/http/routes/chat.js";
+import { registerProviderRoutes } from "../../src/http/routes/providers.js";
 import { isHarnessError } from "../../src/domain/errors.js";
 import type { AgentSessionOptions, PiBridgeEvent } from "@pi-harness/pi-bridge";
 import type { AgentSession } from "@pi-harness/pi-bridge";
@@ -122,6 +123,8 @@ function buildChatApp(
   registerChatRoutes(app, {
     chatStore,
     ...(createAgentSession ? { createAgentSession } : {}),
+  });
+  registerProviderRoutes(app, {
     ...(listProviders ? { listProviders: listProviders as never } : {}),
   });
   return app;
@@ -194,15 +197,16 @@ describe("chat HTTP routes", () => {
     });
   });
 
-  it("GET /api/chat/providers returns the injected provider catalog (REQ-040, REQ-044)", async () => {
+  it("GET /api/providers returns the injected unified provider catalog (REQ-040, REQ-044)", async () => {
     const catalog = [
       {
         id: "anthropic",
         name: "Anthropic",
         authenticated: true,
         auth: "api-key" as const,
+        requiredEnvVars: ["ANTHROPIC_API_KEY"],
         models: [
-          { id: "claude-opus-4-5", name: "Claude Opus 4.5", contextWindow: 200000, cost: { input: 5, output: 25 }, reasoning: true },
+          { id: "claude-opus-4-5", name: "Claude Opus 4.5", reasoning: true, contextWindow: 200000, maxTokens: 64000, cost: { input: 5, output: 25 } },
         ],
       },
       {
@@ -210,17 +214,19 @@ describe("chat HTTP routes", () => {
         name: "CrofAI",
         authenticated: false,
         auth: "api-key" as const,
+        requiredEnvVars: ["CROFAI_API_KEY"],
         models: [
-          { id: "kimi-k2.6", name: "MoonshotAI: Kimi K2.6", contextWindow: 262144, cost: { input: 0.5, output: 1.99 }, reasoning: true },
+          { id: "kimi-k2.6", name: "MoonshotAI: Kimi K2.6", reasoning: true, contextWindow: 262144, maxTokens: 262144, cost: { input: 0.5, output: 1.99 } },
         ],
       },
     ];
     const localApp = buildChatApp(chatStore, undefined, () => catalog);
-    const res = await localApp.inject({ method: "GET", url: "/api/chat/providers" });
+    const res = await localApp.inject({ method: "GET", url: "/api/providers" });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { providers: typeof catalog };
     expect(body.providers.map((p) => p.id)).toEqual(["anthropic", "crofai"]);
     expect(body.providers[0]?.models[0]?.name).toBe("Claude Opus 4.5");
+    expect(body.providers[1]?.requiredEnvVars).toEqual(["CROFAI_API_KEY"]);
     await localApp.close();
   });
 

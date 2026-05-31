@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function NewTaskPage() {
   const [{ counts }, modelCatalog] = await Promise.all([
     orchestrator.listTasks(),
-    orchestrator.getModelOptions(),
+    orchestrator.getProviders(),
   ]);
   const inFlight =
     (counts.brainstorming ?? 0) +

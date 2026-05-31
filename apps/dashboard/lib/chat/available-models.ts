@@ -1,7 +1,7 @@
 /**
  * available-models.ts
  *
- * Maps the orchestrator's provider catalog (`ChatProvider[]` — every provider +
+ * Maps the orchestrator's provider catalog (`Provider[]` — every provider +
  * model pi supports, built-in and custom, each flagged with whether a credential
  * is configured) into the `ProviderEntry[]` shape the ModelPicker renders.
  *
@@ -9,13 +9,12 @@
  * both Node-only) and passed into the chat pages as a prop. This file only
  * reshapes already-fetched data, so it is safe in the client bundle.
  *
- * The legacy CrofAI-only fallback is kept for when the orchestrator is
- * unreachable and the catalog comes back empty.
- *
- * REQ-040, REQ-044
+ * When the catalog is empty (orchestrator unreachable), the picker renders an
+ * empty state — there is no hand-mirrored fallback list, so what the picker
+ * shows can never drift from the real catalog. (REQ-040, REQ-044)
  */
 
-import type { ChatProvider } from "@/lib/api";
+import type { Provider } from "@/lib/api";
 import type { ModelEntry, ProviderEntry } from "@/components/chat/model-picker";
 
 function formatContext(ctx: number): string {
@@ -29,7 +28,7 @@ function formatCost(usdPerM: number): string {
 }
 
 /** Reshape one catalog model into the picker's ModelEntry. */
-function toModelEntry(m: ChatProvider["models"][number]): ModelEntry {
+function toModelEntry(m: Provider["models"][number]): ModelEntry {
   return {
     id: m.id,
     name: m.name,
@@ -45,7 +44,7 @@ function toModelEntry(m: ChatProvider["models"][number]): ModelEntry {
  * are dropped (nothing selectable). Order is preserved (the orchestrator already
  * sorts authenticated-first, then alphabetical).
  */
-export function toProviderEntries(providers: readonly ChatProvider[]): ProviderEntry[] {
+export function toProviderEntries(providers: readonly Provider[]): ProviderEntry[] {
   return providers
     .filter((p) => p.models.length > 0)
     .map((p) => ({
@@ -56,28 +55,10 @@ export function toProviderEntries(providers: readonly ChatProvider[]): ProviderE
     }));
 }
 
-// ── Fallback (orchestrator unreachable) ─────────────────────────────────────────
-// Mirrors CROFAI_PROVIDER_CONFIG in pi-bridge/src/providers/crofai.ts so the
-// picker still shows the default provider's models when the live catalog is
-// empty. Update alongside that file.
-
-const CROFAI_FALLBACK: ProviderEntry = {
-  id: "crofai",
-  name: "CrofAI",
-  authenticated: false,
-  models: [
-    { id: "kimi-k2.6", name: "MoonshotAI: Kimi K2.6", contextWindow: "262k", costIn: "$0.50", costOut: "$1.99", reasoning: true },
-    { id: "deepseek-v3.2", name: "DeepSeek: DeepSeek V3.2", contextWindow: "164k", costIn: "$0.28", costOut: "$0.38", reasoning: false },
-    { id: "deepseek-v4-pro", name: "DeepSeek: DeepSeek V4 Pro", contextWindow: "1M", costIn: "$0.40", costOut: "$0.85", reasoning: true },
-    { id: "glm-4.7", name: "Z.AI: GLM 4.7", contextWindow: "203k", costIn: "$0.25", costOut: "$1.10", reasoning: false },
-  ],
-};
-
 /**
- * Build the ProviderEntry[] for the ModelPicker from the fetched catalog,
- * falling back to the CrofAI-only list when the catalog is empty.
+ * Build the ProviderEntry[] for the ModelPicker from the fetched catalog. An
+ * empty catalog yields an empty list; the picker handles the empty state.
  */
-export function buildProviderEntries(providers: readonly ChatProvider[]): ProviderEntry[] {
-  const entries = toProviderEntries(providers);
-  return entries.length > 0 ? entries : [CROFAI_FALLBACK];
+export function buildProviderEntries(providers: readonly Provider[]): ProviderEntry[] {
+  return toProviderEntries(providers);
 }

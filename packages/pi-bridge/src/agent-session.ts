@@ -10,17 +10,19 @@ import {
   type CreateAgentSessionOptions,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { findEnvKeys, getEnvApiKey, getModels, getProviders } from "@earendil-works/pi-ai";
+import { getModels } from "@earendil-works/pi-ai";
 import type { AssistantMessage, KnownProvider, Usage } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { AuthError, loadEnvHarness } from "./auth.js";
 import {
-  CROFAI_API_KEY_ENV,
-  CROFAI_PROVIDER_CONFIG,
-  CROFAI_PROVIDER_NAME,
-} from "./providers/crofai.js";
+  apiKeyFromEnv,
+  customProviderEnv,
+  CUSTOM_PROVIDERS,
+  hasOAuthCredential,
+  isCustomProvider,
+  isOAuthProvider,
+  requiredEnvVarsFor,
+} from "./provider-registry.js";
 import { randomUUID } from "node:crypto";
 
 export { AuthError };
@@ -93,16 +95,6 @@ export type SdkBoundary = {
   create: (opts: SdkBoundaryCreateOptions) => Promise<{ session: BridgeSdkSession }>;
 };
 
-// Providers we register with the SDK at runtime (not in pi-ai's static MODELS).
-// Maps provider name -> env var that holds the API key. assertCredential and
-// the registry builder both read this so the auth surface stays uniform.
-const CUSTOM_PROVIDER_ENV: Record<string, string> = {
-  [CROFAI_PROVIDER_NAME]: CROFAI_API_KEY_ENV,
-};
-
-const OAUTH_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
-const KNOWN_PROVIDERS = new Set<string>(getProviders());
-
 // Lazy per-process registry. Built once on first session creation; reused for
 // every subsequent session so the orchestrator doesn't re-register providers
 // each phase tick. The registry resolves credentials via setRuntimeApiKey
@@ -113,17 +105,16 @@ let registryPromise: Promise<ModelRegistry> | null = null;
 function buildCustomRegistry(): ModelRegistry {
   const auth = getAuthStorage();
   const registry = ModelRegistry.create(auth);
-  registry.registerProvider(CROFAI_PROVIDER_NAME, CROFAI_PROVIDER_CONFIG);
+  // Register every custom provider from the single registry source of truth.
+  for (const provider of CUSTOM_PROVIDERS) {
+    registry.registerProvider(provider.id, provider.config);
+  }
   return registry;
 }
 
 function getAuthStorage(): AuthStorage {
   authStorage ??= AuthStorage.create();
   return authStorage;
-}
-
-function isKnownProvider(provider: string): provider is KnownProvider {
-  return KNOWN_PROVIDERS.has(provider);
 }
 
 async function getRegistry(): Promise<ModelRegistry> {
@@ -311,9 +302,9 @@ function toolCallId(event: AgentSessionEvent): string | null {
 
 function resolveModel(spec: { provider: string; model: string }, registry: ModelRegistry) {
   // Custom providers (registered at runtime via ModelRegistry) aren't in
-  // pi-ai's static MODELS, so getModel would throw. Consult the registry
-  // first; fall back to pi-ai for built-in providers.
-  if (spec.provider in CUSTOM_PROVIDER_ENV) {
+  // pi-ai's static MODELS, so getModels would return nothing. Consult the
+  // registry first; fall back to pi-ai for built-in providers.
+  if (isCustomProvider(spec.provider)) {
     const found = registry.find(spec.provider, spec.model);
     if (!found) {
       throw new AuthError(
@@ -322,12 +313,11 @@ function resolveModel(spec: { provider: string; model: string }, registry: Model
     }
     return found;
   }
-  if (isKnownProvider(spec.provider)) {
-    const found = getModels(spec.provider).find((model) => model.id === spec.model);
-    if (found) {
-      return found;
-    }
-  }
+
+  // Safe cast: getModels returns [] for unrecognized providers, so an unknown
+  // provider falls through to the AuthError below rather than matching.
+  const found = getModels(spec.provider as KnownProvider).find((model) => model.id === spec.model);
+  if (found) return found;
 
   throw new AuthError(`unknown model ${spec.provider}/${spec.model}: not registered in pi-ai`);
 }
@@ -375,196 +365,36 @@ function allowlistedTools(
 }
 
 function syncRuntimeApiKey(provider: string): void {
-  if (OAUTH_PROVIDERS.has(provider)) return;
+  if (isOAuthProvider(provider)) return;
   const apiKey = apiKeyFromEnv(provider);
   if (apiKey) {
     getAuthStorage().setRuntimeApiKey(provider, apiKey);
   }
 }
 
-function apiKeyFromEnv(provider: string): string | undefined {
-  const customEnv = CUSTOM_PROVIDER_ENV[provider];
-  if (customEnv !== undefined) {
-    return nonEmptyEnv(customEnv);
-  }
-
-  for (const envKey of findEnvKeys(provider) ?? []) {
-    const apiKey = nonEmptyEnv(envKey);
-    if (apiKey) return apiKey;
-  }
-  return getEnvApiKey(provider) || undefined;
-}
-
-function nonEmptyEnv(key: string): string | undefined {
-  const value = process.env[key];
-  return value && value.length > 0 ? value : undefined;
-}
-
-// Upfront credential check using the SDK's own provider→env-var registry
-// (findEnvKeys / getEnvApiKey). Throws AuthError before the SDK is touched so
-// brainstorm.ts can route the failure into a phase_blocked state without
-// spinning up a session.
+// Upfront credential check using the provider registry's resolution. Throws
+// AuthError before the SDK is touched so brainstorm.ts can route the failure
+// into a phase_blocked state without spinning up a session.
 function assertCredential(provider: string): void {
-  // Custom providers aren't in pi-ai's env-key registry; check our own map first.
-  const customEnv = CUSTOM_PROVIDER_ENV[provider];
+  // Custom providers carry a single env var; report it specifically.
+  const customEnv = customProviderEnv(provider);
   if (customEnv !== undefined) {
     if (process.env[customEnv]) return;
     throw new AuthError(`missing API key for ${provider} (expected ${customEnv} in .env.harness)`);
   }
-  if (OAUTH_PROVIDERS.has(provider)) {
+  if (isOAuthProvider(provider)) {
     if (hasOAuthCredential(provider)) return;
     throw new AuthError(`missing subscription login for ${provider} (run /login in pi)`);
   }
-  if (getEnvApiKey(provider)) return;
-  const envVars = findEnvKeys(provider);
-  const expected = envVars && envVars.length > 0 ? envVars.join(" or ") : "<unknown>";
+  if (apiKeyFromEnv(provider) !== undefined) return;
+  const envVars = requiredEnvVarsFor(provider);
+  const expected = envVars.length > 0 ? envVars.join(" or ") : "<unknown>";
   throw new AuthError(`missing API key for ${provider} (expected ${expected} in .env.harness)`);
-}
-
-function hasOAuthCredential(provider: string): boolean {
-  const path = join(process.env["HOME"] ?? "", ".pi", "agent", "auth.json");
-  if (!existsSync(path)) return false;
-  try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    const entry = raw[provider];
-    return (
-      typeof entry === "object" &&
-      entry !== null &&
-      "type" in entry &&
-      (entry as { type?: unknown }).type === "oauth"
-    );
-  } catch {
-    return false;
-  }
 }
 
 function looksLikeAuthFailure(message: string): boolean {
   const m = message.toLowerCase();
   return m.includes("api key") || m.includes("auth") || m.includes("credential");
-}
-
-// ── Provider/model catalog ────────────────────────────────────────────────────
-
-/** A single model in the catalog, in a UI-friendly (serializable) shape. */
-export type AvailableModel = {
-  readonly id: string;
-  readonly name: string;
-  /** Context window in tokens. */
-  readonly contextWindow: number;
-  /** USD per 1M tokens. */
-  readonly cost: { readonly input: number; readonly output: number };
-  readonly reasoning: boolean;
-};
-
-/** A provider plus its models and whether a credential is configured. */
-export type AvailableProvider = {
-  readonly id: string;
-  readonly name: string;
-  /** True when an API key (or OAuth login) for this provider is present. */
-  readonly authenticated: boolean;
-  /** How the provider authenticates — drives the UI hint. */
-  readonly auth: "api-key" | "oauth";
-  readonly models: readonly AvailableModel[];
-};
-
-/** Display names for built-in providers; falls back to the raw id otherwise. */
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  "openai-codex": "OpenAI Codex",
-  "azure-openai-responses": "Azure OpenAI",
-  google: "Google Gemini",
-  "google-vertex": "Google Vertex",
-  "amazon-bedrock": "Amazon Bedrock",
-  deepseek: "DeepSeek",
-  "github-copilot": "GitHub Copilot",
-  xai: "xAI",
-  groq: "Groq",
-  cerebras: "Cerebras",
-  openrouter: "OpenRouter",
-  "vercel-ai-gateway": "Vercel AI Gateway",
-  zai: "Z.AI",
-  mistral: "Mistral",
-  minimax: "MiniMax",
-  "minimax-cn": "MiniMax (CN)",
-  moonshotai: "MoonshotAI",
-  "moonshotai-cn": "MoonshotAI (CN)",
-  huggingface: "Hugging Face",
-  fireworks: "Fireworks",
-  cloudflare: "Cloudflare",
-};
-
-function providerDisplayName(id: string): string {
-  return PROVIDER_DISPLAY_NAMES[id] ?? id;
-}
-
-/**
- * Enumerate every provider + model pi supports — the SDK's built-in catalog
- * (via getProviders/getModels) plus our runtime-registered custom providers
- * (CrofAI). Each provider is flagged `authenticated` when a credential is
- * present, using the same env/OAuth resolution as session creation.
- *
- * Node-only (reads process.env and pi-ai's catalog). Call it server-side and
- * pass the result to the browser — never import this into a client bundle.
- *
- * Ensures .env.harness is loaded first so authentication flags reflect the same
- * keys a real session would use.
- */
-export function listAvailableProviders(): AvailableProvider[] {
-  loadEnvHarness();
-
-  const out: AvailableProvider[] = [];
-
-  // Built-in SDK providers from the static catalog.
-  for (const provider of getProviders()) {
-    const models = getModels(provider).map(
-      (m): AvailableModel => ({
-        id: m.id,
-        name: m.name,
-        contextWindow: m.contextWindow,
-        cost: { input: m.cost.input, output: m.cost.output },
-        reasoning: m.reasoning,
-      }),
-    );
-    if (models.length === 0) continue;
-    const isOAuth = OAUTH_PROVIDERS.has(provider);
-    out.push({
-      id: provider,
-      name: providerDisplayName(provider),
-      authenticated: isOAuth ? hasOAuthCredential(provider) : apiKeyFromEnv(provider) !== undefined,
-      auth: isOAuth ? "oauth" : "api-key",
-      models,
-    });
-  }
-
-  // Custom runtime-registered providers (CrofAI). Source the model list from
-  // the provider config so we don't depend on a built registry instance.
-  for (const [providerId, envVar] of Object.entries(CUSTOM_PROVIDER_ENV)) {
-    const config = providerId === CROFAI_PROVIDER_NAME ? CROFAI_PROVIDER_CONFIG : undefined;
-    const models = (config?.models ?? []).map(
-      (m): AvailableModel => ({
-        id: m.id,
-        name: m.name,
-        contextWindow: m.contextWindow,
-        cost: { input: m.cost.input, output: m.cost.output },
-        reasoning: m.reasoning,
-      }),
-    );
-    out.push({
-      id: providerId,
-      name: config?.name ?? providerDisplayName(providerId),
-      authenticated: nonEmptyEnv(envVar) !== undefined,
-      auth: "api-key",
-      models,
-    });
-  }
-
-  // Authenticated providers first, then alphabetical — surfaces usable models
-  // at the top of the picker.
-  return out.sort((a, b) => {
-    if (a.authenticated !== b.authenticated) return a.authenticated ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
 }
 
 async function buildResourceLoader(

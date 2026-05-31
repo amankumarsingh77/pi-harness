@@ -16,15 +16,11 @@
 
 import type { FastifyInstance } from "fastify";
 import { z, ZodError } from "zod";
-import type { AvailableProvider } from "@pi-harness/pi-bridge";
 import type { ChatModelSelection, ChatStreamFrame } from "@pi-harness/shared";
 import { DEFAULT_PHASE_MODELS } from "@pi-harness/shared";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import type { ChatSessionStore } from "../../adapters/chat-store.js";
 import { runChatTurn, type CreateAgentSessionFn } from "../../agents/chat-session.js";
-
-/** Enumerates every provider + model pi supports. Injectable for tests. */
-export type ListProvidersFn = () => AvailableProvider[];
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -132,11 +128,6 @@ export type ChatRouteDeps = {
    * lazily (only happens in production — never in tests that pass chatStore).
    */
   readonly createAgentSession?: CreateAgentSessionFn;
-  /**
-   * Injectable provider catalog for tests. When absent, listAvailableProviders
-   * is imported lazily from the bridge (production only).
-   */
-  readonly listProviders?: ListProvidersFn;
 };
 
 export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): void {
@@ -153,16 +144,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       return createAgentSession(opts);
     });
 
-  // ── GET /api/chat/providers ──────────────────────────────────────────────────
-  // The full provider + model catalog pi supports (built-in + custom), each
-  // flagged with whether a credential is configured. (REQ-040, REQ-044)
-
-  app.get("/api/chat/providers", async () => {
-    const providers = deps.listProviders
-      ? deps.listProviders()
-      : await import("@pi-harness/pi-bridge").then((m) => m.listAvailableProviders());
-    return { providers };
-  });
+  // The provider/model catalog moved to GET /api/providers (see routes/providers.ts) —
+  // it is shared by the chat picker and the new-task stage selector.
 
   // ── POST /api/chat/threads ───────────────────────────────────────────────────
 

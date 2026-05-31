@@ -24,7 +24,18 @@ const real = api({ baseUrl: ORCHESTRATOR_URL });
 export const orchestrator: Api = {
   listTasks: () => real.listTasks(),
   createTask: (input) => real.createTask(input),
-  getModelOptions: () => real.getModelOptions(),
+  getProviders: async () => {
+    // Soft-fail: an unreachable orchestrator should not crash the new-task or
+    // chat pages; the caller renders an empty/error state from an empty list.
+    try {
+      return await real.getProviders();
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
+        return { providers: [] };
+      }
+      throw e;
+    }
+  },
   transitionTask: (id, action) => real.transitionTask(id, action),
   getTask: (id) => real.getTask(id),
   listEvents: async (runId) => {
@@ -91,18 +102,6 @@ export const orchestrator: Api = {
     } catch (e) {
       if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
         return { threads: [] };
-      }
-      throw e;
-    }
-  },
-  listChatProviders: async () => {
-    try {
-      return await real.listChatProviders();
-    } catch (e) {
-      // Soft-fail: an unreachable orchestrator should not crash the page; the
-      // picker falls back to the thread's current model only.
-      if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
-        return { providers: [] };
       }
       throw e;
     }

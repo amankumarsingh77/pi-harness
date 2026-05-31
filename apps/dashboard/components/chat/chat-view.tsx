@@ -29,7 +29,7 @@ import { mergeChatMessages, mergeMessageLists } from "@/lib/chat/chat-live-provi
 import { useChatStream } from "@/lib/chat/use-chat-stream";
 import { buildProviderEntries } from "@/lib/chat/available-models";
 import { mutations } from "@/lib/client/queries";
-import type { ChatProvider } from "@/lib/api";
+import type { Provider } from "@/lib/api";
 
 type Props = {
   readonly thread: ChatThread;
@@ -37,7 +37,7 @@ type Props = {
   readonly threads: readonly ChatThread[];
   readonly activeThreadId: string;
   /** Full provider + model catalog (fetched server-side). */
-  readonly providers: readonly ChatProvider[];
+  readonly providers: readonly Provider[];
 };
 
 /**

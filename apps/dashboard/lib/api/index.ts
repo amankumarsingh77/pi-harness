@@ -264,22 +264,32 @@ export type ChatThreadDetail = {
   messages: ChatMessage[];
 };
 
-/** A model in the provider catalog (serializable mirror of the bridge type). */
-export type ChatProviderModel = {
+/**
+ * A model in the provider catalog (serializable mirror of pi-bridge's
+ * ProviderModel). The one shape used by both the chat picker and the new-task
+ * stage selector.
+ */
+export type ProviderModel = {
   id: string;
   name: string;
-  contextWindow: number;
-  cost: { input: number; output: number };
   reasoning: boolean;
+  /** Context window in tokens. */
+  contextWindow: number;
+  /** Max output tokens. */
+  maxTokens: number;
+  /** USD per 1M tokens. */
+  cost: { input: number; output: number };
 };
 
-/** A provider + its models + whether a credential is configured. */
-export type ChatProvider = {
+/** A provider + its models + auth method + whether a credential is configured. */
+export type Provider = {
   id: string;
   name: string;
   authenticated: boolean;
   auth: "api-key" | "oauth";
-  models: ChatProviderModel[];
+  /** Env vars that supply the API key. `[]` for OAuth providers. */
+  requiredEnvVars: readonly string[];
+  models: ProviderModel[];
 };
 
 export type PostMessageResult = {
@@ -297,7 +307,7 @@ export type Api = {
         phaseModels?: Partial<Record<Phase, Partial<PhaseModelConfig>>>;
       },
   ) => Promise<Task>;
-  getModelOptions: () => Promise<ModelCatalog>;
+  getProviders: () => Promise<{ providers: Provider[] }>;
   transitionTask: (
     id: string,
     action:
@@ -372,7 +382,6 @@ export type Api = {
     input: { title?: string; model?: ChatModelSelection },
   ) => Promise<ChatThread>;
   listChatThreads: () => Promise<{ threads: ChatThread[] }>;
-  listChatProviders: () => Promise<{ providers: ChatProvider[] }>;
   getChatThread: (threadId: string) => Promise<ChatThreadDetail>;
   postChatMessage: (threadId: string, payload: { text: string }) => Promise<PostMessageResult>;
   updateChatModel: (threadId: string, model: ChatModelSelection) => Promise<ChatThread>;
@@ -384,42 +393,6 @@ export type TaskListResult = {
   readonly counts: Record<string, number>;
   readonly humanInterventionTaskIds: readonly string[];
   readonly summary: DashboardSummary;
-};
-
-export type ModelCatalogCredential =
-  | {
-      kind: "env";
-      configured: boolean;
-      requiredEnvVars: readonly string[];
-    }
-  | {
-      kind: "oauth";
-      configured: boolean;
-      label: string;
-    }
-  | {
-      kind: "ambient";
-      configured: boolean;
-      label: string;
-    };
-
-export type ModelCatalogModel = {
-  id: string;
-  label: string;
-  reasoning: boolean;
-  contextWindow: number;
-  maxTokens: number;
-};
-
-export type ModelCatalogProvider = {
-  id: string;
-  label: string;
-  credential: ModelCatalogCredential;
-  models: readonly ModelCatalogModel[];
-};
-
-export type ModelCatalog = {
-  providers: readonly ModelCatalogProvider[];
 };
 
 export type BrainstormDiff = {
@@ -462,7 +435,7 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       hydrateTask(
         await send<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
       ),
-    getModelOptions: () => send<ModelCatalog>("/api/model-options"),
+    getProviders: () => send<{ providers: Provider[] }>("/api/providers"),
     transitionTask: async (id, action) => {
       const r = await send<{ task: Task }>(`/api/tasks/${id}/transitions`, {
         method: "POST",
@@ -570,7 +543,6 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
       const r = await send<{ threads: ChatThread[] }>("/api/chat/threads");
       return { threads: r.threads.map(hydrateChatThread) };
     },
-    listChatProviders: () => send<{ providers: ChatProvider[] }>("/api/chat/providers"),
     getChatThread: async (threadId) => {
       const r = await send<ChatThreadDetail>(`/api/chat/threads/${threadId}`);
       return {

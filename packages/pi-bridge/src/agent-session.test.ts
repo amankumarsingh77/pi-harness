@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createAgentSession,
-  listAvailableProviders,
   AuthError,
   __resetRegistryCache,
   type PiBridgeEvent,
@@ -539,44 +538,5 @@ describe("createAgentSession", () => {
 
     const err = events.find((e) => e.kind === "error");
     expect(err && "text" in err && err.text).toContain("error");
-  });
-});
-
-describe("listAvailableProviders", () => {
-  it("includes built-in providers, the custom crofai provider, and reflects auth from env", () => {
-    process.env["ANTHROPIC_API_KEY"] = "test-key"; // present
-    delete process.env["CROFAI_API_KEY"]; // absent
-    const providers = listAvailableProviders();
-
-    const ids = providers.map((p) => p.id);
-    // Built-in providers from pi-ai's catalog
-    expect(ids).toContain("anthropic");
-    expect(ids).toContain("openai");
-    // Custom registered provider
-    expect(ids).toContain("crofai");
-
-    const anthropic = providers.find((p) => p.id === "anthropic");
-    expect(anthropic?.authenticated).toBe(true);
-    expect(anthropic && anthropic.models.length > 0).toBe(true);
-
-    const crofai = providers.find((p) => p.id === "crofai");
-    expect(crofai?.authenticated).toBe(false);
-    expect(crofai?.models.map((m) => m.id)).toContain("kimi-k2.6");
-  });
-
-  it("crofai authenticated when CROFAI_API_KEY is present", () => {
-    process.env["CROFAI_API_KEY"] = "crofai-test-key";
-    const providers = listAvailableProviders();
-    expect(providers.find((p) => p.id === "crofai")?.authenticated).toBe(true);
-  });
-
-  it("openai-codex exposes its full catalog (no model filtering)", () => {
-    // ChatGPT-account eligibility is a runtime OpenAI policy with no reliable
-    // static signal (e.g. gpt-5.5 works, gpt-5.2-codex doesn't), so the catalog
-    // is surfaced as-is and rejected models fall back to the chat.error notice.
-    const codex = listAvailableProviders().find((p) => p.id === "openai-codex");
-    expect(codex).toBeDefined();
-    const ids = codex?.models.map((m) => m.id) ?? [];
-    expect(ids).toContain("gpt-5.5");
   });
 });

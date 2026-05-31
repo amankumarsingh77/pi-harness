@@ -1,42 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ModelCatalog, ModelCatalogProvider } from "@/lib/api";
+import type { Provider } from "@/lib/api";
 import { StageModelSelector } from "@/components/new-task/stage-model-selector";
 
-const unavailableProvider: ModelCatalogProvider = {
+const unavailableProvider: Provider = {
   id: "crofai",
-  label: "CrofAI",
-  credential: {
-    kind: "env",
-    configured: false,
-    requiredEnvVars: ["CROFAI_API_KEY"],
-  },
+  name: "CrofAI",
+  authenticated: false,
+  auth: "api-key",
+  requiredEnvVars: ["CROFAI_API_KEY"],
   models: [
     {
       id: "kimi-k2.6",
-      label: "MoonshotAI: Kimi K2.6",
+      name: "MoonshotAI: Kimi K2.6",
       reasoning: true,
       contextWindow: 262144,
       maxTokens: 262144,
+      cost: { input: 0.5, output: 1.99 },
     },
   ],
 };
 
-const unavailableCatalog: ModelCatalog = {
+const unavailableCatalog: { providers: Provider[] } = {
   providers: [unavailableProvider],
 };
 
-const availableCatalog: ModelCatalog = {
-  providers: [
-    {
-      ...unavailableProvider,
-      credential: {
-        kind: "env",
-        configured: true,
-        requiredEnvVars: ["CROFAI_API_KEY"],
-      },
-    },
-  ],
+const availableCatalog: { providers: Provider[] } = {
+  providers: [{ ...unavailableProvider, authenticated: true }],
 };
 
 describe("StageModelSelector", () => {

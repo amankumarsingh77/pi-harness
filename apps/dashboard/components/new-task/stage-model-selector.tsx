@@ -9,7 +9,9 @@ import {
   type Phase,
   type PhaseModelConfig,
 } from "@pi-harness/shared";
-import type { ModelCatalog, ModelCatalogProvider } from "@/lib/api";
+import type { Provider } from "@/lib/api";
+
+type Catalog = { providers: readonly Provider[] };
 
 const PHASE_LABELS: Record<Phase, string> = {
   brainstorm: "Brainstorm",
@@ -23,7 +25,7 @@ type Selection = Record<Phase, { provider: string; model: string }>;
 
 type MissingCredential = {
   phase: Phase;
-  provider: ModelCatalogProvider;
+  provider: Provider;
 };
 
 type RefreshState = "idle" | "refreshing" | "failed";
@@ -32,8 +34,8 @@ export function StageModelSelector({
   initialCatalog,
   fetchCatalog = defaultFetchCatalog,
 }: {
-  initialCatalog: ModelCatalog;
-  fetchCatalog?: () => Promise<ModelCatalog>;
+  initialCatalog: Catalog;
+  fetchCatalog?: () => Promise<Catalog>;
 }) {
   const [catalog, setCatalog] = useState(initialCatalog);
   const [selection, setSelection] = useState<Selection>(() => initialSelection(initialCatalog));
@@ -119,7 +121,7 @@ export function StageModelSelector({
                   >
                     {catalog.providers.map((option) => (
                       <option key={option.id} value={option.id}>
-                        {option.label}
+                        {option.name}
                       </option>
                     ))}
                   </select>
@@ -142,7 +144,7 @@ export function StageModelSelector({
                   >
                     {models.map((model) => (
                       <option key={model.id} value={model.id}>
-                        {model.label}
+                        {model.name}
                       </option>
                     ))}
                   </select>
@@ -190,16 +192,16 @@ export function StageModelSelector({
   );
 }
 
-async function defaultFetchCatalog(): Promise<ModelCatalog> {
-  const response = await fetch("/api/proxy/model-options", {
+async function defaultFetchCatalog(): Promise<Catalog> {
+  const response = await fetch("/api/proxy/providers", {
     headers: { accept: "application/json" },
     cache: "no-store",
   });
   if (!response.ok) throw new Error("model catalog unavailable");
-  return (await response.json()) as ModelCatalog;
+  return (await response.json()) as Catalog;
 }
 
-function initialSelection(catalog: ModelCatalog): Selection {
+function initialSelection(catalog: Catalog): Selection {
   return PHASES.reduce<Selection>(
     (acc, phase) => ({
       ...acc,
@@ -219,7 +221,7 @@ function emptySelection(): Selection {
   };
 }
 
-function reconcileSelection(selection: Selection, catalog: ModelCatalog): Selection {
+function reconcileSelection(selection: Selection, catalog: Catalog): Selection {
   return PHASES.reduce<Selection>(
     (acc, phase) => ({
       ...acc,
@@ -230,7 +232,7 @@ function reconcileSelection(selection: Selection, catalog: ModelCatalog): Select
 }
 
 function selectExistingOrFallback(
-  catalog: ModelCatalog,
+  catalog: Catalog,
   requested: Pick<PhaseModelConfig, "provider" | "model">,
 ): { provider: string; model: string } {
   const provider = providerById(catalog, requested.provider) ?? catalog.providers[0];
@@ -239,22 +241,22 @@ function selectExistingOrFallback(
   return { provider: provider.id, model: model?.id ?? "" };
 }
 
-function providerById(catalog: ModelCatalog, id: string): ModelCatalogProvider | undefined {
+function providerById(catalog: Catalog, id: string): Provider | undefined {
   return catalog.providers.find((provider) => provider.id === id);
 }
 
 function firstSelectionForProvider(
-  catalog: ModelCatalog,
+  catalog: Catalog,
   providerId: string,
 ): { provider: string; model: string } {
   const provider = providerById(catalog, providerId) ?? catalog.providers[0];
   return { provider: provider?.id ?? "", model: provider?.models[0]?.id ?? "" };
 }
 
-function missingCredentials(selection: Selection, catalog: ModelCatalog): readonly MissingCredential[] {
+function missingCredentials(selection: Selection, catalog: Catalog): readonly MissingCredential[] {
   return PHASES.flatMap((phase) => {
     const provider = providerById(catalog, selection[phase].provider);
-    if (provider === undefined || provider.credential.configured) return [];
+    if (provider === undefined || provider.authenticated) return [];
     return [{ phase, provider }];
   });
 }
@@ -266,16 +268,18 @@ function warningText(input: {
 }): string {
   if (!input.hasProviders) return "No model providers are available. Refresh after configuring Pi providers.";
   if (input.refreshState === "failed") return "Could not refresh provider credentials. Check the orchestrator and try again.";
-  const unique = new Map<string, ModelCatalogProvider>();
+  const unique = new Map<string, Provider>();
   for (const item of input.missing) unique.set(item.provider.id, item.provider);
   const details = [...unique.values()].map((provider) => credentialText(provider)).join("; ");
   return `${details}. Add the credential first, then click Refresh.`;
 }
 
-function credentialText(provider: ModelCatalogProvider): string {
-  const credential = provider.credential;
-  if (credential.kind === "env") {
-    return `${provider.label} needs ${credential.requiredEnvVars.join(" or ")}`;
+function credentialText(provider: Provider): string {
+  if (provider.auth === "oauth") {
+    return `${provider.name} needs a subscription login (run /login in pi)`;
   }
-  return `${provider.label}: ${credential.label}`;
+  if (provider.requiredEnvVars.length > 0) {
+    return `${provider.name} needs ${provider.requiredEnvVars.join(" or ")}`;
+  }
+  return `${provider.name} needs its credentials configured in the Pi environment`;
 }

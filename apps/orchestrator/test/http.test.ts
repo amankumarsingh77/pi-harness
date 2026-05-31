@@ -1174,12 +1174,12 @@ describe("http", () => {
     expect(fetched.phaseModels).toEqual(body.phaseModels);
   });
 
-  it("GET /api/model-options returns providers without secret values", async () => {
+  it("GET /api/providers returns the unified catalog without secret values", async () => {
     try {
       process.env["CROFAI_API_KEY"] = "secret-crofai-key";
       const res = await app.inject({
         method: "GET",
-        url: "/api/model-options",
+        url: "/api/providers",
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
