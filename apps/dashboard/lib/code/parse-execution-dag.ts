@@ -36,8 +36,6 @@ export type ParsedDag = {
   readonly waves: readonly ParsedWave[];
 };
 
-const NODE_ID = /^C-\d+$/;
-
 export function parseExecutionDag(body: string): ParsedDag {
   const lines = body.split("\n");
   const nodes = parseNodes(lines);
@@ -233,8 +231,4 @@ export function groupNodesByPhase(nodes: readonly ParsedDagNode[]): readonly Pha
         : "sequential";
     return { name, nodes: phaseNodes, policy };
   });
-}
-
-export function isNodeId(value: string): boolean {
-  return NODE_ID.test(value);
 }
