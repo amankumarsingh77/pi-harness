@@ -4,19 +4,22 @@ import { mkEventAt } from "../domain/events.js";
 import { writerForPath } from "./jsonl-writer.js";
 
 type PhaseEventLogPhase = Extract<Phase, "brainstorm" | "plan">;
-type BrainstormEventKind =
-  | "brainstorm_question"
-  | "brainstorm_answer"
-  | "brainstorm_system"
-  | "brainstorm_revision_requested"
-  | "brainstorm_user_nudge"
-  | "brainstorm_usage"
-  | "brainstorm_artifact_edited"
-  | "brainstorm_agent_reply"
-  | "brainstorm_mock_proposed"
-  | "brainstorm_mock_revised"
-  | "brainstorm_mock_selected"
-  | "brainstorm_mock_edit_requested";
+export const BRAINSTORM_EVENT_KINDS = [
+  "brainstorm_question",
+  "brainstorm_answer",
+  "brainstorm_system",
+  "brainstorm_revision_requested",
+  "brainstorm_user_nudge",
+  "brainstorm_usage",
+  "brainstorm_artifact_edited",
+  "brainstorm_agent_reply",
+  "brainstorm_mock_proposed",
+  "brainstorm_mock_revised",
+  "brainstorm_mock_selected",
+  "brainstorm_mock_edit_requested",
+  "brainstorm_design_promoted",
+] as const;
+type BrainstormEventKind = (typeof BRAINSTORM_EVENT_KINDS)[number];
 type PlanEventKind =
   | "plan_system"
   | "plan_subagent_started"
