@@ -208,6 +208,16 @@ export class ArtifactsStore {
     return join(this.mockPageDir(cwd, taskId, mockId), `${pageId}.html`);
   }
 
+  mockPagePngPath(
+    cwd: string,
+    taskId: string,
+    mockId: string,
+    pageId: string,
+    viewport: "desktop" | "mobile",
+  ): string {
+    return join(this.mockPageDir(cwd, taskId, mockId), `${pageId}.${viewport}.png`);
+  }
+
   async readArtifact(cwd: string, taskId: string, kind: ArtifactKind): Promise<Artifact | null> {
     await this.syncMirrorIfNewer(cwd, taskId, kind);
     const path = this.currentArtifactPath(cwd, taskId, kind);
@@ -348,6 +358,36 @@ export class ArtifactsStore {
     const path = this.mockPageHtmlPath(cwd, taskId, mockId, pageId);
     if (!existsSync(path)) return null;
     return readFile(path, "utf8");
+  }
+
+  async writeBrainstormMockRender(
+    cwd: string,
+    taskId: string,
+    mockId: string,
+    pageId: string,
+    pngs: { desktopPng: Buffer; mobilePng: Buffer },
+  ): Promise<void> {
+    const dir = this.mockPageDir(cwd, taskId, mockId);
+    await mkdir(dir, { recursive: true });
+    const writeAtomic = async (path: string, data: Buffer): Promise<void> => {
+      const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+      await writeFile(tmp, data);
+      await rename(tmp, path);
+    };
+    await writeAtomic(this.mockPagePngPath(cwd, taskId, mockId, pageId, "desktop"), pngs.desktopPng);
+    await writeAtomic(this.mockPagePngPath(cwd, taskId, mockId, pageId, "mobile"), pngs.mobilePng);
+  }
+
+  async readBrainstormMockPng(
+    cwd: string,
+    taskId: string,
+    mockId: string,
+    pageId: string,
+    viewport: "desktop" | "mobile",
+  ): Promise<Buffer | null> {
+    const path = this.mockPagePngPath(cwd, taskId, mockId, pageId, viewport);
+    if (!existsSync(path)) return null;
+    return readFile(path);
   }
 
   async selectBrainstormMock(cwd: string, taskId: string, mockId: string): Promise<void> {
