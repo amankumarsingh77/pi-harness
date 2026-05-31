@@ -240,6 +240,40 @@ export type BrainstormJsonlEvent =
       comment: string;
     };
 
+// Preview of the design-token changes a mock promotion would write to the
+// shared design system. `before`/`after` are the literal token values (a hex
+// color, a font stack, a spacing scalar); `before: null` means the token is
+// new, `after: null` means it would be removed. `designMdDelta` is the unified
+// diff of design.md the promotion would apply.
+export type TokenDiff = {
+  fromVersion: number;
+  toVersion: number;
+  summary: string;
+  changes: { name: string; before: string | null; after: string | null }[];
+  designMdDelta: string;
+};
+
+// Full snapshot of the shared design system at /design: the raw tokens.css and
+// design.md, plus the manifest of promoted exemplars and the promotion history.
+export type DesignSystemSnapshot = {
+  exists: boolean;
+  tokensCss: string;
+  designMd: string;
+  manifest: {
+    tokenVersion: number;
+    updatedAt: string;
+    exemplars: {
+      id: string;
+      title: string;
+      png: string;
+      promotedFromTask: string;
+      promotedMockId: string;
+      tokenVersion: number;
+    }[];
+    history: { tokenVersion: number; task: string; summary: string }[];
+  };
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
@@ -365,6 +399,13 @@ export type Api = {
     taskId: string,
     mockId: string,
   ) => Promise<{ ok: true; mockId: string }>;
+  promoteBrainstormMock: (taskId: string, mockId: string) => Promise<TokenDiff>;
+  confirmPromoteBrainstormMock: (
+    taskId: string,
+    mockId: string,
+    diff: TokenDiff,
+  ) => Promise<{ ok: true; tokenVersion: number; exemplarId: string }>;
+  getDesignSystem: () => Promise<DesignSystemSnapshot>;
   getPlanBundle: (taskId: string) => Promise<PlanBundle>;
   getMission: (taskId: string) => Promise<MissionBundle>;
   runVerifier: (taskId: string, payload?: VerifierRunRequest) => Promise<VerifierRunResult>;
@@ -506,6 +547,23 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
           body: JSON.stringify({}),
         },
       ),
+    promoteBrainstormMock: (taskId, mockId) =>
+      send<TokenDiff>(
+        `/api/tasks/${taskId}/brainstorm/mocks/${mockId}/promote`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+      ),
+    confirmPromoteBrainstormMock: (taskId, mockId, diff) =>
+      send<{ ok: true; tokenVersion: number; exemplarId: string }>(
+        `/api/tasks/${taskId}/brainstorm/mocks/${mockId}/promote/confirm`,
+        {
+          method: "POST",
+          body: JSON.stringify(diff),
+        },
+      ),
+    getDesignSystem: () => send<DesignSystemSnapshot>(`/api/design`),
     getPlanBundle: (taskId) => send<PlanBundle>(`/api/tasks/${taskId}/plan`),
     getMission: (taskId) => send<MissionBundle>(`/api/tasks/${taskId}/mission`),
     runVerifier: (taskId, payload = {}) =>

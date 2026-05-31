@@ -2,20 +2,31 @@
 
 import { useState } from "react";
 import type { BrainstormMockPage } from "@pi-harness/shared";
+import { MockScreenshotView } from "./mock-screenshot-view";
+
+function pngUrl(
+  taskId: string,
+  mockId: string,
+  pageId: string,
+  viewport: "desktop" | "mobile",
+): string {
+  return `/api/proxy/tasks/${taskId}/brainstorm/mocks/${mockId}/pages/${pageId}/png/${viewport}`;
+}
 
 export function MockPagePreview({
   pages,
-  htmlByPageId,
   title,
+  taskId,
+  mockId,
 }: {
   pages: ReadonlyArray<BrainstormMockPage>;
-  htmlByPageId: Readonly<Record<string, string>>;
   title: string;
+  taskId: string;
+  mockId: string;
 }) {
   const firstPage = pages[0];
   const [activePageId, setActivePageId] = useState(firstPage?.pageId ?? "");
   const activePage = pages.find((page) => page.pageId === activePageId) ?? firstPage;
-  const html = activePage ? htmlByPageId[activePage.pageId] : "";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-card">
@@ -45,12 +56,18 @@ export function MockPagePreview({
           </span>
         )}
       </div>
-      <iframe
-        title={`Mock preview ${title} — ${activePage?.title ?? "page"}`}
-        srcDoc={html}
-        sandbox=""
-        className="min-h-0 flex-1 border-0 bg-white"
-      />
+      {activePage ? (
+        <MockScreenshotView
+          key={activePage.pageId}
+          title={`${title} — ${activePage.title}`}
+          desktopSrc={pngUrl(taskId, mockId, activePage.pageId, "desktop")}
+          mobileSrc={pngUrl(taskId, mockId, activePage.pageId, "mobile")}
+        />
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-card font-mono text-[12px] text-fg-mute">
+          Mock has no pages to preview
+        </div>
+      )}
     </div>
   );
 }

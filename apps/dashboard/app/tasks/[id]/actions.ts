@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { orchestrator } from "@/lib/server/api";
+import type { TokenDiff } from "@/lib/api";
 
 export async function cancelCurrentPhaseAction(taskId: string): Promise<void> {
   await orchestrator.transitionTask(taskId, { type: "user_cancel_current_phase" });
@@ -97,6 +98,30 @@ export async function selectBrainstormMockAction(
   await orchestrator.selectBrainstormMock(taskId, mockId);
   revalidatePath(`/tasks/${taskId}/brainstorm`);
   revalidatePath(`/tasks/${taskId}/brainstorm/mocks/${mockId}`);
+}
+
+// Preview the design-token diff a mock promotion would apply to the shared
+// design system. Read-only — no revalidate; the modal renders the returned
+// diff and only confirmPromoteAction writes.
+export async function promoteBrainstormMockAction(
+  taskId: string,
+  mockId: string,
+): Promise<TokenDiff> {
+  return orchestrator.promoteBrainstormMock(taskId, mockId);
+}
+
+// Commit a previously-previewed promotion: writes tokens.css + design.md and
+// records the exemplar in the shared design system, bumping tokenVersion.
+export async function confirmPromoteAction(
+  taskId: string,
+  mockId: string,
+  diff: TokenDiff,
+): Promise<{ ok: true; tokenVersion: number; exemplarId: string }> {
+  const result = await orchestrator.confirmPromoteBrainstormMock(taskId, mockId, diff);
+  revalidatePath(`/tasks/${taskId}/brainstorm`);
+  revalidatePath(`/tasks/${taskId}/brainstorm/mocks/${mockId}`);
+  revalidatePath("/design");
+  return result;
 }
 
 // Discard the current brainstorm run and start fresh. Old artifacts archive

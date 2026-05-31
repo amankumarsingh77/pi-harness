@@ -38,16 +38,6 @@ export default async function BrainstormMockPreviewPage({
   ]);
   const mock = manifest.mocks.find((m) => m.mockId === mockId);
   if (!mock) notFound();
-  const pageHtmlEntries = await Promise.all(
-    mock.pages.map(async (page) => {
-      const html = await orchestrator.getBrainstormMockPageHtml(id, mockId, page.pageId).catch((e) => {
-        if (e instanceof ApiError && e.status === 404) notFound();
-        throw e;
-      });
-      return [page.pageId, html] as const;
-    }),
-  );
-  const htmlByPageId = Object.fromEntries(pageHtmlEntries);
 
   const { task } = taskResult;
   const selected = manifest.selectedMockId === mockId;
@@ -83,7 +73,12 @@ export default async function BrainstormMockPreviewPage({
             locked={locked}
           />
         </header>
-        <MockPagePreview pages={mock.pages} htmlByPageId={htmlByPageId} title={mock.title} />
+        <MockPagePreview
+          pages={mock.pages}
+          title={mock.title}
+          taskId={task.id}
+          mockId={mock.mockId}
+        />
       </section>
     </>
   );
