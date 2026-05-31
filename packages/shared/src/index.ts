@@ -6,6 +6,7 @@ export * from "./types/preflight.js";
 export * from "./types/mission.js";
 export * from "./types/scenario.js";
 export * from "./types/execution-dag.js";
+export * from "./types/chat.js";
 export * from "./schemas/scenario.js";
 export * from "./schemas/blast-radius.js";
 export * from "./schemas/execution-dag.js";
