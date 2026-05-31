@@ -2,11 +2,15 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   DesignSystemManifestSchema,
   emptyManifest,
   type DesignSystemManifest,
 } from "./design-system-types.js";
+
+const execFileAsync = promisify(execFile);
 
 export type DesignSystemSnapshot = {
   exists: boolean;
@@ -126,5 +130,17 @@ export class DesignSystemStore {
     };
     await this.atomicWrite(this.manifestPath(cwd), `${JSON.stringify(manifest, null, 2)}\n`);
     return { tokenVersion, exemplarId };
+  }
+
+  async commitToMain(cwd: string, message: string): Promise<void> {
+    const root = resolve(cwd);
+    await execFileAsync("git", ["add", "--", this.designDir(cwd)], { cwd: root });
+    // No-op safety: if nothing is staged, `git commit` exits non-zero — tolerate it.
+    try {
+      await execFileAsync("git", ["commit", "-m", message], { cwd: root });
+    } catch (err) {
+      const out = String((err as { stdout?: string }).stdout ?? "");
+      if (!out.includes("nothing to commit")) throw err;
+    }
   }
 }
