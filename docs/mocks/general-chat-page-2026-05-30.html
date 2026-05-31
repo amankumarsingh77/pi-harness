@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>General Codebase Chat - pi-harness mock</title>
+    <style>
+      :root {
+        --color-bg: #0d0e10;
+        --color-card: #131418;
+        --color-card-hover: #181a1f;
+        --color-sub: #18181b;
+        --color-muted: #0f0f10;
+        --color-input: #0a0b0d;
+        --color-fg: #f7f8f8;
+        --color-fg-body: #e6e7e9;
+        --color-fg-label: #a1a1aa;
+        --color-fg-mute: #8a8f98;
+        --color-fg-subtle: #71717a;
+        --color-fg-faint: #4a4e57;
+        --color-fg-ghost: #3f3f46;
+        --color-border: #27272a;
+        --color-border-soft: #1f1f23;
+        --color-border-strong: #3f3f46;
+        --color-line: rgba(255, 255, 255, 0.06);
+        --color-line-hover: rgba(255, 255, 255, 0.12);
+        --color-line-strong: rgba(255, 255, 255, 0.18);
+        --color-st-idle: #8a8f98;
+        --color-st-progress: #5e6ad2;
+        --color-st-review: #f2c94c;
+        --color-st-blocked: #eb5757;
+        --color-st-shipping: #c084fc;
+        --color-st-done: #4cb782;
+        --color-blue-fg: #60a5fa;
+        --color-cyan-fg: #22d3ee;
+        --color-amber-fg: #fbbf24;
+        --color-green-fg: #34d399;
+        --color-red-fg: #f87171;
+        --font-body: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        background: var(--color-bg);
+        color: var(--color-fg-body);
+        font-family: var(--font-body);
+        font-size: 13px;
+        line-height: 1.5;
+        letter-spacing: -0.005em;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      button, textarea, input { font: inherit; }
+      button { cursor: pointer; }
+      .mono { font-family: var(--font-mono); font-feature-settings: normal; }
+      .dot { width: 7px; height: 7px; border-radius: 99px; background: currentColor; display: inline-block; flex: none; }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+      }
+
+      .history {
+        border-right: 1px solid var(--color-line);
+        background: linear-gradient(180deg, #101114 0%, #0d0e10 100%);
+        min-height: 100vh;
+        padding: 14px;
+        position: sticky;
+        top: 0;
+        align-self: start;
+      }
+
+      .brand {
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--color-fg);
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 14px;
+      }
+
+      .mark {
+        width: 9px;
+        height: 9px;
+        transform: rotate(45deg);
+        background: var(--color-fg);
+        box-shadow: 0 0 18px rgba(247, 248, 248, 0.22);
+      }
+
+      .new-chat {
+        width: 100%;
+        height: 34px;
+        border: 1px solid var(--color-line-hover);
+        border-radius: 7px;
+        color: var(--color-fg);
+        background: rgba(255, 255, 255, 0.035);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        font-weight: 560;
+        transition: background 150ms ease, border-color 150ms ease;
+      }
+      .new-chat:hover { background: rgba(255, 255, 255, 0.06); border-color: var(--color-line-strong); }
+
+      .search {
+        margin: 12px 0 15px;
+        border: 1px solid var(--color-line);
+        border-radius: 7px;
+        background: var(--color-input);
+        height: 34px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+        color: var(--color-fg-faint);
+      }
+      .search input {
+        border: 0;
+        outline: 0;
+        min-width: 0;
+        flex: 1;
+        background: transparent;
+        color: var(--color-fg-body);
+        font-size: 12.5px;
+      }
+
+      .section-label {
+        margin: 16px 4px 7px;
+        font-family: var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 10px;
+        color: var(--color-fg-faint);
+      }
+
+      .thread {
+        border: 1px solid transparent;
+        border-radius: 7px;
+        padding: 9px 9px 8px;
+        color: var(--color-fg-mute);
+        display: grid;
+        gap: 3px;
+      }
+      .thread:hover { background: rgba(255, 255, 255, 0.025); color: var(--color-fg-body); }
+      .thread.active {
+        border-color: var(--color-line);
+        background: var(--color-card);
+        color: var(--color-fg);
+      }
+      .thread-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 560; font-size: 12.5px; }
+      .thread-meta { color: var(--color-fg-faint); font-size: 11px; display: flex; gap: 7px; }
+
+      .workspace {
+        min-width: 0;
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        height: 52px;
+        border-bottom: 1px solid var(--color-line);
+        background: rgba(13, 14, 16, 0.86);
+        backdrop-filter: blur(14px);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        gap: 16px;
+      }
+      .mobile-menu { display: none; }
+      .title-block { min-width: 0; }
+      .page-title { margin: 0; color: var(--color-fg); font-size: 14px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .page-meta { margin-top: 2px; display: flex; align-items: center; gap: 8px; color: var(--color-fg-faint); font-size: 11px; }
+      .top-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+      .chip {
+        min-height: 26px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--color-line);
+        background: rgba(255, 255, 255, 0.025);
+        border-radius: 7px;
+        padding: 0 9px;
+        color: var(--color-fg-mute);
+        font-size: 11.5px;
+      }
+      .chip.live { color: var(--color-blue-fg); border-color: rgba(96, 165, 250, 0.22); }
+      .chip.stop {
+        color: var(--color-red-fg);
+        border-color: rgba(248, 113, 113, 0.28);
+        background: rgba(248, 113, 113, 0.06);
+      }
+
+      .scenario-strip {
+        border-bottom: 1px solid var(--color-line);
+        background: rgba(255, 255, 255, 0.015);
+        padding: 9px 18px;
+        display: flex;
+        gap: 7px;
+        overflow-x: auto;
+      }
+      .scenario-btn {
+        flex: none;
+        height: 28px;
+        border: 1px solid var(--color-line);
+        border-radius: 7px;
+        background: transparent;
+        color: var(--color-fg-mute);
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .scenario-btn.active {
+        color: var(--color-fg);
+        border-color: var(--color-line-strong);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .transcript {
+        width: min(100%, 920px);
+        margin: 0 auto;
+        padding: 26px 24px 120px;
+      }
+
+      .empty-state {
+        min-height: calc(100vh - 230px);
+        display: grid;
+        align-content: center;
+        gap: 22px;
+      }
+      .empty-kicker {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-fg-faint);
+      }
+      .empty-title { margin: 0; color: var(--color-fg); font-size: clamp(28px, 5vw, 46px); line-height: 1.03; letter-spacing: -0.04em; max-width: 720px; }
+      .empty-sub { margin: -8px 0 0; color: var(--color-fg-mute); font-size: 14px; max-width: 620px; }
+      .prompt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 720px; }
+      .prompt-card {
+        border: 1px solid var(--color-line);
+        border-radius: 8px;
+        background: var(--color-card);
+        padding: 13px;
+        color: var(--color-fg-body);
+        text-align: left;
+      }
+      .prompt-card span { display: block; color: var(--color-fg-faint); margin-top: 4px; font-size: 11.5px; }
+
+      .turn {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 13px;
+        margin-bottom: 28px;
+      }
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        border: 1px solid var(--color-line);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-fg-label);
+        background: rgba(255, 255, 255, 0.025);
+        font-weight: 700;
+      }
+      .avatar.user { background: var(--color-fg); color: var(--color-bg); }
+      .bubble {
+        min-width: 0;
+        color: var(--color-fg-body);
+      }
+      .user-text {
+        display: inline-block;
+        max-width: 740px;
+        border: 1px solid var(--color-line);
+        background: var(--color-card);
+        border-radius: 8px;
+        padding: 11px 13px;
+        color: var(--color-fg);
+      }
+      .assistant-body {
+        max-width: 780px;
+      }
+      .assistant-body p { margin: 0 0 12px; }
+      .assistant-body code {
+        font-family: var(--font-mono);
+        border: 1px solid var(--color-line);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.035);
+        padding: 1px 5px;
+        color: var(--color-fg);
+        font-size: 12px;
+      }
+
+      .thinking {
+        border: 1px solid var(--color-line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.018);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .thinking summary {
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 0 12px;
+        color: var(--color-fg-label);
+        user-select: none;
+      }
+      .thinking summary::-webkit-details-marker { display: none; }
+      .thinking-body {
+        border-top: 1px solid var(--color-line);
+        padding: 11px 12px 12px 29px;
+        color: var(--color-fg-mute);
+        font-size: 12.5px;
+      }
+      .pulse {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--color-st-progress);
+        box-shadow: 0 0 0 rgba(94, 106, 210, 0.5);
+        animation: pulse 1.25s infinite;
+      }
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(94, 106, 210, 0.5); }
+        100% { box-shadow: 0 0 0 8px rgba(94, 106, 210, 0); }
+      }
+
+      .tools {
+        border: 1px solid var(--color-line);
+        border-radius: 8px;
+        background: var(--color-muted);
+        overflow: hidden;
+        margin-bottom: 14px;
+      }
+      .tools-head {
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 11px;
+        border-bottom: 1px solid var(--color-line);
+        color: var(--color-fg-mute);
+      }
+      .tools-head span:last-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tool-row {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 38px;
+        padding: 8px 11px;
+        border-bottom: 1px solid var(--color-line);
+      }
+      .tool-row:last-child { border-bottom: 0; }
+      .tool-name { color: var(--color-fg); font-weight: 600; }
+      .tool-input { color: var(--color-fg-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .status { font-family: var(--font-mono); font-size: 10.5px; border: 1px solid var(--color-line); border-radius: 99px; padding: 2px 7px; color: var(--color-fg-mute); }
+      .status.ok { color: var(--color-green-fg); border-color: rgba(52, 211, 153, 0.24); }
+      .status.run { color: var(--color-blue-fg); border-color: rgba(96, 165, 250, 0.24); }
+      .status.fail { color: var(--color-red-fg); border-color: rgba(248, 113, 113, 0.24); }
+      .status.warn { color: var(--color-amber-fg); border-color: rgba(251, 191, 36, 0.24); }
+
+      .notice {
+        border: 1px solid var(--color-line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.025);
+        padding: 11px 12px;
+        margin: 0 0 13px;
+        color: var(--color-fg-mute);
+      }
+      .notice.warn { border-color: rgba(251, 191, 36, 0.24); color: var(--color-amber-fg); background: rgba(251, 191, 36, 0.055); }
+      .notice.fail { border-color: rgba(248, 113, 113, 0.24); color: var(--color-red-fg); background: rgba(248, 113, 113, 0.055); }
+
+      .typing {
+        display: inline-flex;
+        gap: 5px;
+        align-items: center;
+        color: var(--color-fg-faint);
+      }
+      .typing i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: dot 1s infinite ease-in-out;
+      }
+      .typing i:nth-child(2) { animation-delay: 120ms; }
+      .typing i:nth-child(3) { animation-delay: 240ms; }
+      @keyframes dot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+
+      .composer-wrap {
+        position: sticky;
+        bottom: 0;
+        z-index: 8;
+        background: linear-gradient(180deg, rgba(13, 14, 16, 0) 0%, rgba(13, 14, 16, 0.96) 24%, #0d0e10 100%);
+        padding: 36px 24px 18px;
+      }
+      .composer {
+        width: min(100%, 920px);
+        margin: 0 auto;
+        border: 1px solid var(--color-line-hover);
+        border-radius: 10px;
+        background: var(--color-input);
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+        overflow: hidden;
+      }
+      .composer textarea {
+        display: block;
+        width: 100%;
+        min-height: 62px;
+        max-height: 180px;
+        resize: vertical;
+        border: 0;
+        outline: 0;
+        padding: 13px 14px 8px;
+        background: transparent;
+        color: var(--color-fg);
+      }
+      .composer textarea::placeholder { color: var(--color-fg-faint); }
+      .composer-foot {
+        border-top: 1px solid var(--color-line);
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px;
+        gap: 10px;
+      }
+      .composer-tools { display: flex; gap: 6px; min-width: 0; }
+      .mini-btn {
+        height: 27px;
+        border: 1px solid var(--color-line);
+        border-radius: 7px;
+        color: var(--color-fg-mute);
+        background: rgba(255, 255, 255, 0.02);
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+      .send {
+        height: 29px;
+        border: 0;
+        border-radius: 7px;
+        padding: 0 12px;
+        background: var(--color-fg);
+        color: var(--color-bg);
+        font-weight: 650;
+      }
+      .send.stop {
+        background: var(--color-st-blocked);
+        color: #210909;
+      }
+
+      .scenario { display: none; }
+      .scenario.active { display: block; }
+
+      @media (max-width: 860px) {
+        .app { grid-template-columns: 1fr; }
+        .history { display: none; }
+        .mobile-menu {
+          display: inline-flex;
+          height: 29px;
+          border: 1px solid var(--color-line);
+          border-radius: 7px;
+          background: transparent;
+          color: var(--color-fg-mute);
+          align-items: center;
+          padding: 0 9px;
+        }
+        .topbar { padding: 0 12px; }
+        .top-actions { display: none; }
+        .transcript { padding: 20px 14px 128px; }
+        .prompt-grid { grid-template-columns: 1fr; }
+        .turn { grid-template-columns: 28px minmax(0, 1fr); gap: 9px; }
+        .avatar { width: 24px; height: 24px; border-radius: 6px; font-size: 11px; }
+        .user-text { display: block; max-width: 100%; }
+        .tool-row { grid-template-columns: 1fr; gap: 4px; }
+        .tool-row .status { justify-self: start; }
+        .composer-wrap { padding: 30px 10px 10px; }
+        .composer-foot { align-items: stretch; flex-direction: column; }
+        .composer-tools { overflow-x: auto; }
+        .send { width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="history" aria-label="Chat history">
+        <div class="brand"><span class="mark"></span><span>pi-harness</span></div>
+        <button class="new-chat" type="button">+ New chat</button>
+        <label class="search">
+          <span class="mono">/</span>
+          <input value="" placeholder="Search chats" />
+        </label>
+        <div class="section-label">Pinned</div>
+        <div class="thread active">
+          <div class="thread-top"><span class="dot" style="color: var(--color-st-progress)"></span><span class="thread-title">Explain live stream architecture</span></div>
+          <div class="thread-meta mono"><span>main</span><span>now</span></div>
+        </div>
+        <div class="thread">
+          <div class="thread-top"><span class="dot" style="color: var(--color-st-done)"></span><span class="thread-title">Where are task phases persisted?</span></div>
+          <div class="thread-meta mono"><span>main</span><span>2h</span></div>
+        </div>
+        <div class="section-label">Recent</div>
+        <div class="thread">
+          <div class="thread-top"><span class="dot" style="color: var(--color-fg-faint)"></span><span class="thread-title">Dashboard route map</span></div>
+          <div class="thread-meta mono"><span>feature/chat</span><span>Fri</span></div>
+        </div>
+        <div class="thread">
+          <div class="thread-top"><span class="dot" style="color: var(--color-st-blocked)"></span><span class="thread-title">Why did auth fail?</span></div>
+          <div class="thread-meta mono"><span>main</span><span>Thu</span></div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <button class="mobile-menu" type="button">Chats</button>
+          <div class="title-block">
+            <h1 class="page-title">Explain live stream architecture</h1>
+            <div class="page-meta mono"><span>/Users/amankumar/Documents/pi/pi-harness</span><span>main</span></div>
+          </div>
+          <div class="top-actions">
+            <span class="chip mono">crofai/gpt-5-codex</span>
+            <span class="chip mono">thinking medium</span>
+            <span class="chip live mono"><span class="dot"></span><span id="stateLabel">streaming</span></span>
+            <button class="chip stop mono" type="button" id="stopChip">Stop</button>
+          </div>
+        </header>
+
+        <nav class="scenario-strip" aria-label="Mock scenarios">
+          <button class="scenario-btn active" type="button" data-scenario="empty">Empty</button>
+          <button class="scenario-btn" type="button" data-scenario="streaming">Streaming</button>
+          <button class="scenario-btn" type="button" data-scenario="tools">Tool-heavy</button>
+          <button class="scenario-btn" type="button" data-scenario="stopped">Stopped</button>
+          <button class="scenario-btn" type="button" data-scenario="error">Error</button>
+        </nav>
+
+        <section class="transcript">
+          <div class="scenario active" id="scenario-empty">
+            <div class="empty-state">
+              <div>
+                <div class="empty-kicker">repo scoped assistant</div>
+                <h2 class="empty-title">Ask the agent about this codebase.</h2>
+                <p class="empty-sub">This chat can inspect the repo, summarize flows, explain errors, and hand off implementation work to a task when you are ready.</p>
+              </div>
+              <div class="prompt-grid">
+                <button class="prompt-card" type="button">Explain how live events reach the dashboard<span>Trace backend store, SSE proxy, and client reducer.</span></button>
+                <button class="prompt-card" type="button">Find where Pi sessions are created<span>Show bridge code and SDK assumptions.</span></button>
+                <button class="prompt-card" type="button">What would break if EventSource reconnects?<span>List duplicate, cursor, and stale-turn cases.</span></button>
+                <button class="prompt-card" type="button">Prepare a task for editable chat mode<span>Convert discussion into a structured implementation ticket.</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="scenario" id="scenario-streaming">
+            <article class="turn">
+              <div class="avatar user">A</div>
+              <div class="bubble"><div class="user-text">How does the live event stream work from the orchestrator to the dashboard?</div></div>
+            </article>
+            <article class="turn">
+              <div class="avatar">pi</div>
+              <div class="bubble">
+                <div class="assistant-body">
+                  <details class="thinking" open>
+                    <summary><span class="pulse"></span><span class="mono">Thinking for 8s</span><span>mapping event ownership and replay behavior</span></summary>
+                    <div class="thinking-body">I need to connect the append-only EventStore, LiveEventStore sequence cursor, Next.js proxy, and client hydration. I should call out that current phase events are task/run scoped and chat should get its own event domain.</div>
+                  </details>
+                  <div class="tools">
+                    <div class="tools-head"><span class="mono">Tools</span><span class="mono">3 running/completed</span></div>
+                    <div class="tool-row"><span class="tool-name mono">rg</span><span class="tool-input mono">LiveEventStore | agent.event.appended</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">apps/orchestrator/src/http/routes/live.ts</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">apps/dashboard/lib/use-events.ts</span><span class="status run">streaming</span></div>
+                  </div>
+                  <p>The live stream is a thin SSE path around an append-only event log. The orchestrator writes an <code>AgentEvent</code>, mirrors it into <code>LiveEventStore</code>, assigns a monotonic sequence, then sends it to subscribers matching <code>runId</code>, <code>taskId</code>, or dashboard scope.</p>
+                  <p>The dashboard proxy keeps the upstream <code>text/event-stream</code> body intact, and the client hydrates date fields before merging the new envelopes into the local timeline <span class="typing"><i></i><i></i><i></i></span></p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="scenario" id="scenario-tools">
+            <article class="turn">
+              <div class="avatar user">A</div>
+              <div class="bubble"><div class="user-text">Find every place that drops Pi thinking or tool updates.</div></div>
+            </article>
+            <article class="turn">
+              <div class="avatar">pi</div>
+              <div class="bubble">
+                <div class="assistant-body">
+                  <details class="thinking">
+                    <summary><span class="dot" style="color: var(--color-st-done)"></span><span class="mono">Thinking collapsed</span><span>6 source checks</span></summary>
+                    <div class="thinking-body">The bridge is the narrowest change. It comments that thinking_delta is intentionally dropped and has no case for tool_execution_update.</div>
+                  </details>
+                  <div class="tools">
+                    <div class="tools-head"><span class="mono">Tools</span><span class="mono">5 calls / 1 warning</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">packages/pi-bridge/src/agent-session.ts:198</span><span class="status warn">finding</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">node_modules/.../docs/sdk.md</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">node_modules/.../docs/json.md</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">rg</span><span class="tool-input mono">tool_execution_update</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">packages/shared/src/types/event.ts</span><span class="status ok">done</span></div>
+                  </div>
+                  <p>The bridge currently drops thinking at <code>packages/pi-bridge/src/agent-session.ts</code> and only forwards tool start/end. There is no shared event kind for thinking deltas or tool updates yet, so the dashboard cannot render a Claude-style thinking accordion or live tool stdout without extending the event contract.</p>
+                  <p>I would add bridge events first, then map them into chat-specific events instead of stretching the existing task/run <code>AgentEvent</code> union.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="scenario" id="scenario-stopped">
+            <article class="turn">
+              <div class="avatar user">A</div>
+              <div class="bubble"><div class="user-text">Audit the whole repo for stale docs.</div></div>
+            </article>
+            <article class="turn">
+              <div class="avatar">pi</div>
+              <div class="bubble">
+                <div class="assistant-body">
+                  <div class="notice warn mono">Stopped by user at 00:18. Partial answer and tool trace were preserved.</div>
+                  <details class="thinking">
+                    <summary><span class="dot" style="color: var(--color-amber-fg)"></span><span class="mono">Thinking stopped</span><span>partial summary available</span></summary>
+                    <div class="thinking-body">The scan is broad. I should narrow to docs that mention pipeline behavior and compare them against code.</div>
+                  </details>
+                  <div class="tools">
+                    <div class="tools-head"><span class="mono">Tools</span><span class="mono">interrupted</span></div>
+                    <div class="tool-row"><span class="tool-name mono">rg</span><span class="tool-input mono">orchestrate|brainstorm|verify docs</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">read</span><span class="tool-input mono">docs/redesign/implementation-status.md</span><span class="status warn">aborted</span></div>
+                  </div>
+                  <p>I found likely stale areas in the redesign docs, but the full audit was stopped before I could verify each claim against code. Resume with a narrower prompt such as <code>audit docs/redesign only</code> for a faster pass.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="scenario" id="scenario-error">
+            <article class="turn">
+              <div class="avatar user">A</div>
+              <div class="bubble"><div class="user-text">Summarize the Pi SDK docs.</div></div>
+            </article>
+            <article class="turn">
+              <div class="avatar">pi</div>
+              <div class="bubble">
+                <div class="assistant-body">
+                  <div class="notice fail"><span class="mono">auth_error</span> Missing API key for provider <span class="mono">crofai</span>. Add the key to <span class="mono">.env.harness</span> or switch models.</div>
+                  <div class="tools">
+                    <div class="tools-head"><span class="mono">Diagnostics</span><span class="mono">no model call made</span></div>
+                    <div class="tool-row"><span class="tool-name mono">config</span><span class="tool-input mono">load .env.harness</span><span class="status ok">done</span></div>
+                    <div class="tool-row"><span class="tool-name mono">auth</span><span class="tool-input mono">resolve provider credentials</span><span class="status fail">failed</span></div>
+                  </div>
+                  <p>The chat could not start because credentials failed before the SDK session was created. The UI should keep this as a recoverable thread-level error, not a blank transcript.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <div class="composer-wrap">
+          <form class="composer">
+            <textarea placeholder="Ask about this codebase. Cmd+Enter to send, Esc to stop while streaming."></textarea>
+            <div class="composer-foot">
+              <div class="composer-tools">
+                <button class="mini-btn mono" type="button">repo context</button>
+                <button class="mini-btn mono" type="button">read-only</button>
+                <button class="mini-btn mono" type="button">follow-up</button>
+              </div>
+              <button class="send stop" type="button" id="sendButton">Stop</button>
+            </div>
+          </form>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const labels = {
+        empty: "idle",
+        streaming: "streaming",
+        tools: "complete",
+        stopped: "stopped",
+        error: "blocked"
+      };
+
+      const buttons = Array.from(document.querySelectorAll(".scenario-btn"));
+      const panels = Array.from(document.querySelectorAll(".scenario"));
+      const stateLabel = document.getElementById("stateLabel");
+      const sendButton = document.getElementById("sendButton");
+      const stopChip = document.getElementById("stopChip");
+
+      function setScenario(name) {
+        for (const button of buttons) button.classList.toggle("active", button.dataset.scenario === name);
+        for (const panel of panels) panel.classList.toggle("active", panel.id === "scenario-" + name);
+        stateLabel.textContent = labels[name] || "idle";
+        const streaming = name === "streaming";
+        sendButton.textContent = streaming ? "Stop" : "Send";
+        sendButton.classList.toggle("stop", streaming);
+        stopChip.style.display = streaming ? "inline-flex" : "none";
+      }
+
+      for (const button of buttons) {
+        button.addEventListener("click", () => {
+          history.replaceState(null, "", "#" + button.dataset.scenario);
+          setScenario(button.dataset.scenario);
+        });
+      }
+
+      const initial = location.hash.replace("#", "");
+      setScenario(labels[initial] ? initial : "empty");
+    </script>
+  </body>
+</html>

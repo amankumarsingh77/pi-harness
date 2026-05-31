@@ -15,6 +15,7 @@ import { TaskScheduler } from "./runner/scheduler.js";
 import { CancellationRegistry } from "./runner/cancellation.js";
 import type { PhaseDeps } from "./runner/phase-prompts.js";
 import { buildServer } from "./http/server.js";
+import { ChatSessionStore } from "./adapters/chat-store.js";
 import { TaskWorkflowService } from "./services/task-workflow-service.js";
 
 const execFileAsync = promisify(execFile);
@@ -116,6 +117,8 @@ async function main(): Promise<void> {
     "scheduler recovery sweep complete",
   );
 
+  const chatStore = new ChatSessionStore({ stateDir: config.stateDir });
+
   const app = buildServer({
     runs,
     events,
@@ -129,6 +132,7 @@ async function main(): Promise<void> {
     pinoLogger: pinoRoot,
     liveEvents,
     preflightSteps,
+    chatStore,
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   log.info({ port: config.port }, "orchestrator listening");

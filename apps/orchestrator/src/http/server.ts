@@ -24,6 +24,9 @@ import { registerPlanRoutes } from "./routes/plan.js";
 import { registerLiveEventStream } from "./routes/live.js";
 import { registerMissionRoutes } from "./routes/mission.js";
 import { registerVerifierRoutes, type VerifierRouteRunners } from "./routes/verifier.js";
+import { registerChatRoutes } from "./routes/chat.js";
+import { ChatSessionStore } from "../adapters/chat-store.js";
+import type { ChatSessionStore as ChatSessionStoreType } from "../adapters/chat-store.js";
 import { registerModelOptionRoutes } from "./routes/model-options.js";
 
 export type ServerDeps = {
@@ -50,6 +53,10 @@ export type ServerDeps = {
   claimLedger?: ClaimLedgerStoreType;
   verifierRunners?: VerifierRouteRunners;
   workflow?: TaskWorkflowService;
+  // Optional in tests that don't exercise chat routes. Production constructs one from stateDir.
+  chatStore?: ChatSessionStoreType;
+  // Injectable createAgentSession for chat routes. Tests provide a scripted mock; production uses the live SDK.
+  chatCreateAgentSession?: import("../agents/chat-session.js").CreateAgentSessionFn;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -150,6 +157,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     preflightSteps,
     ...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
     ...(deps.cancellation ? { cancellation: deps.cancellation } : {}),
+  });
+  // Chat routes — always registered; chatStore defaults to a new instance when not injected.
+  const chatStore = deps.chatStore ?? new ChatSessionStore({ stateDir });
+  registerChatRoutes(app, {
+    chatStore,
+    ...(deps.chatCreateAgentSession ? { createAgentSession: deps.chatCreateAgentSession } : {}),
   });
   return app;
 }

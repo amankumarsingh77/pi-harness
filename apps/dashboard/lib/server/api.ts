@@ -1,5 +1,6 @@
 import "server-only";
-import { api, ApiError, type Api, type BrainstormBundle } from "@/lib/api";
+import { api, ApiError, type Api, type BrainstormBundle, type ChatThreadDetail } from "@/lib/api";
+import type { ChatThread } from "@pi-harness/shared";
 import {
   MOCK_BRAINSTORM_ARTIFACT,
   MOCK_EVENTS,
@@ -83,4 +84,50 @@ export const orchestrator: Api = {
   getPlanDiff: (taskId, kind) => real.getPlanDiff(taskId, kind),
   submitPlanArtifactEdit: (taskId, payload) => real.submitPlanArtifactEdit(taskId, payload),
   restartPlan: (taskId, payload) => real.restartPlan(taskId, payload),
+  createChatThread: (input) => real.createChatThread(input),
+  listChatThreads: async (): Promise<{ threads: ChatThread[] }> => {
+    try {
+      return await real.listChatThreads();
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
+        return { threads: [] };
+      }
+      throw e;
+    }
+  },
+  listChatProviders: async () => {
+    try {
+      return await real.listChatProviders();
+    } catch (e) {
+      // Soft-fail: an unreachable orchestrator should not crash the page; the
+      // picker falls back to the thread's current model only.
+      if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
+        return { providers: [] };
+      }
+      throw e;
+    }
+  },
+  getChatThread: (threadId) => real.getChatThread(threadId),
+  postChatMessage: (threadId, payload) => real.postChatMessage(threadId, payload),
+  updateChatModel: (threadId, model) => real.updateChatModel(threadId, model),
+  stopChatTurn: (threadId) => real.stopChatTurn(threadId),
 };
+
+/**
+ * Server-only helper for the /chat/[threadId] route: returns the thread detail,
+ * or `thread: null` when the orchestrator reports it missing/unavailable so the
+ * page can call notFound(). Kept separate from the Api-typed `orchestrator`
+ * object because the client Api contract always resolves a concrete thread.
+ */
+export async function getChatThreadOrNull(
+  threadId: string,
+): Promise<{ thread: ChatThread | null; messages: ChatThreadDetail["messages"] }> {
+  try {
+    return await real.getChatThread(threadId);
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
+      return { thread: null, messages: [] };
+    }
+    throw e;
+  }
+}

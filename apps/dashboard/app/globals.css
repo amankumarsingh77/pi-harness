@@ -111,6 +111,19 @@ html, body {
   animation: blink 1s steps(1) infinite;
 }
 
+/* Animated "thinking" dots shown before the first assistant token. */
+@keyframes typing-bounce {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 0.9; transform: translateY(-2px); }
+}
+.typing-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 9999px;
+  background: var(--color-fg-mute);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
 .scroll-hide {
   scrollbar-width: none;
   -ms-overflow-style: none;

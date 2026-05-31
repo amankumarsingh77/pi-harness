@@ -1,6 +1,7 @@
 "use client";
 
-import { api, type Api } from "@/lib/api";
+import { api, type Api, type ChatThreadDetail } from "@/lib/api";
+import type { ChatModelSelection } from "@pi-harness/shared";
 
 // All client requests are rewritten to /api/proxy/* so the orchestrator URL
 // is never exposed to the browser.
@@ -19,6 +20,8 @@ export const queryKeys = {
   mission: (taskId: string) => ["tasks", taskId, "mission"] as const,
   artifact: (taskId: string, name: "brainstorm" | "plan" | "proof-report") =>
     ["tasks", taskId, "artifacts", name] as const,
+  chatThreads: ["chat", "threads"] as const,
+  chatThread: (id: string) => ["chat", "threads", id] as const,
 };
 
 export const queries = {
@@ -54,6 +57,14 @@ export const queries = {
     queryKey: queryKeys.artifact(taskId, name),
     queryFn: () => proxied.getArtifact<T>(taskId, name),
   }),
+  listChatThreads: () => ({
+    queryKey: queryKeys.chatThreads,
+    queryFn: () => proxied.listChatThreads(),
+  }),
+  getChatThread: (threadId: string) => ({
+    queryKey: queryKeys.chatThread(threadId),
+    queryFn: (): Promise<ChatThreadDetail> => proxied.getChatThread(threadId),
+  }),
 };
 
 export const mutations = {
@@ -68,5 +79,20 @@ export const mutations = {
   runVerifier: (id: string) => ({
     mutationFn: (input?: Parameters<Api["runVerifier"]>[1]) =>
       proxied.runVerifier(id, input),
+  }),
+  createChatThread: () => ({
+    mutationFn: (input: Parameters<Api["createChatThread"]>[0]) =>
+      proxied.createChatThread(input),
+  }),
+  postChatMessage: (threadId: string) => ({
+    mutationFn: (payload: { text: string }) =>
+      proxied.postChatMessage(threadId, payload),
+  }),
+  updateChatModel: (threadId: string) => ({
+    mutationFn: (model: ChatModelSelection) =>
+      proxied.updateChatModel(threadId, model),
+  }),
+  stopChatTurn: (threadId: string) => ({
+    mutationFn: () => proxied.stopChatTurn(threadId),
   }),
 };
