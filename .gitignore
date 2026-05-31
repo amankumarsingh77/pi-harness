@@ -22,8 +22,15 @@ graphify-out/
 .playwright-mcp/
 skills-lock.json
 
-# Docs — kept local, not pushed
-docs/
+# Docs — kept local, not pushed …
+docs/*
+# … except spec artifacts and UI mocks, which are committed for PR review.
+# (Re-include the dir first, then its contents — git won't descend into an
+#  excluded dir, so each level must be un-ignored explicitly.)
+!docs/spec/
+!docs/spec/**
+!docs/mocks/
+!docs/mocks/**
 
 # OS / editor noise
 .DS_Store
