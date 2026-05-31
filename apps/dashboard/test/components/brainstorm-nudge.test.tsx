@@ -91,10 +91,12 @@ describe("NudgeInput", () => {
 });
 
 describe("MockPagePreview", () => {
-  it("switches iframe content between mock pages", () => {
+  it("switches the screenshot src between mock pages", () => {
     render(
       <MockPagePreview
         title="Split pane review"
+        taskId="t1"
+        mockId="mock-a"
         pages={[
           {
             pageId: "task-detail",
@@ -108,19 +110,23 @@ describe("MockPagePreview", () => {
             htmlPath: ".harness/t1/mocks/mock-a/brainstorm-review.html",
           },
         ]}
-        htmlByPageId={{
-          "task-detail": "<h1>Task detail page</h1>",
-          "brainstorm-review": "<h1>Brainstorm review page</h1>",
-        }}
       />,
     );
 
-    const iframe = screen.getByTitle(/mock preview split pane review/i);
-    expect(iframe).toHaveAttribute("srcdoc", "<h1>Task detail page</h1>");
+    const img = screen.getByRole("img", {
+      name: /mock preview split pane review/i,
+    }) as HTMLImageElement;
+    expect(img.src).toContain(
+      "/api/proxy/tasks/t1/brainstorm/mocks/mock-a/pages/task-detail/png/desktop",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Brainstorm review" }));
 
-    expect(iframe).toHaveAttribute("srcdoc", "<h1>Brainstorm review page</h1>");
+    expect(
+      (screen.getByRole("img", { name: /brainstorm review/i }) as HTMLImageElement).src,
+    ).toContain(
+      "/api/proxy/tasks/t1/brainstorm/mocks/mock-a/pages/brainstorm-review/png/desktop",
+    );
   });
 });
 

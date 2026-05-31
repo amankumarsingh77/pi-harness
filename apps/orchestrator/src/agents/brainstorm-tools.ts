@@ -5,6 +5,9 @@ import { join } from "node:path";
 import type { Artifact, ArtifactKind, BrainstormMock } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
+import { findTokenViolations } from "./token-conformance.js";
+import type { DesignSystemStore } from "./design-system-store.js";
+import type { MockRenderer } from "./mock-renderer.js";
 
 // Mirrors the SDK's AgentToolResult shape without depending on the SDK package
 // here — that coupling lives in pi-bridge. ToolDefinition shape is structural;
@@ -166,8 +169,6 @@ export type MarkReadyDetails = {
   path?: string;
 };
 export type ReplyToUserDetails = { replyId: string };
-export type SubmitMockChoicesDetails = { proposed: string[] };
-export type WriteMockRevisionDetails = { revised: string };
 
 function baseMockId(mockId: string): string {
   return mockId.replace(/-rev\d+$/, "");
@@ -469,19 +470,47 @@ function hasWebResearch(cwd: string, taskId: string): boolean {
   );
 }
 
-export function makeSubmitMockChoicesTool(deps: {
-  store: ArtifactsStore;
+type SubmitMocksDetails = { ok: boolean; proposed?: string[]; violations?: unknown };
+type SubmitMockRevisionDetails = { ok: boolean; revised?: string; violations?: unknown };
+
+export function makeSubmitMocksTool(deps: {
+  store: Pick<ArtifactsStore, "writeBrainstormMock" | "writeBrainstormMockRender">;
+  designSystem: Pick<DesignSystemStore, "read" | "readDraftTokens">;
+  renderer: Pick<MockRenderer, "render">;
   bus: BrainstormEventBus;
   cwd: string;
   taskId: string;
-}): ToolLike<typeof SubmitMockChoicesParams, SubmitMockChoicesDetails> {
+}): ToolLike<typeof SubmitMockChoicesParams, SubmitMocksDetails> {
   return {
-    name: "submit_mock_choices",
-    label: "Submit mock choices",
+    name: "submit_mocks",
+    label: "Submit mocks",
     description:
-      "Write one or more static HTML brainstorm mock choices and publish them for the user to open, edit, or choose. After calling this, halt your turn.",
+      "Write one or more mock choices as HTML that consumes the project design tokens (var(--…)). Mocks are rendered to screenshots. After calling this, halt your turn.",
     parameters: SubmitMockChoicesParams,
     async execute(_id, params) {
+      // Validate every page across every mock BEFORE any render or persist
+      // side-effect. A single hard-coded core token rejects the whole call so
+      // the agent gets a clean retry with no partially-written mock set.
+      for (const mock of params.mocks) {
+        for (const page of mock.pages) {
+          const violations = findTokenViolations(page.html);
+          if (violations.length > 0) {
+            return {
+              content: [
+                { type: "text", text: "rejected: hard-coded core tokens; use var(--…)" },
+              ],
+              details: {
+                ok: false,
+                violations: { mockId: mock.mockId, pageId: page.pageId, violations },
+              },
+              terminate: true,
+            };
+          }
+        }
+      }
+
+      const ds = await deps.designSystem.read(deps.cwd);
+      const tokensCss = ds.exists ? ds.tokensCss : await deps.designSystem.readDraftTokens(deps.cwd, deps.taskId);
       const mockSetId = `mset_${randomUUID()}`;
       const proposed: string[] = [];
       for (const input of params.mocks) {
@@ -497,6 +526,8 @@ export function makeSubmitMockChoicesTool(deps: {
             title: page.title,
             ...(page.summary !== undefined ? { summary: page.summary } : {}),
             htmlPath: `.harness/${deps.taskId}/mocks/${input.mockId}/${page.pageId}.html`,
+            desktopPngPath: `.harness/${deps.taskId}/mocks/${input.mockId}/${page.pageId}.desktop.png`,
+            mobilePngPath: `.harness/${deps.taskId}/mocks/${input.mockId}/${page.pageId}.mobile.png`,
           })),
         };
         await deps.store.writeBrainstormMock(
@@ -505,6 +536,16 @@ export function makeSubmitMockChoicesTool(deps: {
           mock,
           input.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
         );
+        for (const page of input.pages) {
+          const png = await deps.renderer.render({ html: page.html, tokensCss });
+          await deps.store.writeBrainstormMockRender(
+            deps.cwd,
+            deps.taskId,
+            input.mockId,
+            page.pageId,
+            png,
+          );
+        }
         await deps.bus.publish({
           kind: "brainstorm_mock_proposed",
           mockSetId,
@@ -513,33 +554,52 @@ export function makeSubmitMockChoicesTool(deps: {
         proposed.push(input.mockId);
       }
       return {
-        content: [{ type: "text", text: "submitted mock choices" }],
-        details: { proposed },
+        content: [{ type: "text", text: "submitted mocks" }],
+        details: { ok: true, proposed },
         terminate: true,
       };
     },
   };
 }
 
-export function makeWriteMockRevisionTool(deps: {
-  store: ArtifactsStore;
+export function makeSubmitMockRevisionTool(deps: {
+  store: Pick<
+    ArtifactsStore,
+    "writeBrainstormMock" | "writeBrainstormMockRender" | "readBrainstormMockManifest"
+  >;
+  designSystem: Pick<DesignSystemStore, "read" | "readDraftTokens">;
+  renderer: Pick<MockRenderer, "render">;
   bus: BrainstormEventBus;
   cwd: string;
   taskId: string;
-}): ToolLike<typeof WriteMockRevisionParams, WriteMockRevisionDetails> {
+}): ToolLike<typeof WriteMockRevisionParams, SubmitMockRevisionDetails> {
   return {
-    name: "write_mock_revision",
-    label: "Write mock revision",
+    name: "submit_mock_revision",
+    label: "Submit mock revision",
     description:
-      "Write a revised static HTML mock after the user requested edits to an existing mock.",
+      "Write a revised mock as HTML that consumes the project design tokens (var(--…)) after the user requested edits to an existing mock. The revision is rendered to screenshots. After calling this, halt your turn.",
     parameters: WriteMockRevisionParams,
     async execute(_id, params) {
+      // Reject hard-coded core tokens before reading the manifest or rendering.
+      for (const page of params.pages) {
+        const violations = findTokenViolations(page.html);
+        if (violations.length > 0) {
+          return {
+            content: [{ type: "text", text: "rejected: hard-coded core tokens; use var(--…)" }],
+            details: { ok: false, violations: { pageId: page.pageId, violations } },
+            terminate: true,
+          };
+        }
+      }
+
       const manifest = await deps.store.readBrainstormMockManifest(deps.cwd, deps.taskId);
-      const mockSetId = `mset_${randomUUID()}`;
       const mockId = nextRevisionMockId(
         params.sourceMockId,
         manifest.mocks.map((mock) => mock.mockId),
       );
+      const ds = await deps.designSystem.read(deps.cwd);
+      const tokensCss = ds.exists ? ds.tokensCss : await deps.designSystem.readDraftTokens(deps.cwd, deps.taskId);
+      const mockSetId = `mset_${randomUUID()}`;
       const mock: BrainstormMock = {
         mockId,
         title: params.title,
@@ -553,6 +613,8 @@ export function makeWriteMockRevisionTool(deps: {
           title: page.title,
           ...(page.summary !== undefined ? { summary: page.summary } : {}),
           htmlPath: `.harness/${deps.taskId}/mocks/${mockId}/${page.pageId}.html`,
+          desktopPngPath: `.harness/${deps.taskId}/mocks/${mockId}/${page.pageId}.desktop.png`,
+          mobilePngPath: `.harness/${deps.taskId}/mocks/${mockId}/${page.pageId}.mobile.png`,
         })),
       };
       await deps.store.writeBrainstormMock(
@@ -561,6 +623,16 @@ export function makeWriteMockRevisionTool(deps: {
         mock,
         params.pages.map((page) => ({ pageId: page.pageId, html: page.html })),
       );
+      for (const page of params.pages) {
+        const png = await deps.renderer.render({ html: page.html, tokensCss });
+        await deps.store.writeBrainstormMockRender(
+          deps.cwd,
+          deps.taskId,
+          mockId,
+          page.pageId,
+          png,
+        );
+      }
       await deps.bus.publish({
         kind: "brainstorm_mock_revised",
         mockSetId,
@@ -569,7 +641,8 @@ export function makeWriteMockRevisionTool(deps: {
       });
       return {
         content: [{ type: "text", text: "wrote mock revision" }],
-        details: { revised: mockId },
+        details: { ok: true, revised: mockId },
+        terminate: true,
       };
     },
   };

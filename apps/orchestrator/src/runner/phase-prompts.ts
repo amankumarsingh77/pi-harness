@@ -5,6 +5,8 @@ import type {
   PiBridgeEvent,
 } from "@pi-harness/pi-bridge";
 import type { ArtifactsStore } from "../agents/artifacts-store.js";
+import type { DesignSystemStore } from "../agents/design-system-store.js";
+import type { MockRenderer } from "../agents/mock-renderer.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { PreflightStepStore } from "../adapters/preflight-step-store.js";
 import { PhaseEventLogStore } from "../adapters/phase-event-log-store.js";
@@ -30,6 +32,8 @@ export type PhaseDeps = {
   // phases route through it as each is migrated.
   createAgentSession: (opts: AgentSessionOptions) => Promise<AgentSession>;
   store: ArtifactsStore;
+  designSystem: DesignSystemStore;
+  mockRenderer: MockRenderer;
   eventStore: EventStore;
   preflightSteps?: PreflightStepStore;
   claimLedger?: ClaimLedgerStore;
@@ -107,6 +111,8 @@ export async function runPhase(
         runId: input.runId,
         cwd: deps.cwd,
         store: deps.store,
+        designSystem: deps.designSystem,
+        renderer: deps.mockRenderer,
         bus,
         eventStore: deps.eventStore,
         ...(deps.claimLedger !== undefined ? { claimLedger: deps.claimLedger } : {}),

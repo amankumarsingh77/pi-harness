@@ -5,9 +5,20 @@ import { join } from "node:path";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { BrainstormEventBus } from "../../src/agents/brainstorm-event-bus.js";
 import {
-  makeSubmitMockChoicesTool,
-  makeWriteMockRevisionTool,
+  makeSubmitMockRevisionTool,
+  makeSubmitMocksTool,
 } from "../../src/agents/brainstorm-tools.js";
+
+// The token-bound tools read the design system snapshot for tokensCss and
+// render every page to screenshots. These fakes keep the storage/event
+// assertions focused without a real DesignSystemStore or headless browser.
+function makeRenderDeps() {
+  const designSystem = { read: vi.fn(async () => ({ tokensCss: ":root{--fg:#000;}", exists: true })) };
+  const renderer = {
+    render: vi.fn(async () => ({ desktopPng: Buffer.from("D"), mobilePng: Buffer.from("M") })),
+  };
+  return { designSystem, renderer };
+}
 
 let scratch: string;
 let cwd: string;
@@ -125,10 +136,11 @@ describe("brainstorm mock artifact storage", () => {
 });
 
 describe("brainstorm mock tools", () => {
-  it("submit_mock_choices writes files, publishes proposal events, and terminates", async () => {
+  it("submit_mocks writes files, renders pages, publishes proposal events, and terminates", async () => {
     const store = new ArtifactsStore();
     const { bus, eventAppends } = makeBus();
-    const tool = makeSubmitMockChoicesTool({ store, bus, cwd, taskId: TASK });
+    const { designSystem, renderer } = makeRenderDeps();
+    const tool = makeSubmitMocksTool({ store, designSystem, renderer, bus, cwd, taskId: TASK });
 
     const result = await fakeExecute(tool, {
       mocks: [
@@ -162,7 +174,8 @@ describe("brainstorm mock tools", () => {
     });
 
     expect(result.terminate).toBe(true);
-    expect(result.details).toEqual({ proposed: ["mock-a"] });
+    expect(result.details).toEqual({ ok: true, proposed: ["mock-a"] });
+    expect(renderer.render).toHaveBeenCalledTimes(2);
     expect(eventAppends).toHaveLength(1);
     expect(eventAppends[0]).toMatchObject({
       kind: "brainstorm_mock_proposed",
@@ -194,10 +207,11 @@ describe("brainstorm mock tools", () => {
     ).resolves.toContain("Task detail");
   });
 
-  it("submit_mock_choices publishes one mockSetId for every mock in a tool call", async () => {
+  it("submit_mocks publishes one mockSetId for every mock in a tool call", async () => {
     const store = new ArtifactsStore();
     const { bus, eventAppends } = makeBus();
-    const tool = makeSubmitMockChoicesTool({ store, bus, cwd, taskId: TASK });
+    const { designSystem, renderer } = makeRenderDeps();
+    const tool = makeSubmitMocksTool({ store, designSystem, renderer, bus, cwd, taskId: TASK });
 
     await fakeExecute(tool, {
       mocks: [
@@ -236,10 +250,11 @@ describe("brainstorm mock tools", () => {
     expect(eventAppends[2]?.["mockSetId"]).not.toBe(firstSetId);
   });
 
-  it("write_mock_revision creates a derived mock revision and publishes it", async () => {
+  it("submit_mock_revision creates a derived mock revision and publishes it", async () => {
     const store = new ArtifactsStore();
     const { bus, eventAppends } = makeBus();
-    const tool = makeWriteMockRevisionTool({ store, bus, cwd, taskId: TASK });
+    const { designSystem, renderer } = makeRenderDeps();
+    const tool = makeSubmitMockRevisionTool({ store, designSystem, renderer, bus, cwd, taskId: TASK });
     await store.writeBrainstormMock(cwd, TASK, makeMock(), MOCK_HTML);
 
     const result = await fakeExecute(tool, {
@@ -264,7 +279,8 @@ describe("brainstorm mock tools", () => {
       ],
     });
 
-    expect(result.details).toEqual({ revised: "mock-a-rev1" });
+    expect(result.details).toEqual({ ok: true, revised: "mock-a-rev1" });
+    expect(renderer.render).toHaveBeenCalledTimes(1);
     expect(eventAppends).toHaveLength(1);
     expect(eventAppends[0]).toMatchObject({
       kind: "brainstorm_mock_revised",
@@ -284,10 +300,11 @@ describe("brainstorm mock tools", () => {
     ).resolves.toContain("revised");
   });
 
-  it("write_mock_revision allocates the next revision id for repeated edits", async () => {
+  it("submit_mock_revision allocates the next revision id for repeated edits", async () => {
     const store = new ArtifactsStore();
     const { bus, eventAppends } = makeBus();
-    const tool = makeWriteMockRevisionTool({ store, bus, cwd, taskId: TASK });
+    const { designSystem, renderer } = makeRenderDeps();
+    const tool = makeSubmitMockRevisionTool({ store, designSystem, renderer, bus, cwd, taskId: TASK });
     await store.writeBrainstormMock(cwd, TASK, makeMock(), MOCK_HTML);
     await store.writeBrainstormMock(cwd, TASK, {
       ...makeMock("mock-a-rev1"),
@@ -314,7 +331,7 @@ describe("brainstorm mock tools", () => {
       ],
     });
 
-    expect(result.details).toEqual({ revised: "mock-a-rev2" });
+    expect(result.details).toEqual({ ok: true, revised: "mock-a-rev2" });
     expect(eventAppends[0]).toMatchObject({
       kind: "brainstorm_mock_revised",
       mock: {

@@ -14,14 +14,16 @@ import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
+import type { DesignSystemStore } from "./design-system-store.js";
+import type { MockRenderer } from "./mock-renderer.js";
 import {
   makeMarkReadyTool,
   makeReadArtifactTool,
   makeReplyToUserTool,
-  makeSubmitMockChoicesTool,
+  makeSubmitMockRevisionTool,
+  makeSubmitMocksTool,
   makeSubmitQuestionsTool,
   makeWriteArtifactTool,
-  makeWriteMockRevisionTool,
 } from "./brainstorm-tools.js";
 import {
   brainstormResearchPath,
@@ -38,6 +40,8 @@ export type BrainstormOpts = {
   runId: string;
   cwd: string;
   store: ArtifactsStore;
+  designSystem: DesignSystemStore;
+  renderer: MockRenderer;
   bus: BrainstormEventBus;
   eventStore: EventStore;
   phaseModel: PhaseModelConfig;
@@ -161,14 +165,18 @@ async function runTurn(
     taskId: opts.taskId,
   });
   const submitQuestionsTool = makeSubmitQuestionsTool({ bus: opts.bus });
-  const submitMockChoicesTool = makeSubmitMockChoicesTool({
+  const submitMocksTool = makeSubmitMocksTool({
     store: opts.store,
+    designSystem: opts.designSystem,
+    renderer: opts.renderer,
     bus: opts.bus,
     cwd: opts.cwd,
     taskId: opts.taskId,
   });
-  const writeMockRevisionTool = makeWriteMockRevisionTool({
+  const submitMockRevisionTool = makeSubmitMockRevisionTool({
     store: opts.store,
+    designSystem: opts.designSystem,
+    renderer: opts.renderer,
     bus: opts.bus,
     cwd: opts.cwd,
     taskId: opts.taskId,
@@ -197,8 +205,8 @@ async function runTurn(
     if (
       (e.kind === "tool_call" || e.kind === "tool_result") &&
       (e.tool === "submit_questions" ||
-        e.tool === "submit_mock_choices" ||
-        e.tool === "write_mock_revision" ||
+        e.tool === "submit_mocks" ||
+        e.tool === "submit_mock_revision" ||
         e.tool === "mark_ready" ||
         e.tool === "reply_to_user")
     ) {
@@ -236,7 +244,7 @@ async function runTurn(
       haltReason = "questions";
       return;
     }
-    if (e.kind === "tool_call" && e.tool === "submit_mock_choices") {
+    if (e.kind === "tool_call" && e.tool === "submit_mocks") {
       haltReason = "questions";
       return;
     }
@@ -287,8 +295,8 @@ async function runTurn(
         readArtifactTool,
         writeArtifactTool,
         submitQuestionsTool,
-        submitMockChoicesTool,
-        writeMockRevisionTool,
+        submitMocksTool,
+        submitMockRevisionTool,
         markReadyTool,
         replyToUserTool,
         makePiWebSearchTool(),
@@ -450,8 +458,8 @@ function isProgressTool(tool: string, output: unknown): boolean {
   if (tool === "write_artifact") return toolResultOk(output);
   return (
     tool === "submit_questions" ||
-    tool === "submit_mock_choices" ||
-    tool === "write_mock_revision" ||
+    tool === "submit_mocks" ||
+    tool === "submit_mock_revision" ||
     tool === "reply_to_user"
   );
 }
@@ -781,7 +789,7 @@ function buildMockEditPrompt(events: JsonlEvent[]): string {
   }
   lines.push(
     "",
-    "Use write_mock_revision to create a derived mock direction with a complete replacement page set. Do not overwrite the original mock.",
+    "Use submit_mock_revision to create a derived mock direction with a complete replacement page set. Do not overwrite the original mock.",
   );
   return lines.join("\n");
 }

@@ -1,9 +1,13 @@
 "use client";
 import { useState, useTransition } from "react";
 import {
+  confirmPromoteAction,
+  promoteBrainstormMockAction,
   selectBrainstormMockAction,
   submitBrainstormMockEditAction,
 } from "@/app/tasks/[id]/actions";
+import type { TokenDiff } from "@/lib/api";
+import { PromoteModal } from "./promote-modal";
 
 export function MockPreviewActions({
   taskId,
@@ -19,6 +23,8 @@ export function MockPreviewActions({
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState("");
   const [pending, start] = useTransition();
+  const [promoting, startPromote] = useTransition();
+  const [promoteDiff, setPromoteDiff] = useState<TokenDiff | null>(null);
   const canSubmit = comment.trim().length > 0 && !pending;
 
   return (
@@ -62,6 +68,21 @@ export function MockPreviewActions({
       )}
       <button
         type="button"
+        aria-label="Promote mock to design system"
+        disabled={promoting}
+        onClick={() => {
+          if (promoting) return;
+          startPromote(async () => {
+            const diff = await promoteBrainstormMockAction(taskId, mockId);
+            setPromoteDiff(diff);
+          });
+        }}
+        className="rounded border border-line px-2.5 py-1 font-mono text-[11px] text-fg-body hover:border-line-hover hover:bg-white/[0.03] disabled:opacity-55"
+      >
+        {promoting ? "Diffing…" : "Promote ↑"}
+      </button>
+      <button
+        type="button"
         onClick={() => {
           if (locked || selected || pending) return;
           start(async () => {
@@ -73,6 +94,13 @@ export function MockPreviewActions({
       >
         {selected ? "Chosen" : "Choose"}
       </button>
+      {promoteDiff && (
+        <PromoteModal
+          diff={promoteDiff}
+          onConfirm={() => confirmPromoteAction(taskId, mockId, promoteDiff)}
+          onClose={() => setPromoteDiff(null)}
+        />
+      )}
     </div>
   );
 }

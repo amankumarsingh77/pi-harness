@@ -99,6 +99,7 @@ function tagForEvent(event: AgentEvent): string {
     case "brainstorm_mock_edit_requested":
     case "brainstorm_usage":
     case "brainstorm_artifact_edited":
+    case "brainstorm_design_promoted":
       return "brainstorm";
     case "plan_system":
     case "plan_subagent_started":
@@ -113,6 +114,8 @@ function tagForEvent(event: AgentEvent): string {
       return "code";
     case "message_delta":
       return "stream";
+    default:
+      return ((_exhaustive: never) => "event")(event);
   }
 }
 
@@ -152,6 +155,8 @@ function messageForEvent(event: AgentEvent): string {
       return `brainstorm usage · ${event.cumulativeInputTokens} in`;
     case "brainstorm_artifact_edited":
       return `${event.artifact}.md edited`;
+    case "brainstorm_design_promoted":
+      return `design promoted · tokens v${event.tokenVersion}`;
     case "plan_system":
       return `plan · ${event.systemKind}`;
     case "plan_subagent_started":

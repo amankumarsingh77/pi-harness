@@ -20,6 +20,9 @@ export type BrainstormMockPage = {
   title: string;
   summary?: string;
   htmlPath: string;
+  /** Rendered screenshots (Task 8 populates these). */
+  desktopPngPath?: string;
+  mobilePngPath?: string;
 };
 
 export type BrainstormMockMiniature =
@@ -175,6 +178,12 @@ export type AgentEvent =
       requestId: string;
       mockId: string;
       comment: string;
+    })
+  | (AgentEventBase & {
+      kind: "brainstorm_design_promoted";
+      exemplarId: string;
+      tokenVersion: number;
+      summary: string;
     })
   // Plan-phase events. Mirrored to <worktree>/.harness/<taskId>/plan.jsonl.
   // The plan phase has two stages — a parallel preflight of 8 research

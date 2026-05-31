@@ -25,8 +25,8 @@ export type CustomTool =
   | "read_artifact"
   | "write_artifact"
   | "submit_questions"
-  | "submit_mock_choices"
-  | "write_mock_revision"
+  | "submit_mocks"
+  | "submit_mock_revision"
   | "reply_to_user"
   | "mark_ready"
   | "pi_web_search"
@@ -59,8 +59,8 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
       "read_artifact",
       "write_artifact",
       "submit_questions",
-      "submit_mock_choices",
-      "write_mock_revision",
+      "submit_mocks",
+      "submit_mock_revision",
       "mark_ready",
       "reply_to_user",
       "pi_web_search",
