@@ -4,6 +4,7 @@ import type { Task, TaskPriority, TaskStatus, Workflow } from "@pi-harness/share
 import { useMemo, useState } from "react";
 import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/react";
+import { SlidersHorizontal } from "lucide-react";
 import { mutations } from "@/lib/client/queries";
 import { KanbanColumn } from "./column";
 import {
@@ -114,6 +115,9 @@ export function KanbanBoard({
       <BoardToolbar
         filters={filters}
         staleCount={staleCount}
+        onPriorityFilter={(priority) => setFilters((curr) => ({ ...curr, priority }))}
+        onWorkflowFilter={(workflow) => setFilters((curr) => ({ ...curr, workflow }))}
+        onClearFilters={() => setFilters({})}
         onRemoveWorkflow={() => setFilters((curr) => withoutWorkflow(curr))}
         onRemovePriority={() => setFilters((curr) => withoutPriority(curr))}
       />
@@ -123,7 +127,7 @@ export function KanbanBoard({
           void handleDragEnd(event);
         }}
       >
-        <div className="no-scrollbar overflow-x-auto px-5 pb-20 pt-3">
+        <div className="no-scrollbar overflow-x-auto px-5 pb-20 pt-3" aria-label="Task board columns">
           <div
             className="grid min-w-max gap-3"
             style={{
@@ -147,10 +151,13 @@ export function KanbanBoard({
           {activeDragTask && <TaskDragPreview task={activeDragTask} />}
         </DragOverlay>
       </DragDropProvider>
-      {/* Right-edge fade hints there's more content beyond the viewport. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-bg to-transparent"
+        className="pointer-events-none absolute inset-y-[38px] left-0 w-8 bg-gradient-to-r from-bg to-transparent"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-[38px] right-0 w-12 bg-gradient-to-l from-bg to-transparent"
       />
     </main>
   );
@@ -181,11 +188,17 @@ const START_BRAINSTORM: BoardTransitionAction = {
 function BoardToolbar({
   filters,
   staleCount,
+  onPriorityFilter,
+  onWorkflowFilter,
+  onClearFilters,
   onRemoveWorkflow,
   onRemovePriority,
 }: {
   filters: BoardFilters;
   staleCount: number;
+  onPriorityFilter: (priority: Exclude<TaskPriority, "none" | "low">) => void;
+  onWorkflowFilter: (workflow: Workflow) => void;
+  onClearFilters: () => void;
   onRemoveWorkflow: () => void;
   onRemovePriority: () => void;
 }) {
@@ -199,14 +212,24 @@ function BoardToolbar({
         <button
           type="button"
           aria-pressed="true"
-          className="h-6 border-r border-line px-2.5 text-fg-body"
+          className="h-6 border-r border-line bg-white/[0.035] px-2.5 text-fg-body"
         >
           Board
         </button>
-        <button type="button" disabled className="h-6 border-r border-line px-2.5 text-fg-faint">
+        <button
+          type="button"
+          disabled
+          title="List view is coming soon"
+          className="h-6 cursor-not-allowed border-r border-line px-2.5 text-fg-faint opacity-55"
+        >
           List
         </button>
-        <button type="button" disabled className="h-6 px-2.5 text-fg-faint">
+        <button
+          type="button"
+          disabled
+          title="Calendar view is coming soon"
+          className="h-6 cursor-not-allowed px-2.5 text-fg-faint opacity-55"
+        >
           Calendar
         </button>
       </div>
@@ -218,17 +241,80 @@ function BoardToolbar({
         <FilterPill label={`priority ≥ ${filters.priority}`} onRemove={onRemovePriority} removeLabel="Remove priority filter" />
       )}
 
-      <button
-        type="button"
-        className="h-6 shrink-0 rounded-md border border-line px-2.5 font-mono text-[11px] text-fg-mute transition-colors hover:border-line-hover hover:text-fg-body"
-      >
-        + filter
-      </button>
+      <BoardFilterMenu
+        filters={filters}
+        onPriority={onPriorityFilter}
+        onWorkflow={onWorkflowFilter}
+        onClear={onClearFilters}
+      />
 
-      <span className="ml-auto hidden font-mono text-[11px] text-fg-subtle sm:inline">
-        {staleCount} cards idle &gt; 30m · auto-cleanup ok
+      <span className="ml-auto hidden items-center gap-2 font-mono text-[11px] text-fg-subtle sm:inline-flex">
+        <span>{staleCount} cards idle &gt; 30m</span>
+        <span className="text-fg-faint">·</span>
+        <span>scroll for all phases</span>
       </span>
     </div>
+  );
+}
+
+function BoardFilterMenu({
+  filters,
+  onPriority,
+  onWorkflow,
+  onClear,
+}: {
+  readonly filters: BoardFilters;
+  readonly onPriority: (priority: Exclude<TaskPriority, "none" | "low">) => void;
+  readonly onWorkflow: (workflow: Workflow) => void;
+  readonly onClear: () => void;
+}) {
+  const active = filters.workflow !== undefined || filters.priority !== undefined;
+
+  return (
+    <details className="relative">
+      <summary className="flex h-6 cursor-pointer list-none items-center gap-1.5 rounded-md border border-line px-2.5 font-mono text-[11px] text-fg-mute transition-colors hover:border-line-hover hover:text-fg-body [&::-webkit-details-marker]:hidden">
+        <SlidersHorizontal size={11} strokeWidth={1.9} aria-hidden="true" />
+        filter
+        {active && <span className="text-st-progress">on</span>}
+      </summary>
+      <div className="absolute left-0 top-7 z-30 w-56 rounded-md border border-line bg-card p-2 shadow-[0_18px_44px_rgba(0,0,0,0.34)]">
+        <div className="px-1.5 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
+          Priority
+        </div>
+        <FilterOption label="Urgent and up" onClick={() => onPriority("urgent")} />
+        <FilterOption label="High and up" onClick={() => onPriority("high")} />
+        <FilterOption label="Medium and up" onClick={() => onPriority("medium")} />
+        <div className="mt-2 px-1.5 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
+          Workflow
+        </div>
+        <FilterOption label="Backend feature" onClick={() => onWorkflow("backend-feature")} />
+        <button
+          type="button"
+          className="mt-2 h-7 w-full rounded border border-line px-2 text-left font-mono text-[11px] text-fg-mute transition-colors hover:border-line-hover hover:text-fg-body"
+          onClick={onClear}
+        >
+          Clear filters
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function FilterOption({
+  label,
+  onClick,
+}: {
+  readonly label: string;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="block h-7 w-full rounded px-1.5 text-left text-[12px] text-fg-body transition-colors hover:bg-card-hover"
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }
 

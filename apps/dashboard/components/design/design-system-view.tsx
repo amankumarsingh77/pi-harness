@@ -1,4 +1,8 @@
+import Link from "next/link";
+import type { Route } from "next";
+import { ArrowRight, CheckCircle2, CircleDashed, Palette } from "lucide-react";
 import type { DesignSystemSnapshot } from "@/lib/api";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\))$/;
 
@@ -152,6 +156,92 @@ export function DesignSystemView({ snapshot }: { snapshot: DesignSystemSnapshot 
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+export function DesignSystemEmptyState() {
+  return (
+    <div className="mx-auto w-full max-w-5xl px-6 py-10">
+      <section
+        role="region"
+        aria-label="Design system not seeded"
+        className="overflow-hidden rounded-lg border border-line bg-card"
+      >
+        <header className="flex items-start gap-3 border-b border-line px-5 py-4">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-white/[0.03] text-st-progress">
+            <Palette size={18} strokeWidth={1.8} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="m-0 text-[18px] font-semibold tracking-[-0.016em] text-fg">
+              Design system not seeded
+            </h1>
+            <p className="m-0 mt-1 max-w-2xl text-[12.5px] leading-5 text-fg-mute">
+              Promote a brainstorm mock to create tokens, exemplars, and the design.md source of truth.
+            </p>
+          </div>
+          <span className="ml-auto rounded-full border border-line px-2.5 py-1 font-mono text-[10.5px] text-fg-faint">
+            tokens v0
+          </span>
+        </header>
+
+        <div className="grid gap-5 p-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <div className="mb-3 font-mono text-[10.5px] uppercase tracking-[0.08em] text-fg-faint">
+              Setup checklist
+            </div>
+            <div className="space-y-2">
+              <ChecklistItem done label="Create a task with UI scope" />
+              <ChecklistItem label="Complete brainstorm mocks" />
+              <ChecklistItem label="Promote one mock into the design system" />
+              <ChecklistItem label="Review generated tokens and gallery exemplars" />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-input/45 p-4">
+            <EmptyState
+              title="No promoted mock"
+              body="The gallery, token table, and promotion history appear here after the first approved mock is promoted."
+            />
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link
+                href={"/tasks/new" as Route}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-fg px-3 text-[12.5px] font-medium text-bg transition-colors hover:bg-fg/90"
+              >
+                Create UI task
+                <ArrowRight size={13} strokeWidth={1.8} aria-hidden="true" />
+              </Link>
+              <Link
+                href={"/" as Route}
+                className="inline-flex h-8 items-center rounded-md border border-line px-3 text-[12.5px] font-medium text-fg-body transition-colors hover:border-line-hover hover:bg-white/[0.03]"
+              >
+                Open board
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ChecklistItem({
+  done = false,
+  label,
+}: {
+  readonly done?: boolean;
+  readonly label: string;
+}) {
+  const Icon = done ? CheckCircle2 : CircleDashed;
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-line bg-input/35 px-3 py-2">
+      <Icon
+        size={14}
+        strokeWidth={1.9}
+        className={done ? "text-st-done" : "text-fg-faint"}
+        aria-hidden="true"
+      />
+      <span className={done ? "text-[13px] text-fg-body" : "text-[13px] text-fg-mute"}>{label}</span>
     </div>
   );
 }

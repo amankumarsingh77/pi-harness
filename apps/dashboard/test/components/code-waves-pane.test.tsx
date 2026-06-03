@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
+import { CodeNodeDetail } from "@/components/code/code-node-detail";
 import { CodeWavesPane } from "@/components/code/code-waves-pane";
 import { parseExecutionDag } from "@/lib/code/parse-execution-dag";
 import { deriveCodeState } from "@/lib/code/derive-code-state";
@@ -111,5 +112,11 @@ describe("CodeWavesPane", () => {
       />,
     );
     expect(screen.getByText(/not authored yet/i)).toBeInTheDocument();
+  });
+
+  it("shows a recovery path when the DAG has not been authored", () => {
+    render(<CodeNodeDetail node={null} taskId="T-1" dagEmpty />);
+    expect(screen.getByRole("region", { name: "No execution DAG authored" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open plan" })).toHaveAttribute("href", "/tasks/T-1/plan");
   });
 });

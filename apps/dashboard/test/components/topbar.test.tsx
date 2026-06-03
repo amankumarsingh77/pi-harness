@@ -41,7 +41,6 @@ describe("Topbar", () => {
     ]);
     expect(screen.getByRole("navigation")).toHaveTextContent("Board");
     expect(screen.getByRole("navigation")).toHaveTextContent("Runs");
-    expect(screen.getByRole("navigation")).toHaveTextContent("Scenarios");
     expect(strip).toHaveTextContent("running 3");
     expect(strip).toHaveTextContent("review 2");
     expect(strip).toHaveTextContent("blocked 1");
@@ -84,5 +83,30 @@ describe("Topbar", () => {
     const nav = screen.getByRole("navigation", { name: "Primary" });
     const chatLink = within(nav).getByText("Chat").closest("a");
     expect(chatLink).toHaveAttribute("aria-current", "page");
+  });
+
+  it("does not link primary navigation to missing scenarios route", () => {
+    render(<Topbar summary={summary} />);
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).queryByText("Scenarios")).toBeNull();
+    expect(within(nav).queryByRole("link", { name: "Scenarios" })).toBeNull();
+  });
+
+  it("keeps Board inactive on task, new task, and design routes", () => {
+    for (const route of [
+      "/tasks/new",
+      "/tasks/task-1",
+      "/tasks/task-1/plan",
+      "/tasks/task-1/code",
+      "/tasks/task-1/verify",
+      "/design",
+    ]) {
+      pathname.value = route;
+      const { unmount } = render(<Topbar summary={summary} />);
+      const nav = screen.getByRole("navigation", { name: "Primary" });
+      const boardLink = within(nav).getByText("Board").closest("a");
+      expect(boardLink).not.toHaveAttribute("aria-current", "page");
+      unmount();
+    }
   });
 });

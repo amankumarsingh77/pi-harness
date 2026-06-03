@@ -15,7 +15,8 @@ export function EvidenceColumn({
   capturing?: boolean;
   children: React.ReactNode;
 }) {
-  const allGreen = passed === total;
+  const notApplicable = total === 0;
+  const allGreen = !notApplicable && passed === total;
   const accent = allGreen ? "green" : capturing ? "amber" : "red";
 
   return (
@@ -26,8 +27,8 @@ export function EvidenceColumn({
               style={{ borderColor: accent === "green" ? "rgba(52,211,153,0.18)" : "rgba(251,191,36,0.2)" }}>
         <span className={clsx("inline-flex h-5 w-5 items-center justify-center rounded font-mono text-xs font-bold",
                               accent === "green" && "bg-green-fg/[0.12] text-green-fg2",
-                              accent === "amber" && "bg-amber-fg/[0.12] text-amber-fg2")}>
-          {capturing ? "⏳" : allGreen ? "✓" : "✗"}
+                              (accent === "amber" || notApplicable) && "bg-amber-fg/[0.12] text-amber-fg2")}>
+          {capturing ? "⏳" : allGreen ? "✓" : notApplicable ? "–" : "✗"}
         </span>
         <h2 className={clsx("m-0 font-mono text-[11px] font-bold tracking-[0.14em]",
                             accent === "green" ? "text-green-fg" : "text-amber-fg")}>
@@ -35,10 +36,15 @@ export function EvidenceColumn({
         </h2>
         <span className={clsx("ml-auto font-mono text-xs font-semibold",
                               accent === "green" ? "text-green-fg2" : "text-amber-fg2")}>
-          {capturing ? "capturing…" : `${passed} / ${total}`}
+          {capturing ? "capturing…" : notApplicable ? "not applicable" : `${passed} / ${total}`}
         </span>
       </header>
       <div className="flex-1 px-4.5 py-4">{children}</div>
+      {notApplicable && (
+        <div className="border-t border-line px-4.5 py-2.5 text-[11.5px] leading-5 text-fg-mute">
+          No checks of this class were declared for this run, so it is excluded from the gate count.
+        </div>
+      )}
     </article>
   );
 }

@@ -1,18 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { Clipboard, FileText } from "lucide-react";
 import type { TaskStatus } from "@pi-harness/shared";
 import { Composer, type ComposerHandle } from "./composer";
 import { MockStrip } from "./mock-strip";
 import { QuestionThreadStage } from "./question-stage";
 import type {
   AgentReplyEvent,
+  BlockedEvent,
   BrainstormTimeline,
   FocusItem,
   NudgeThread,
   RevisionEvent,
 } from "./use-brainstorm-timeline";
+import { Alert } from "@/components/ui/alert";
+import { RestartButton } from "./restart-button";
 
 export function FocusStage({
   taskId,
@@ -36,20 +40,12 @@ export function FocusStage({
   }
 
   if (timeline.failed) {
+    const reason = failedReason(timeline);
+    const diagnostic = brainstormDiagnostic({ taskId, reason, timeline });
     return (
       <main className="brainstorm-focus">
         <div className="brainstorm-focus-scroll">
-          <section className="brainstorm-focus-card border-st-blocked/40">
-            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-st-blocked">
-              brainstorm blocked
-            </span>
-            <p className="mt-2 text-[13px] text-fg-body">
-              {timeline.pinnedBlocked ? blockedReason(timeline.pinnedBlocked) : "The run failed."}
-            </p>
-            <p className="mt-1 font-mono text-[11px] text-fg-subtle">
-              Restart from the header to start a fresh tick.
-            </p>
-          </section>
+          <BrainstormFailurePanel taskId={taskId} reason={reason} diagnostic={diagnostic} />
         </div>
       </main>
     );
@@ -85,6 +81,82 @@ export function FocusStage({
         activeNudges={timeline.activeNudges}
       />
     </main>
+  );
+}
+
+function BrainstormFailurePanel({
+  taskId,
+  reason,
+  diagnostic,
+}: {
+  readonly taskId: string;
+  readonly reason: string;
+  readonly diagnostic: string;
+}) {
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyDiagnostic = async (): Promise<void> => {
+    await navigator.clipboard.writeText(diagnostic);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  };
+
+  return (
+    <Alert tone="danger" title="Brainstorm failed" label="Brainstorm recovery">
+      <p className="m-0 break-words font-mono text-[12.5px]">{reason}</p>
+      <p className="m-0 mt-1 text-[12px] text-fg-mute">
+        Restart creates a fresh brainstorm run and keeps the archived transcript available.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-fg-body transition-colors hover:border-line-hover hover:bg-white/[0.03]"
+          aria-expanded={showDiagnostic}
+          onClick={() => setShowDiagnostic((current) => !current)}
+        >
+          <FileText size={13} strokeWidth={1.8} aria-hidden="true" />
+          View full error
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-fg-body transition-colors hover:border-line-hover hover:bg-white/[0.03]"
+          onClick={() => void copyDiagnostic()}
+        >
+          <Clipboard size={13} strokeWidth={1.8} aria-hidden="true" />
+          {copied ? "Copied" : "Copy diagnostic"}
+        </button>
+        <RestartButton taskId={taskId} disabled={false} label="Restart brainstorm" />
+      </div>
+      {showDiagnostic && (
+        <pre className="mt-3 max-h-64 overflow-auto rounded-md border border-line bg-black/[0.16] p-3 text-[11px] leading-5 text-fg-body">
+          {diagnostic}
+        </pre>
+      )}
+    </Alert>
+  );
+}
+
+function brainstormDiagnostic({
+  taskId,
+  reason,
+  timeline,
+}: {
+  readonly taskId: string;
+  readonly reason: string;
+  readonly timeline: BrainstormTimeline;
+}): string {
+  return JSON.stringify(
+    {
+      taskId,
+      reason,
+      failed: timeline.failed,
+      blocked: timeline.pinnedBlocked ?? null,
+      eventCount: timeline.events.length,
+      latestEvents: timeline.events.slice(-5),
+    },
+    null,
+    2,
   );
 }
 
@@ -183,4 +255,17 @@ function formatTime(value: string): string {
 function blockedReason(event: NonNullable<BrainstormTimeline["pinnedBlocked"]>): string {
   const reason = event.data?.["reason"];
   return typeof reason === "string" ? reason : "unknown error";
+}
+
+function failedReason(timeline: BrainstormTimeline): string {
+  const statusEvent = [...timeline.events]
+    .reverse()
+    .find(
+      (event): event is BlockedEvent =>
+        event.kind === "brainstorm_system" &&
+        event.systemKind === "status_changed",
+    );
+  const reason = statusEvent?.data?.["reason"];
+  if (typeof reason === "string" && reason.length > 0) return reason;
+  return timeline.pinnedBlocked ? blockedReason(timeline.pinnedBlocked) : "The run failed.";
 }

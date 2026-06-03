@@ -55,7 +55,7 @@ export function CodePageLive({
           selectedNodeId={selectedId}
           onSelect={setSelected}
         />
-        <CodeNodeDetail node={node} />
+        <CodeNodeDetail node={node} taskId={taskId} dagEmpty={state.waves.length === 0} />
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { clsx } from "clsx";
 import type { ChatThread } from "@pi-harness/shared";
+import { GitBranch, MessageSquarePlus, Plus, Search } from "lucide-react";
 
 type Props = {
   readonly threads: readonly ChatThread[];
@@ -51,9 +52,7 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
   }, [nowProp]);
   const now = mountedNow;
 
-  const filtered = threads.filter(
-    (t) => !search || t.title.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = threads.filter((thread) => threadMatchesSearch(thread, search));
 
   // Before `now` resolves, show every thread in one undated group so SSR and the
   // first client render agree; grouping + timestamps appear once mounted.
@@ -63,6 +62,7 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
   function ThreadItem({ thread }: { thread: ChatThread }) {
     const isActive = thread.id === activeThreadId;
     const time = now ? relativeTime(new Date(thread.updatedAt), now) : "";
+    const title = displayThreadTitle(thread);
     return (
       <button
         key={thread.id}
@@ -89,15 +89,21 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
               isActive ? "text-[var(--color-fg)]" : "text-[var(--color-fg-body)]",
             )}
           >
-            {thread.title}
+            {title}
           </span>
         </div>
         <div
           data-testid={`thread-meta-${thread.id}`}
-          className="mt-0.5 flex gap-2 pl-3.5 font-mono text-[10.5px] text-[var(--color-fg-faint)]"
+          className="mt-0.5 flex min-w-0 items-center gap-2 pl-3.5 font-mono text-[10.5px] text-[var(--color-fg-faint)]"
         >
-          {thread.branch && <span>{thread.branch}</span>}
-          <span>{time}</span>
+          {thread.branch && (
+            <span className="inline-flex min-w-0 items-center gap-1 truncate">
+              <GitBranch size={10} strokeWidth={1.8} aria-hidden="true" />
+              {thread.branch}
+            </span>
+          )}
+          <span>{thread.model.model}</span>
+          {time && <span className="ml-auto shrink-0">{time}</span>}
         </div>
       </button>
     );
@@ -117,9 +123,7 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
           onClick={onNewChat}
           className="flex h-[30px] w-full items-center gap-[7px] rounded-md border border-[var(--color-line)] px-[10px] text-[12.5px] text-[var(--color-fg-body)] transition-colors hover:border-[var(--color-line-hover)] hover:bg-[var(--color-card-hover)]"
         >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
-            <path d="M5.5 1.5V9.5M1.5 5.5H9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          </svg>
+          <Plus size={13} strokeWidth={1.9} aria-hidden="true" />
           New chat
           <span className="ml-auto font-mono text-[10.5px] text-[var(--color-fg-faint)]">⌘⇧O</span>
         </button>
@@ -127,7 +131,7 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
 
       {/* search */}
       <label className="mx-[10px] mb-2 flex h-7 items-center gap-[7px] rounded-md border border-[var(--color-line)] bg-[var(--color-input)] px-[9px] text-[12px] text-[var(--color-fg-faint)]">
-        <span className="font-mono">/</span>
+        <Search size={12} strokeWidth={1.8} aria-hidden="true" />
         <input
           type="text"
           placeholder="Search chats"
@@ -156,9 +160,51 @@ export function ChatRail({ threads, activeThreadId, onNewChat, onSelectThread, n
           </>
         )}
         {filtered.length === 0 && (
-          <p className="px-2 py-3 text-[12px] text-[var(--color-fg-faint)]">No chats found.</p>
+          <div className="mx-2 mt-3 rounded-md border border-dashed border-[var(--color-line)] px-3 py-4 text-center">
+            <MessageSquarePlus
+              size={16}
+              strokeWidth={1.8}
+              className="mx-auto mb-2 text-[var(--color-fg-faint)]"
+              aria-hidden="true"
+            />
+            <p className="m-0 text-[12px] text-[var(--color-fg-mute)]">
+              {threads.length === 0 ? "No chats yet." : "No chats match this search."}
+            </p>
+          </div>
         )}
       </div>
     </aside>
+  );
+}
+
+function threadMatchesSearch(thread: ChatThread, search: string): boolean {
+  const needle = search.trim().toLowerCase();
+  if (needle.length === 0) return true;
+  return [
+    displayThreadTitle(thread),
+    thread.id,
+    thread.branch ?? "",
+    thread.model.provider,
+    thread.model.model,
+  ].join(" ").toLowerCase().includes(needle);
+}
+
+function displayThreadTitle(thread: ChatThread): string {
+  const title = thread.title.trim();
+  if (title.length > 0 && !looksGeneratedTitle(title, thread.id)) return title;
+  const date = new Date(thread.updatedAt);
+  const suffix = Number.isNaN(date.getTime())
+    ? thread.id.slice(0, 8)
+    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `Chat ${suffix}`;
+}
+
+function looksGeneratedTitle(title: string, id: string): boolean {
+  const normalized = title.toLowerCase();
+  return (
+    normalized === id.toLowerCase() ||
+    normalized === "new chat" ||
+    /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(title) ||
+    /^[0-9a-f]{12,}$/i.test(title)
   );
 }

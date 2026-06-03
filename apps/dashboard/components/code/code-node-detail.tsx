@@ -1,12 +1,43 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import Link from "next/link";
 import { clsx } from "clsx";
 import { ChatToolCall } from "@/components/chat/chat-tool-call";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { CodeNodeView, CodeTranscriptItem } from "@/lib/code/derive-code-state";
 
-export function CodeNodeDetail({ node }: { readonly node: CodeNodeView | null }) {
+export function CodeNodeDetail({
+  node,
+  taskId,
+  dagEmpty = false,
+}: {
+  readonly node: CodeNodeView | null;
+  readonly taskId?: string;
+  readonly dagEmpty?: boolean;
+}) {
   if (!node) {
+    if (dagEmpty) {
+      return (
+        <section className="flex min-h-0 flex-1 items-center justify-center bg-bg p-5">
+          <EmptyState
+            title="No execution DAG authored"
+            body="Plan approval writes execution-dag.yaml before code starts. The graph preview will appear here as soon as the planner emits waves and node assertions."
+            visual={<DagPreview />}
+            action={
+              taskId ? (
+                <Link
+                  href={`/tasks/${taskId}/plan` as never}
+                  className="inline-flex h-8 items-center rounded-md border border-line px-3 text-[12.5px] font-medium text-fg-body transition-colors hover:border-line-hover hover:bg-white/[0.03]"
+                >
+                  Open plan
+                </Link>
+              ) : undefined
+            }
+          />
+        </section>
+      );
+    }
     return (
       <section className="flex min-h-0 flex-1 items-center justify-center bg-bg">
         <p className="font-mono text-[12px] text-fg-faint">Select a node to view its activity</p>
@@ -72,6 +103,49 @@ export function CodeNodeDetail({ node }: { readonly node: CodeNodeView | null })
         </span>
       </div>
     </section>
+  );
+}
+
+function DagPreview() {
+  return (
+    <div className="mx-auto mb-4 grid w-full max-w-[280px] grid-cols-[1fr_32px_1fr] items-center gap-2" aria-hidden="true">
+      <PreviewNode label="plan" />
+      <PreviewConnector />
+      <PreviewNode label="code" />
+      <div />
+      <PreviewConnector vertical />
+      <div />
+      <PreviewNode label="test" muted />
+      <PreviewConnector />
+      <PreviewNode label="verify" muted />
+    </div>
+  );
+}
+
+function PreviewNode({
+  label,
+  muted = false,
+}: {
+  readonly label: string;
+  readonly muted?: boolean;
+}) {
+  return (
+    <div className={clsx(
+      "rounded-md border px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.08em]",
+      muted
+        ? "border-line bg-white/[0.018] text-fg-faint"
+        : "border-st-progress/35 bg-st-progress/[0.07] text-st-progress",
+    )}>
+      {label}
+    </div>
+  );
+}
+
+function PreviewConnector({ vertical = false }: { readonly vertical?: boolean }) {
+  return (
+    <span
+      className={vertical ? "mx-auto h-6 w-px bg-line" : "h-px w-full bg-line"}
+    />
   );
 }
 

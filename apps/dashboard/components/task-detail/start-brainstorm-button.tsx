@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Sparkles } from "lucide-react";
 import type { Task } from "@pi-harness/shared";
 import { mutations } from "@/lib/client/queries";
 
@@ -39,8 +40,9 @@ export function StartBrainstormButton({ task }: { readonly task: Task }) {
         onClick={() => {
           void startBrainstorm();
         }}
-        className="inline-flex h-8 items-center justify-center rounded-md border border-st-progress/70 bg-st-progress/15 px-3 font-mono text-[11px] font-medium text-st-progress transition-colors hover:border-st-progress hover:bg-st-progress/20 disabled:cursor-wait disabled:border-line disabled:bg-white/[0.025] disabled:text-fg-faint"
+        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-st-progress bg-st-progress px-3.5 text-[12.5px] font-medium text-white transition-[filter] hover:brightness-110 disabled:cursor-wait disabled:border-line disabled:bg-white/[0.025] disabled:text-fg-faint"
       >
+        <Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
         {pending ? "Starting..." : "Start brainstorm"}
       </button>
       {error && (

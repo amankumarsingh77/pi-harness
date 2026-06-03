@@ -13,6 +13,7 @@ export function Button(props: {
   variant?: ButtonVariant;
   type?: "button" | "submit";
   onClick?: () => void;
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const variant = props.variant ?? "default";
@@ -26,6 +27,7 @@ export function Button(props: {
         V[variant],
       )}
     >
+      {props.icon}
       {props.children}
     </button>
   );

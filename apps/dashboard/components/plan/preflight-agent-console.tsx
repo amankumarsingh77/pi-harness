@@ -188,12 +188,28 @@ function AgentPane({
         </div>
       </header>
 
-      <div className="scroll-hide h-43.5 overflow-y-auto px-3 py-2.5">
-        <LogRows rows={rows} limit={8} emptyText={emptyTextFor(summary.kind)} />
+      <div className="space-y-2.5 px-3 py-2.5">
+        <div className="rounded-[7px] border border-line bg-white/[0.018] px-3 py-2">
+          <div className="mb-1 flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
+            <span>Finding summary</span>
+            <span>{summary.step?.status ?? statusLabel(summary.kind)}</span>
+          </div>
+          <p className="m-0 line-clamp-2 [line-clamp:2] text-[12px] leading-5 text-fg-body">
+            {findingsPreview(summary)}
+          </p>
+        </div>
+        <details className="rounded-[7px] border border-line bg-black/[0.08]">
+          <summary className="cursor-pointer px-3 py-2 font-mono text-[10.5px] text-fg-mute transition-colors hover:text-fg-body">
+            Recent command log
+          </summary>
+          <div className="scroll-hide max-h-36 overflow-y-auto border-t border-line px-3 py-2.5">
+            <LogRows rows={rows} limit={8} emptyText={emptyTextFor(summary.kind)} />
+          </div>
+        </details>
       </div>
 
       <footer className="flex items-center justify-between gap-2 border-t border-line px-3 py-2.5 font-mono text-[10.5px] text-fg-mute">
-        <span className="truncate">{findingsPreview(summary)}</span>
+        <span className="truncate">{summary.meta.join(" · ")}</span>
         <button
           type="button"
           className="rounded-[7px] border border-line bg-white/2 px-2 py-1 text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/4.5"
@@ -204,6 +220,21 @@ function AgentPane({
       </footer>
     </article>
   );
+}
+
+function statusLabel(kind: DotKind): string {
+  switch (kind) {
+    case "done":
+      return "complete";
+    case "progress":
+      return "running";
+    case "blocked":
+      return "blocked";
+    case "fallback":
+      return "fallback";
+    case "intake":
+      return "queued";
+  }
 }
 
 function AgentDrawer({

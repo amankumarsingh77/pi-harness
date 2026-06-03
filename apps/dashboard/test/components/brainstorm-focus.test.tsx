@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, renderHook, screen } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type { BrainstormJsonlEvent } from "@/lib/api";
 import { FocusStage } from "@/components/brainstorm/focus-stage";
 import { useBrainstormTimeline } from "@/components/brainstorm/use-brainstorm-timeline";
@@ -52,6 +52,38 @@ describe("FocusStage", () => {
     const input = screen.getByLabelText(/nudge the agent/i);
     expect(shelf.textContent).toContain("queued");
     expect(shelf.compareDocumentPosition(input)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("puts restart recovery next to a failed brainstorm", () => {
+    const { result } = renderHook(() =>
+      useBrainstormTimeline({
+        initialEvents: [
+          {
+            kind: "brainstorm_system",
+            ts: "2026-05-15T10:00:00.000Z",
+            systemKind: "status_changed",
+            data: { status: "failed", reason: "graphify initialization failed" },
+          },
+        ],
+        liveEvents: [],
+        connected: true,
+        taskStatus: "brainstorm_failed",
+        gate: "running",
+        runId: "r1",
+        nowMs: Date.now(),
+      }),
+    );
+
+    render(<FocusStage taskId="t1" taskStatus="brainstorm_failed" timeline={result.current} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Brainstorm failed");
+    expect(screen.getByRole("button", { name: "Restart brainstorm" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View full error" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy diagnostic" })).toBeInTheDocument();
+    expect(screen.getByText(/graphify initialization failed/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View full error" }));
+    expect(screen.getByText(/eventCount/)).toBeInTheDocument();
   });
 });
 

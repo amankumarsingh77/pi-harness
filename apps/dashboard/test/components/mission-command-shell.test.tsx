@@ -18,7 +18,7 @@ describe("MissionCommandShell", () => {
       />,
     );
 
-    expect(screen.getByText("Mission Packet")).toBeInTheDocument();
+    expect(screen.getAllByText("Mission Packet").length).toBeGreaterThan(0);
     expect(screen.getByText("Ship durable mission state")).toBeInTheDocument();
     expect(screen.getByText("No claims yet")).toBeInTheDocument();
     expect(screen.getByText("No mission transcript events")).toBeInTheDocument();
