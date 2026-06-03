@@ -30,7 +30,7 @@ Write these via the SDK's `write` tool. `plan.md`, `scenarios.yaml`, and `execut
 
 Markdown body must contain these seven sections, each non-empty:
 
-- `## Goal` — what the plan accomplishes, traceable to design.md goals (one to three sentences).
+- `## Goal` — what the plan accomplishes, traceable to `design.md` Problem/Requirements and `spec.md` Requirements (one to three sentences).
 - `## Patterns to follow` — bullet list. Each bullet cites a `file:line` reference from `research/codebase-scout.md` and a one-line note on why it's the right model.
 - `## Touchpoints` — components/files that change. For each: the layer (api, db, ui, etc.), the file path(s), and a one-line finding sourced from `research/codebase-scout.md`.
 - `## Blast radius` — bullet list summarizing affected `BR-*` items from `blast-radius.yaml`, enriched by `research/integration-scanner.md`.

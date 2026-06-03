@@ -32,8 +32,8 @@ const AnswerEntrySchema = z
 
 const SubmitAnswersSchema = z.object({
   // The dashboard always submits the entire question batch at once. Allow up
-  // to 20 answers in a single request — well above the realistic batch size
-  // (3–5) but bounded so a malformed client can't flood the JSONL.
+  // to 20 answers in a single request so focused multi-question batches work
+  // while a malformed client still cannot flood the JSONL.
   answers: z.array(AnswerEntrySchema).min(1).max(20),
 });
 

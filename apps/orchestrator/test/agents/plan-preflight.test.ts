@@ -496,8 +496,17 @@ describe("runPreflight", () => {
     };
 
     const designSentinel = "DESIGN_BODY_SHOULD_NOT_APPEAR_VERBATIM_IN_PROMPT";
-    const designBody = `# Design\n\n## Goals\n\n- Cancel runs cleanly.\n\n## Trade-offs\n\n${designSentinel}\n`;
-    const specBody = `# Spec\n\n## Acceptance criteria\n\n- WHEN /cancel arrives, transition within 2s.\n`;
+    const designBody = `# Design\n\n## Problem\n\n- Cancel runs cleanly.\n\n## Architectural Decisions\n\n${designSentinel}\n`;
+    const specBody = [
+      "# Spec",
+      "",
+      "## Requirements",
+      "",
+      "| ID | Type | Requirement | Acceptance Criterion | Priority |",
+      "| --- | --- | --- | --- | --- |",
+      "| REQ-001 | Event-driven | The system shall cancel a run. | WHEN /cancel arrives, transition within 2s. | Must |",
+      "",
+    ].join("\n");
 
     await runPreflight(
       baseOpts({

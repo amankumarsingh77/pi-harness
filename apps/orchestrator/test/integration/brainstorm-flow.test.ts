@@ -19,6 +19,72 @@ import { CancellationRegistry } from "../../src/runner/cancellation.js";
 import { transition } from "../../src/domain/state-machine.js";
 import { createBareTestStores, resetTestStore } from "../helpers/stores.js";
 
+const VALID_READY_DESIGN_BODY = [
+  "## Problem",
+  "Brainstorm artifacts need enough detail for planning.",
+  "",
+  "## Context",
+  "The brainstorm phase writes design.md and spec.md before approval.",
+  "",
+  "## Requirements",
+  "- Functional: document the chosen approach and requirements.",
+  "",
+  "## Architectural Decisions",
+  "- Use stable markdown headings for validation.",
+  "",
+  "## Approaches Considered",
+  "- Continue using the minimal artifact format.",
+  "",
+  "## Data Shapes / Contracts",
+  "- Artifacts remain markdown files with harness-owned frontmatter.",
+  "",
+  "## Architecture",
+  "The agent writes artifacts through write_artifact and calls mark_ready.",
+  "",
+  "## External Dependencies & Fallback Chain",
+  "None — pure-internal workflow change.",
+  "",
+  "## Risks & Mitigations",
+  "- Risk: incomplete artifacts. Mitigation: mark_ready validates required sections.",
+  "",
+  "## Assumptions",
+  "- The user approves artifacts before planning.",
+  "",
+  "## Open Questions",
+  "None blocking.",
+  "",
+  "## What This Does NOT Do",
+  "- Change the task approval API.",
+  "",
+].join("\n");
+
+const VALID_READY_SPEC_BODY = [
+  "## Glossary",
+  "- Requirement: an observable condition the implementation must satisfy.",
+  "",
+  "## Requirements",
+  "| ID | Type | Requirement | Acceptance Criterion | Priority |",
+  "| --- | --- | --- | --- | --- |",
+  "| REQ-001 | Event-driven | The system shall accept complete brainstorm artifacts. | Approval advances the task to planning. | Must |",
+  "",
+  "## Edge Cases",
+  "| ID | Scenario | Expected Behavior | Derived From |",
+  "| --- | --- | --- | --- |",
+  "| EDGE-001 | Artifact has all required headings. | mark_ready succeeds. | REQ-001 |",
+  "",
+  "## Verification Matrix",
+  "| REQ ID | Unit Test | Integration Test | E2E Test | Manual Test | Notes |",
+  "| --- | --- | --- | --- | --- | --- |",
+  "| REQ-001 | Yes | Yes | No | No | Integration flow covers phase transition. |",
+  "",
+  "## Verification scenarios",
+  "- Complete brainstorm, approve it, and observe planning start.",
+  "",
+  "## Out of Scope",
+  "- Browser-level dashboard approval coverage.",
+  "",
+].join("\n");
+
 function assistantWithUsage(input: number, output: number, costTotal: number) {
   return {
     role: "assistant",
@@ -217,13 +283,11 @@ describe("brainstorm integration flow", () => {
       if (!designArt || !specArt) throw new Error("missing scaffolding");
       await store.writeArtifact(task.worktreePath!, t.id, {
         fm: designArt.fm,
-        body:
-          "## Goals\nnarrow login flow\n\n## Trade-offs\nlonger build time\n\n## Alternatives considered\nbuilt our own oauth\n",
+        body: VALID_READY_DESIGN_BODY,
       });
       await store.writeArtifact(task.worktreePath!, t.id, {
         fm: specArt.fm,
-        body:
-          "## Verification scenarios\nuser logs in via oauth happy path\n\n## Acceptance criteria\nsession cookie present\n",
+        body: VALID_READY_SPEC_BODY,
       });
       await executeTool(adapter, "mark_ready", {});
     });
