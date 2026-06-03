@@ -30,6 +30,72 @@ const PHASE_MODEL: PhaseModelConfig = {
   thinkingLevel: "medium",
 };
 
+const VALID_READY_DESIGN_BODY = [
+  "## Problem",
+  "Brainstorm artifacts are too terse for reliable planning.",
+  "",
+  "## Context",
+  "The harness writes design.md and spec.md before the plan phase runs.",
+  "",
+  "## Requirements",
+  "- Functional: capture planner-ready design details.",
+  "",
+  "## Architectural Decisions",
+  "- Require stable markdown sections before mark_ready succeeds.",
+  "",
+  "## Approaches Considered",
+  "- Keep minimal Goals/Trade-offs/Alternatives sections.",
+  "",
+  "## Data Shapes / Contracts",
+  "- `design.md` and `spec.md` remain markdown artifacts with harness frontmatter.",
+  "",
+  "## Architecture",
+  "Brainstorm writes artifacts, then mark_ready validates and flips status.",
+  "",
+  "## External Dependencies & Fallback Chain",
+  "None — pure-internal artifact contract.",
+  "",
+  "## Risks & Mitigations",
+  "- Risk: longer docs slow review. Mitigation: use tables and stable headings.",
+  "",
+  "## Assumptions",
+  "- Planning consumes these artifacts as the source of truth.",
+  "",
+  "## Open Questions",
+  "None blocking.",
+  "",
+  "## What This Does NOT Do",
+  "- Change artifact storage paths.",
+  "",
+].join("\n");
+
+const VALID_READY_SPEC_BODY = [
+  "## Glossary",
+  "- Brainstorm artifact: the design/spec pair produced before planning.",
+  "",
+  "## Requirements",
+  "| ID | Type | Requirement | Acceptance Criterion | Priority |",
+  "| --- | --- | --- | --- | --- |",
+  "| REQ-001 | Event-driven | The system shall validate rich artifact sections. | mark_ready accepts the artifact pair. | Must |",
+  "",
+  "## Edge Cases",
+  "| ID | Scenario | Expected Behavior | Derived From |",
+  "| --- | --- | --- | --- |",
+  "| EDGE-001 | Missing required heading. | mark_ready rejects with the missing heading. | REQ-001 |",
+  "",
+  "## Verification Matrix",
+  "| REQ ID | Unit Test | Integration Test | E2E Test | Manual Test | Notes |",
+  "| --- | --- | --- | --- | --- | --- |",
+  "| REQ-001 | Yes | Yes | No | No | Covered by brainstorm tests. |",
+  "",
+  "## Verification scenarios",
+  "- Run mark_ready on complete design/spec artifacts.",
+  "",
+  "## Out of Scope",
+  "- Moving artifacts to docs/spec.",
+  "",
+].join("\n");
+
 let scratch: string;
 let envDir: string;
 let prevCwd: string;
@@ -642,11 +708,11 @@ describe("runBrainstorm (real-bridge)", () => {
     if (!designArt || !specArt) throw new Error("scaffolding missing");
     await store.writeArtifact(scratch, TASK, {
       fm: designArt.fm,
-      body: "## Goals\nbuild login\n\n## Trade-offs\nslower release\n\n## Alternatives considered\nrolled own\n",
+      body: VALID_READY_DESIGN_BODY,
     });
     await store.writeArtifact(scratch, TASK, {
       fm: specArt.fm,
-      body: "## Verification scenarios\nlog in via oauth\n\n## Acceptance criteria\nuser session set\n",
+      body: VALID_READY_SPEC_BODY,
     });
 
     const adapter = createFakeAdapter();
@@ -695,8 +761,8 @@ describe("runBrainstorm (real-bridge)", () => {
     await waitForPrompt(adapter);
     const writeArtifact = findCustomTool(adapter, "write_artifact");
     const readArtifact = findCustomTool(adapter, "read_artifact");
-    const designBody = "## Goals\nbuild login\n\n## Trade-offs\nslower release\n\n## Alternatives considered\nrolled own\n";
-    const specBody = "## Verification scenarios\nlog in via oauth\n\n## Acceptance criteria\nuser session set\n";
+    const designBody = VALID_READY_DESIGN_BODY;
+    const specBody = VALID_READY_SPEC_BODY;
 
     const designWrite = await writeArtifact.execute(
       "wa1",

@@ -36,11 +36,29 @@ describe("scaffoldBrainstorm", () => {
     expect(design).toContain("status: draft");
     expect(design).toContain("branch: pi/T-001");
     expect(design).toContain("last_updated_by: orchestrator");
+    expect(design).toContain("## Problem");
+    expect(design).toContain("## Context");
+    expect(design).toContain("## Requirements");
+    expect(design).toContain("## Architectural Decisions");
+    expect(design).toContain("## Approaches Considered");
+    expect(design).toContain("## Data Shapes / Contracts");
+    expect(design).toContain("## Architecture");
+    expect(design).toContain("## External Dependencies & Fallback Chain");
+    expect(design).toContain("## Risks & Mitigations");
+    expect(design).toContain("## Assumptions");
+    expect(design).toContain("## Open Questions");
+    expect(design).toContain("## What This Does NOT Do");
 
     const spec = await readFile(join(scratch, ".harness", "T-001", "spec.md"), "utf8");
     expect(spec).toContain("kind: spec");
     expect(spec).toContain("parent: design.md");
     expect(spec).toContain("status: draft");
+    expect(spec).toContain("## Glossary");
+    expect(spec).toContain("## Requirements");
+    expect(spec).toContain("## Edge Cases");
+    expect(spec).toContain("## Verification Matrix");
+    expect(spec).toContain("## Verification scenarios");
+    expect(spec).toContain("## Out of Scope");
   });
 
   it("does not commit generated brainstorm artifacts", async () => {

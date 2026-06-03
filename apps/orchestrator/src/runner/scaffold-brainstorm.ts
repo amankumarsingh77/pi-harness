@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import type { Artifact } from "@pi-harness/shared";
+import { scaffoldBrainstormBody } from "../agents/brainstorm-artifact-contract.js";
 import { ArtifactsStore } from "../agents/artifacts-store.js";
 
 export type ScaffoldOpts = {
@@ -42,7 +43,7 @@ export async function scaffoldBrainstorm(opts: ScaffoldOpts): Promise<ScaffoldRe
         last_updated: ts,
         last_updated_by: "orchestrator",
       },
-      body: "# Design\n\n_Draft — populated by the brainstorm subagent._\n",
+      body: scaffoldBrainstormBody("design"),
     };
     const spec: Artifact = {
       fm: {
@@ -54,7 +55,7 @@ export async function scaffoldBrainstorm(opts: ScaffoldOpts): Promise<ScaffoldRe
         last_updated: ts,
         last_updated_by: "orchestrator",
       },
-      body: "# Spec\n\n_Draft — populated by the brainstorm subagent._\n",
+      body: scaffoldBrainstormBody("spec"),
     };
     await store.writeArtifact(opts.cwd, opts.taskId, design);
     await store.writeArtifact(opts.cwd, opts.taskId, spec);

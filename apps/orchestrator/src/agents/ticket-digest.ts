@@ -15,13 +15,13 @@ export type DigestInput = {
   specBody: string;
 };
 
-const DESIGN_GOALS_HEADING = "## Goals";
-const SPEC_AC_HEADING = "## Acceptance criteria";
+const DESIGN_PROBLEM_HEADING = "## Problem";
+const SPEC_REQUIREMENTS_HEADING = "## Requirements";
 const SECTION_BODY_CHAR_CAP = 1500;
 
 export function buildTicketDigest(input: DigestInput): string {
-  const goals = extractSection(input.designBody, DESIGN_GOALS_HEADING);
-  const ac = extractSection(input.specBody, SPEC_AC_HEADING);
+  const problem = extractSection(input.designBody, DESIGN_PROBLEM_HEADING);
+  const requirements = extractSection(input.specBody, SPEC_REQUIREMENTS_HEADING);
 
   const parts: string[] = [];
   parts.push(`# Ticket`);
@@ -30,26 +30,26 @@ export function buildTicketDigest(input: DigestInput): string {
   parts.push(``);
   parts.push(input.ticketDescription.trim());
 
-  if (goals) {
+  if (problem) {
     parts.push(``);
-    parts.push(`# Goals (from design.md)`);
+    parts.push(`# Problem (from design.md)`);
     parts.push(``);
-    parts.push(truncate(goals));
+    parts.push(truncate(problem));
   }
 
-  if (ac) {
+  if (requirements) {
     parts.push(``);
-    parts.push(`# Acceptance criteria (from spec.md)`);
+    parts.push(`# Requirements (from spec.md)`);
     parts.push(``);
-    parts.push(truncate(ac));
+    parts.push(truncate(requirements));
   }
 
   parts.push(``);
   parts.push(`# Full context (read on demand)`);
   parts.push(``);
   parts.push(`The full brainstorm artifacts are on disk in this worktree. Read them only if your job needs more than the digest above:`);
-  parts.push(`- \`.harness/<task>/design.md\` — architecture decisions, trade-offs, alternatives`);
-  parts.push(`- \`.harness/<task>/spec.md\` — full requirements + verification scenarios`);
+  parts.push(`- \`.harness/<task>/design.md\` — problem, context, architecture decisions, risks`);
+  parts.push(`- \`.harness/<task>/spec.md\` — requirements table, edge cases, verification matrix`);
 
   return parts.join("\n");
 }

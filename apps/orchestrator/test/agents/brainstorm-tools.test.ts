@@ -65,23 +65,68 @@ function makeArtifact(kind: ArtifactKind, body: string, status: "draft" | "ready
 }
 
 const VALID_DESIGN_BODY = [
-  "## Goals",
-  "Ship a thing.",
+  "## Problem",
+  "Users need a clearer brainstorm contract.",
   "",
-  "## Trade-offs",
-  "Speed vs. correctness.",
+  "## Context",
+  "The current brainstorm artifacts are too terse for planning.",
   "",
-  "## Alternatives considered",
-  "Doing nothing.",
+  "## Requirements",
+  "- Functional: write planner-ready artifacts.",
+  "",
+  "## Architectural Decisions",
+  "- Use markdown sections with stable headings.",
+  "",
+  "## Approaches Considered",
+  "- Keep the old minimal format.",
+  "",
+  "## Data Shapes / Contracts",
+  "- `design.md` and `spec.md` remain harness-owned markdown artifacts.",
+  "",
+  "## Architecture",
+  "The brainstorm agent writes both artifacts and then calls mark_ready.",
+  "",
+  "## External Dependencies & Fallback Chain",
+  "None — pure-internal prompt and validation change.",
+  "",
+  "## Risks & Mitigations",
+  "- Risk: verbose docs become vague. Mitigation: require verification mapping.",
+  "",
+  "## Assumptions",
+  "- The planner reads both artifacts before planning.",
+  "",
+  "## Open Questions",
+  "None blocking.",
+  "",
+  "## What This Does NOT Do",
+  "- Move artifacts out of `.harness/<taskId>`.",
   "",
 ].join("\n");
 
 const VALID_SPEC_BODY = [
+  "## Glossary",
+  "- Brainstorm artifact: the design/spec pair authored before planning.",
+  "",
+  "## Requirements",
+  "| ID | Type | Requirement | Acceptance Criterion | Priority |",
+  "| --- | --- | --- | --- | --- |",
+  "| REQ-001 | Event-driven | The system shall reject incomplete brainstorm artifacts. | mark_ready returns a missing-section error. | Must |",
+  "",
+  "## Edge Cases",
+  "| ID | Scenario | Expected Behavior | Derived From |",
+  "| --- | --- | --- | --- |",
+  "| EDGE-001 | Empty section body. | mark_ready rejects the artifact. | REQ-001 |",
+  "",
+  "## Verification Matrix",
+  "| REQ ID | Unit Test | Integration Test | E2E Test | Manual Test | Notes |",
+  "| --- | --- | --- | --- | --- | --- |",
+  "| REQ-001 | Yes | Yes | No | No | Brainstorm tool tests cover this. |",
+  "",
   "## Verification scenarios",
   "Hit the API and assert 200.",
   "",
-  "## Acceptance criteria",
-  "Endpoint exists and returns JSON.",
+  "## Out of Scope",
+  "- Semantic LLM grading of artifact quality.",
   "",
 ].join("\n");
 
@@ -225,16 +270,32 @@ describe("makeMarkReadyTool", () => {
     expect(eventAppends).toHaveLength(0);
   });
 
-  it("returns missing detail when spec.md lacks ## Acceptance criteria", async () => {
+  it("returns missing detail when spec.md lacks ## Verification Matrix", async () => {
     const { bus } = makeBus();
     const store = makeStore();
     await writeArtifactFile(store, "design", VALID_DESIGN_BODY);
-    await writeArtifactFile(store, "spec", "## Verification scenarios\nfoo\n");
+    await writeArtifactFile(store, "spec", [
+      "## Glossary",
+      "foo",
+      "",
+      "## Requirements",
+      "foo",
+      "",
+      "## Edge Cases",
+      "foo",
+      "",
+      "## Verification scenarios",
+      "foo",
+      "",
+      "## Out of Scope",
+      "foo",
+      "",
+    ].join("\n"));
     const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({
       ok: false,
-      missing: "spec.md missing: ## Acceptance criteria",
+      missing: "spec.md missing: ## Verification Matrix",
       kind: "spec",
       path: expect.stringContaining("/.harness/T-1/spec.md"),
     });
@@ -264,24 +325,20 @@ describe("makeMarkReadyTool", () => {
   it("reports missing when section heading is present but body is whitespace-only", async () => {
     const { bus } = makeBus();
     const store = makeStore();
-    const designEmptyTradeoffs = [
-      "## Goals",
-      "Ship.",
-      "",
-      "## Trade-offs",
-      "   ",
-      "",
-      "## Alternatives considered",
-      "None.",
-      "",
-    ].join("\n");
-    await writeArtifactFile(store, "design", designEmptyTradeoffs);
+    await writeArtifactFile(
+      store,
+      "design",
+      VALID_DESIGN_BODY.replace(
+        "## Architectural Decisions\n- Use markdown sections with stable headings.",
+        "## Architectural Decisions\n   ",
+      ),
+    );
     await writeArtifactFile(store, "spec", VALID_SPEC_BODY);
     const tool = makeMarkReadyTool({ store, bus, cwd, taskId: TASK, countPendingNudges: async () => 0 });
     const result = await fakeExecute(tool, {});
     expect(result.details).toEqual({
       ok: false,
-      missing: "design.md missing: ## Trade-offs (empty)",
+      missing: "design.md missing: ## Architectural Decisions (empty)",
       kind: "design",
       path: expect.stringContaining("/.harness/T-1/design.md"),
     });

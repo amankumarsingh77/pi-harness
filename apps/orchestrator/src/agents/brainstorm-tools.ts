@@ -2,7 +2,11 @@ import { Type, type Static, type TSchema } from "typebox";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Artifact, ArtifactKind, BrainstormMock } from "@pi-harness/shared";
+import type { Artifact, BrainstormMock } from "@pi-harness/shared";
+import {
+  BRAINSTORM_REQUIRED_SECTIONS,
+  type BrainstormArtifactKind,
+} from "./brainstorm-artifact-contract.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import type { BrainstormEventBus } from "./brainstorm-event-bus.js";
 import { findTokenViolations } from "./token-conformance.js";
@@ -145,10 +149,6 @@ const WriteMockRevisionParams = Type.Object({
 });
 
 export type SubmitQuestionsDetails = { awaiting: string[] };
-// Brainstorm writes only `design` and `spec`. Plan/scenarios are owned by
-// the plan phase and have their own required-section check there.
-type BrainstormArtifactKind = Extract<ArtifactKind, "design" | "spec">;
-
 export type ReadArtifactDetails = {
   found: boolean;
   kind: BrainstormArtifactKind;
@@ -301,18 +301,13 @@ export function makeWriteArtifactTool(deps: {
   };
 }
 
-const REQUIRED_SECTIONS: Record<BrainstormArtifactKind, string[]> = {
-  design: ["## Goals", "## Trade-offs", "## Alternatives considered"],
-  spec: ["## Verification scenarios", "## Acceptance criteria"],
-};
-
 // Returns the first missing-section error string, or null if all sections are
 // present with non-empty bodies. A section's body runs from immediately after
 // the heading line to the next line beginning with "## " (or EOF). "Empty"
 // means no non-whitespace character appears in that range.
 function findMissingSection(kind: BrainstormArtifactKind, body: string): string | null {
   const lines = body.split("\n");
-  for (const heading of REQUIRED_SECTIONS[kind]) {
+  for (const heading of BRAINSTORM_REQUIRED_SECTIONS[kind]) {
     const headingIdx = lines.findIndex((l) => l.trim() === heading);
     if (headingIdx === -1) {
       return `${kind}.md missing: ${heading}`;
