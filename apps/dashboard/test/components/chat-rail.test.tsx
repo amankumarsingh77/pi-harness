@@ -103,6 +103,25 @@ describe("ChatRail", () => {
     expect(screen.queryByText("Pi agent sessions created")).not.toBeInTheDocument();
   });
 
+  it("uses a friendly fallback title when a thread title is a raw id", () => {
+    const updatedAt = new Date("2026-05-30T10:00:00Z");
+    const threadId = "0f15936e-21dd-4214-884d-90b886a6cc7b";
+    const threads = [makeThread({ id: threadId, title: threadId, updatedAt })];
+
+    render(
+      <ChatRail
+        threads={threads}
+        activeThreadId={null}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+        now={updatedAt}
+      />,
+    );
+
+    expect(screen.getByText("Chat May 30")).toBeInTheDocument();
+    expect(screen.queryByText(threadId)).not.toBeInTheDocument();
+  });
+
   it("shows branch and time meta in mono font area (REQ-003)", () => {
     const threads = [makeThread({ id: "t1", branch: "main" })];
     render(<ChatRail threads={threads} activeThreadId={null} onNewChat={vi.fn()} onSelectThread={vi.fn()} />);

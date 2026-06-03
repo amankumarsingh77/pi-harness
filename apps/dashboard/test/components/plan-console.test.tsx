@@ -170,6 +170,23 @@ describe("PlanConsole", () => {
     expect(banner).toHaveTextContent("planner blocked by provider error");
   });
 
+  it("surfaces a failed plan recovery summary before raw logs", () => {
+    renderConsole({
+      taskStatus: "plan_failed",
+      headerStatus: "failed - restart to retry",
+      iconKind: "blocked",
+      lastBlocked: {
+        reason: "preflight agent failed to write findings",
+        ts: "2026-05-21T18:58:41.000Z",
+      },
+    });
+
+    const alert = screen.getByRole("alert", { name: "Plan recovery" });
+    expect(alert).toHaveTextContent("Plan failed");
+    expect(alert).toHaveTextContent("preflight agent failed to write findings");
+    expect(within(alert).getByRole("button", { name: "Restart" })).toBeInTheDocument();
+  });
+
   it("omits the blocked banner when lastBlocked is null", () => {
     renderConsole();
     expect(screen.queryByTestId("plan-blocked-banner")).toBeNull();
@@ -288,6 +305,9 @@ function renderConsole(
     readonly executionDag?: Artifact | null;
     readonly lastBlocked?: { reason: string; ts: string } | null;
     readonly preflightSteps?: readonly PreflightStep[];
+    readonly taskStatus?: Task["status"];
+    readonly headerStatus?: string;
+    readonly iconKind?: "intake" | "progress" | "review" | "done" | "blocked";
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -297,11 +317,11 @@ function renderConsole(
     <QueryClientProvider client={queryClient}>
       <PlanEventsProvider runId={null}>
         <PlanConsole
-          task={task()}
+          task={task(opts.taskStatus)}
           runs={[run()]}
           gate="running"
-          headerStatus="in progress"
-          iconKind="progress"
+          headerStatus={opts.headerStatus ?? "in progress"}
+          iconKind={opts.iconKind ?? "progress"}
           canCancelRun
           plan={artifact("plan", planBody)}
           blastRadius={artifact("blast-radius", blastRadiusBody)}
@@ -432,12 +452,12 @@ nodes:
     assertion: tests cover compact phases
 `;
 
-function task(): Task {
+function task(status: Task["status"] = "planning"): Task {
   return {
     id: "T-1",
     title: "Redesign the tasks/:id page",
     description: "",
-    status: "planning",
+    status,
     priority: "high",
     worktreePath: "/tmp/T-1",
     branchName: "codex/task-detail-redesign",

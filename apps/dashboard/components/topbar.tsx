@@ -231,7 +231,7 @@ function NavFallback() {
     <nav className="hidden items-center gap-0.5 sm:flex" aria-hidden="true">
       <span className="rounded px-2.5 py-1 text-[12.5px] text-fg-mute">Board</span>
       <span className="rounded px-2.5 py-1 text-[12.5px] text-fg-mute">Runs</span>
-      <span className="rounded px-2.5 py-1 text-[12.5px] text-fg-mute">Scenarios</span>
+      <span className="rounded px-2.5 py-1 text-[12.5px] text-fg-mute">Chat</span>
     </nav>
   );
 }

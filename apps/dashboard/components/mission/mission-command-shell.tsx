@@ -1,4 +1,5 @@
 import type { Claim, ClaimEvent, MissionEvent, MissionPacket, Run, Task } from "@pi-harness/shared";
+import { FileText, Gavel, RadioTower, ScrollText, ShieldCheck } from "lucide-react";
 
 const CLAIM_STATUS_ORDER: readonly Claim["status"][] = [
   "pending",
@@ -34,8 +35,20 @@ export function MissionCommandShell({
   const transcript = combinedTranscript(missionEvents, claimEvents);
 
   return (
-    <section className="grid grid-cols-1 gap-[18px] lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)_minmax(0,0.95fr)]">
-      <Panel title="Mission Packet" eyebrow={mission.workflowIntent}>
+    <>
+      <nav
+        aria-label="Mission sections"
+        className="mb-4 flex gap-2 overflow-x-auto rounded-[8px] border border-line bg-card p-2"
+      >
+        <SectionAnchor href="#mission-packet" label="Mission Packet" />
+        <SectionAnchor href="#claim-ledger" label="Claim Ledger" />
+        <SectionAnchor href="#runtime-status" label="Runtime" />
+        <SectionAnchor href="#filtered-transcript" label="Transcript" />
+        <SectionAnchor href="#policy-kernel" label="Policy" />
+      </nav>
+
+      <section className="grid grid-cols-1 gap-[18px] lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)_minmax(0,0.95fr)]">
+      <Panel id="mission-packet" title="Mission Packet" eyebrow={mission.workflowIntent} icon={FileText}>
         <div className="space-y-5">
           <div>
             <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint">
@@ -59,7 +72,7 @@ export function MissionCommandShell({
         </div>
       </Panel>
 
-      <Panel title="Claim Ledger" eyebrow={`${claims.length} claims`}>
+      <Panel id="claim-ledger" title="Claim Ledger" eyebrow={`${claims.length} claims`} icon={Gavel}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-line bg-white/[0.02] p-3">
           <div>
             <div className="text-[13px] font-medium text-fg">Verifier sidecar</div>
@@ -97,7 +110,7 @@ export function MissionCommandShell({
         )}
       </Panel>
 
-      <Panel title="Runtime Status" eyebrow={task.status}>
+      <Panel id="runtime-status" title="Runtime Status" eyebrow={task.status} icon={RadioTower}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Metric label="Runs" value={String(runs.length)} />
@@ -129,7 +142,7 @@ export function MissionCommandShell({
         </div>
       </Panel>
 
-      <Panel title="Filtered Transcript" eyebrow={`${transcript.length} events`}>
+      <Panel id="filtered-transcript" title="Filtered Transcript" eyebrow={`${transcript.length} events`} icon={ScrollText}>
         {transcript.length === 0 ? (
           <EmptyState title="No mission transcript events" detail="Mission and claim updates will appear here." />
         ) : (
@@ -144,33 +157,58 @@ export function MissionCommandShell({
         )}
       </Panel>
 
-      <Panel title="Policy Kernel" eyebrow="deferred">
+      <Panel id="policy-kernel" title="Policy Kernel" eyebrow="deferred" icon={ShieldCheck}>
         <div className="space-y-3">
           <Metric label="Profile" value={mission.policyProfile} />
           <EmptyState title="No policy decisions recorded" detail="This slice keeps policy read-only while the ledger becomes durable." />
         </div>
       </Panel>
     </section>
+    </>
   );
 }
 
 function Panel({
+  id,
   title,
   eyebrow,
+  icon: Icon,
   children,
 }: {
+  readonly id: string;
   readonly title: string;
   readonly eyebrow: string;
+  readonly icon: React.ComponentType<{ readonly size?: number; readonly strokeWidth?: number; readonly className?: string }>;
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[8px] border border-line bg-card p-4 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]">
+    <section id={id} className="scroll-mt-20 rounded-[8px] border border-line bg-card p-4 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]">
       <header className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="m-0 text-[14px] font-semibold text-fg">{title}</h2>
+        <h2 className="m-0 flex items-center gap-2 text-[14px] font-semibold text-fg">
+          <Icon size={15} strokeWidth={1.8} className="text-fg-mute" aria-hidden="true" />
+          {title}
+        </h2>
         <span className="max-w-[180px] truncate font-mono text-[11px] text-fg-faint">{eyebrow}</span>
       </header>
       {children}
     </section>
+  );
+}
+
+function SectionAnchor({
+  href,
+  label,
+}: {
+  readonly href: string;
+  readonly label: string;
+}) {
+  return (
+    <a
+      href={href}
+      className="whitespace-nowrap rounded-md border border-line px-3 py-1.5 font-mono text-[11px] text-fg-mute transition-colors hover:border-line-hover hover:bg-white/[0.03] hover:text-fg-body"
+    >
+      {label}
+    </a>
   );
 }
 

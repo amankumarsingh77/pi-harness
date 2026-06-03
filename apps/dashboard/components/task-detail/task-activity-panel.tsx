@@ -28,7 +28,9 @@ export function TaskActivityPanel({
       </div>
       <div className="py-2.5">
         {rows.length === 0 ? (
-          <p className="px-3.5 font-mono text-[11px] text-fg-faint">No activity yet</p>
+          <p className="px-3.5 font-mono text-[11px] text-fg-faint">
+            Start brainstorm to create the first run.
+          </p>
         ) : (
           rows.map((row) => (
             <div

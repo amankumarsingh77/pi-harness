@@ -380,9 +380,7 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("plan crashed")).toBeInTheDocument();
     expect(screen.getByText("code crashed")).toBeInTheDocument();
     expect(screen.getByText("pr crashed")).toBeInTheDocument();
-    expect(screen.queryByText("plan failed")).not.toBeInTheDocument();
-    expect(screen.queryByText("code failed")).not.toBeInTheDocument();
-    expect(screen.queryByText("PR failed")).not.toBeInTheDocument();
+    expect(screen.getAllByText("blocked").length).toBeGreaterThan(0);
   });
 
   it("renders the board toolbar and disabled future views", () => {
@@ -391,7 +389,9 @@ describe("KanbanBoard", () => {
     expect(screen.getByRole("button", { name: "Board" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "List" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Calendar" })).toBeDisabled();
-    expect(screen.getByText("0 cards idle > 30m · auto-cleanup ok")).toBeInTheDocument();
+    expect(screen.getByText(/0 cards idle > 30m/)).toBeInTheDocument();
+    expect(screen.getByText("scroll for all phases")).toBeInTheDocument();
+    expect(screen.getByText("filter")).toBeInTheDocument();
   });
 
   it("filters visible cards by workflow and removes a filter pill", () => {

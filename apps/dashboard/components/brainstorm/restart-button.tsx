@@ -12,9 +12,11 @@ import { restartBrainstormAction } from "@/app/tasks/[id]/actions";
 export function RestartButton({
   taskId,
   disabled,
+  label = "Restart",
 }: {
-  taskId: string;
-  disabled: boolean;
+  readonly taskId: string;
+  readonly disabled: boolean;
+  readonly label?: string;
 }) {
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -41,7 +43,7 @@ export function RestartButton({
         className="rounded-md border border-line bg-transparent px-2.5 py-1 font-mono text-[11.5px] text-fg-mute transition-colors hover:border-line-hover hover:text-fg-body disabled:cursor-not-allowed disabled:opacity-55"
         data-testid="restart-button"
       >
-        Restart
+        {label}
       </button>
 
       {open && (

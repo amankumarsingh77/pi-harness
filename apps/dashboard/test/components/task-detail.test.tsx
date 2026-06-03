@@ -123,6 +123,22 @@ describe("Focused task detail panels", () => {
     expect(screen.getByText("Files touched")).toBeInTheDocument();
   });
 
+  it("renders purposeful guidance before the first run starts", () => {
+    render(
+      <div>
+        <TaskActivityPanel events={[]} />
+        <TaskFactsPanel
+          task={task({ status: "backlog", branchName: null, worktreePath: null })}
+          runs={[]}
+          files={[]}
+        />
+      </div>,
+    );
+
+    expect(screen.getByText(/Start brainstorm to create the first run/)).toBeInTheDocument();
+    expect(screen.getByText(/No run history yet/)).toBeInTheDocument();
+  });
+
   it("opens read-only inspector surfaces without workflow mutation labels", () => {
     const selectedRun = run({ phase: "code", status: "running" });
 

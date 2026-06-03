@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata, Route } from "next";
+import { ArrowLeft, ClipboardPlus } from "lucide-react";
 
 export const metadata: Metadata = { title: "New task · pi-harness" };
 import { Topbar } from "@/components/topbar";
@@ -25,38 +26,42 @@ export default async function NewTaskPage() {
   return (
     <>
       <Topbar runningCount={inFlight} />
-      <main className="mx-auto mb-20 mt-10 max-w-5xl px-8">
-        <nav className="mb-4 flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle">
+      <main className="mx-auto mb-20 mt-8 w-full max-w-5xl px-4 sm:px-6 lg:px-8">
+        <nav
+          className="mb-4 flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle"
+          aria-label="Breadcrumb"
+        >
           <Link href={"/" as Route} className="inline-flex items-center gap-1 text-fg-mute hover:text-fg-body">
-            <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" aria-hidden="true">
-              <path
-                d="M 9 6 L 3 6 M 6 3 L 3 6 L 6 9"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <ArrowLeft size={12} strokeWidth={1.8} aria-hidden="true" />
             Board
           </Link>
           <span className="text-fg-ghost">/</span>
           <span className="text-fg-body">New task</span>
         </nav>
 
-        <form action={createTask} className="overflow-hidden rounded-lg border border-line bg-card">
-          <header className="flex items-center gap-2.5 border-b border-line px-6 py-4">
-            <svg viewBox="0 0 14 14" className="h-3.5 w-3.5 text-st-idle" aria-hidden="true">
-              <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 2.4" />
-            </svg>
-            <h1 className="m-0 font-display text-[15px] font-semibold tracking-[-0.012em] text-fg">
-              Create a task
-            </h1>
+        <form
+          action={createTask}
+          aria-label="Create task form"
+          className="overflow-hidden rounded-lg border border-line bg-card shadow-[0_16px_48px_rgba(0,0,0,0.16)]"
+        >
+          <header className="flex items-start gap-3 border-b border-line px-5 py-4 sm:px-6">
+            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-white/[0.03] text-st-progress">
+              <ClipboardPlus size={17} strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="m-0 font-display text-[18px] font-semibold tracking-[-0.016em] text-fg">
+                Create a task
+              </h1>
+              <p className="m-0 mt-1 text-[12.5px] leading-[1.5] text-fg-mute">
+                Capture the request, then choose the models each agent stage should use.
+              </p>
+            </div>
           </header>
 
-          <div className="px-6 py-5">
-            <Field label="Title" hint="one line, present tense">
+          <div className="px-5 py-5 sm:px-6">
+            <Field label="Title" htmlFor="new-task-title" hint="one line, present tense">
               <input
+                id="new-task-title"
                 name="title"
                 required
                 maxLength={200}
@@ -68,9 +73,11 @@ export default async function NewTaskPage() {
 
             <Field
               label="Description"
+              htmlFor="new-task-description"
               hint="supports markdown · the brainstorm agent reads this verbatim"
             >
               <textarea
+                id="new-task-description"
                 name="description"
                 rows={6}
                 placeholder={`What's the goal? Any constraints? Existing files to look at?\n\ne.g. — Throttle /api/upload to 30 req/min per user. Reset hourly. Should respect the existing token-bucket helper in src/lib/throttle.ts.`}
@@ -96,17 +103,20 @@ export default async function NewTaskPage() {
 
 function Field({
   label,
+  htmlFor,
   hint,
   children,
 }: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
+  readonly label: string;
+  readonly htmlFor?: string;
+  readonly hint?: string;
+  readonly children: React.ReactNode;
 }) {
+  const LabelElement = htmlFor ? "label" : "span";
   return (
     <div className="mb-4 block">
       <div className="mb-1.5 flex items-baseline justify-between font-mono text-[11px] uppercase tracking-[0.04em] text-fg-mute">
-        <span>{label}</span>
+        <LabelElement {...(htmlFor ? { htmlFor } : {})}>{label}</LabelElement>
         {hint && <span className="text-[11px] normal-case tracking-[0.01em] text-fg-faint">{hint}</span>}
       </div>
       {children}

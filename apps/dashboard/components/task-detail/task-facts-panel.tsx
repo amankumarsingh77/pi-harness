@@ -51,7 +51,7 @@ export function TaskFactsPanel({
 
         <MiniCard title="Run history">
           {runs.length === 0 ? (
-            <p className="m-0 font-mono text-[11px] text-fg-faint">no runs yet</p>
+            <p className="m-0 font-mono text-[11px] text-fg-faint">No run history yet</p>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {[...runs].reverse().slice(0, 4).map((run) => (

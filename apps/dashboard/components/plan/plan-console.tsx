@@ -5,6 +5,7 @@ import type { AgentEvent, Artifact, PreflightStep, Run, Task } from "@pi-harness
 import type { PlanGate, PlanJsonlEvent } from "@/lib/api";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
+import { Alert } from "@/components/ui/alert";
 import { PreflightAgentConsole } from "./preflight-agent-console";
 import { PlanArtifactConsole } from "./plan-artifact-console";
 import { PlannerLogPanel } from "./planner-log-panel";
@@ -121,6 +122,21 @@ export function PlanConsole({
               </p>
             </div>
           </section>
+        )}
+
+        {task.status === "plan_failed" && (
+          <div className="mb-3">
+            <Alert
+              tone="danger"
+              title="Plan failed"
+              label="Plan recovery"
+              action={<RestartPlanButton taskId={task.id} disabled={!canRestart} />}
+            >
+              <p className="m-0 break-words font-mono text-[12.5px]">
+                {lastBlocked?.reason || "No failure reason was recorded."}
+              </p>
+            </Alert>
+          </div>
         )}
 
         <PreflightAgentConsole
