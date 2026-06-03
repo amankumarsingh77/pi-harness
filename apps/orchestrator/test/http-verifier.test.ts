@@ -59,11 +59,7 @@ describe("verifier routes", () => {
         "  - id: S-route",
         "    type: api",
         "    name: route scenario",
-        "    request:",
-        "      method: GET",
-        "      url: /healthz",
-        "    expect:",
-        "      status: 200",
+        "    description: GET /healthz returns 200 and reports the service is up.",
       ].join("\n"),
     });
     await claimLedger.syncPlannedClaims(task.id, [

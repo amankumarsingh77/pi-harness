@@ -1,14 +1,11 @@
-import type {
-  ApiScenario,
-  UiScenario,
-  UiVisualScenario,
-  ScenarioResult,
-} from "@pi-harness/shared";
+import type { Scenario, ScenarioResult } from "@pi-harness/shared";
 import type { LegacyRunArtifactsStore } from "./artifacts-store.js";
 
-type RunApi = (o: { scenario: ApiScenario; proofDir: string }) => Promise<ScenarioResult>;
-type RunUi = (o: { scenario: UiScenario; proofDir: string }) => Promise<ScenarioResult>;
-type RunUiVisual = (o: { scenario: UiVisualScenario; proofDir: string }) => Promise<ScenarioResult>;
+// TODO(agentic-verify): the runner stubs ignore scenario shape and return a
+// not-implemented result. The follow-up plan swaps these for a verifier agent.
+type RunApi = (o: { scenario: Scenario; proofDir: string }) => Promise<ScenarioResult>;
+type RunUi = (o: { scenario: Scenario; proofDir: string }) => Promise<ScenarioResult>;
+type RunUiVisual = (o: { scenario: Scenario; proofDir: string }) => Promise<ScenarioResult>;
 
 export type VerifyOpts = {
   taskId: string;

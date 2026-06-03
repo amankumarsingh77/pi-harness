@@ -33,7 +33,7 @@ export type PlanArtifact = {
 
 export type ScenarioResult = {
   id: string;
-  type: "api" | "ui" | "ui-visual";
+  type: string;
   ok: boolean;
   durationMs?: number;
   error?: string;

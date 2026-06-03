@@ -241,16 +241,12 @@ async function writeScenarios(
   });
 }
 
-function scenarioYaml(id: string, url: string): string {
+function scenarioYaml(id: string, hint: string): string {
   return [
     `  - id: ${id}`,
     "    type: api",
     `    name: ${id} scenario`,
-    "    request:",
-    "      method: GET",
-    `      url: ${url}`,
-    "    expect:",
-    "      status: 200",
+    `    description: Exercise ${hint} and verify it responds with a 200 and the expected body.`,
   ].join("\n");
 }
 

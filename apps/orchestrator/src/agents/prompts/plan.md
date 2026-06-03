@@ -24,7 +24,7 @@ A single JSON block matching the `PlanArtifact` schema, fenced by ```json. Requi
 1. **Every `steps[].patternRef` must cite a real file:line** from `codebase-pattern-finder`. No invented references.
 2. **Every `precedentWarnings[].lesson` must trace back to a real commit** from `precedent-locator`.
 3. **`steps[]` are testable.** Each step's `assertion` is the literal predicate that proves it's done — runnable as a test or visible in the verification report.
-4. **`verificationScenarios` come from your `verification-author` subagent call.** You don't author them by hand — dispatch the subagent with the brainstorm + your draft steps and paste back its YAML, converted to the schema.
+4. **`verificationScenarios` are textual briefs.** Each scenario is `id` + a free-string `type` hint + `name` + a prose `description` that states both what to exercise and what proves it passed. No selectors, request bodies, or step lists — the verifier agent derives those. Cover every high/medium `BR-*` unless it's in `outOfScope`.
 5. **`outOfScope` is non-empty.** Every plan has some neighboring change that is *deliberately not* in scope; name it.
 6. **`suggestedWorkflow` defaults to `backend-feature`** in v1 (only option).
 

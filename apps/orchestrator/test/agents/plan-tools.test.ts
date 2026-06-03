@@ -38,15 +38,11 @@ const validScenariosYaml = `scenarios:
   - id: s1
     type: api
     name: smoke
+    description: GET /health returns 200 and the body reports the service is up.
     requirementRefs:
       - REQ-001
     blastRadiusRefs:
       - BR-001
-    request:
-      method: GET
-      url: http://localhost/health
-    expect:
-      status: 200
 `;
 
 const validBlastRadiusYaml = `items:
@@ -390,10 +386,7 @@ describe("mark_ready", () => {
   - id: s1
     type: api
     name: smoke
-    request:
-      method: GET
-      url: http://localhost/health
-`; // expect.status missing
+`; // description missing
     await writePlanArtifacts(validPlanBody, bad);
     const tool = makeMarkReadyTool({
       store, bus, cwd, taskId: "T-1",

@@ -46,23 +46,34 @@ Markdown body must contain these seven sections, each non-empty:
 
 ### `<cwd>/.harness/<taskId>/scenarios.yaml`
 
-YAML body must conform to `ScenarioFileSchema`:
+YAML body must conform to `ScenarioFileSchema`. A scenario is a textual **brief**, not a script:
 
 ```yaml
 scenarios:
   - id: <unique-string>
-    type: api | ui | ui-visual
+    type: <one-word arena hint>      # ui | api | db | cli | grpc | perf | ...
     name: <short label>
+    description: >
+      The instruction AND the acceptance criterion, in prose. What behavior to
+      exercise and what proves it passed. The verifier agent reads this to decide
+      how to set up the environment, which tools it needs (a browser, a DB, the
+      app server), how to drive the behavior, and what evidence to capture.
     requirementRefs: [REQ-001]
     blastRadiusRefs: [BR-001]
-    # type-specific fields per the schema
 ```
 
-Keep the count small — three to eight scenarios is typical. Each scenario should be runnable end-to-end after the coder implements the steps; this file feeds the verify phase directly. Every high or medium risk `BR-*` item from `blast-radius.yaml` must be covered by at least one scenario unless explicitly named in `## Out of scope`.
+`type` is a free-string hint that primes tool choice — not a closed set. Use whatever
+arena fits (`ui`, `api`, `db`, `cli`, …); the verifier agent maps it to tooling. Do **not**
+write selectors, request bodies, step lists, or expected status codes — the agent derives
+those from the `description`. Put everything an agent needs to both *perform* and *judge* the
+check into the `description`.
 
-For API scenarios, prefer root-relative URLs such as `/api/tasks` or `/api/runs/<id>/events` instead of hard-coding `localhost` ports. The verifier resolves root-relative API URLs against the orchestrator base URL. Full `http://...` or `https://...` URLs are also valid when the scenario must target an external service.
+`description` must be substantive (a sentence or more). A scenario whose description doesn't
+state what proves it passed is incomplete.
 
-For UI and UI visual scenarios, `navigate` steps may use root-relative dashboard paths such as `/tasks/<id>/plan`; the verifier resolves them against the dashboard base URL. Use absolute URLs only when the scenario intentionally leaves the dashboard.
+Keep the count small — three to eight scenarios is typical. This file feeds the verify phase
+directly. Every high or medium risk `BR-*` item from `blast-radius.yaml` must be covered by at
+least one scenario unless explicitly named in `## Out of scope`.
 
 ### `<cwd>/.harness/<taskId>/execution-dag.yaml`
 

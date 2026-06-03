@@ -40,7 +40,8 @@ export const PlanArtifactSchema = z.object({
 
 export const ScenarioResultSchema = z.object({
   id: z.string().min(1),
-  type: z.enum(["api", "ui", "ui-visual"]),
+  // Free-string arena hint, mirrors ScenarioSchema.type (ui | api | db | ...).
+  type: z.string().min(1),
   ok: z.boolean(),
   durationMs: z.number().optional(),
   error: z.string().optional(),

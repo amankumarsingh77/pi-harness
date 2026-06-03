@@ -1,19 +1,15 @@
 import { clsx } from "clsx";
 
-const TITLES = {
-  unit:     "UNIT + INTEGRATION",
-  api:      "FUNCTIONAL · API",
-  visual:   "VISUAL · PLAYWRIGHT",
-} as const;
-
 export function EvidenceColumn({
-  type,
+  title,
   passed,
   total,
   capturing = false,
   children,
 }: {
-  type: keyof typeof TITLES;
+  // Free-string label — one column per evidence class present in the proof
+  // report (unit, plus whatever scenario `type` values the plan produced).
+  title: string;
   passed: number;
   total: number;
   capturing?: boolean;
@@ -35,7 +31,7 @@ export function EvidenceColumn({
         </span>
         <h2 className={clsx("m-0 font-mono text-[11px] font-bold tracking-[0.14em]",
                             accent === "green" ? "text-green-fg" : "text-amber-fg")}>
-          {TITLES[type]}
+          {title}
         </h2>
         <span className={clsx("ml-auto font-mono text-xs font-semibold",
                               accent === "green" ? "text-green-fg2" : "text-amber-fg2")}>

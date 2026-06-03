@@ -14,11 +14,7 @@ const validScenariosBody = `scenarios:
   - id: s1
     type: api
     name: smoke
-    request:
-      method: GET
-      url: http://localhost/health
-    expect:
-      status: 200
+    description: GET /health returns 200 and the body reports the service is up.
 `;
 
 const validPlanBody = [

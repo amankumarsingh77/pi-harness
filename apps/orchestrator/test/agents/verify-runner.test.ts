@@ -1,102 +1,32 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { runApiScenario } from "../../src/agents/verify-runner.js";
+import { describe, it, expect } from "vitest";
+import type { Scenario } from "@pi-harness/shared";
+import {
+  runApiScenario,
+  runUiScenario,
+  runUiVisualScenario,
+} from "../../src/agents/verify-runner.js";
 
-let proofDir: string;
+// The deterministic runners were retired when scenarios became textual briefs.
+// Until the agentic verifier lands, every runner returns ok:false with an
+// explicit reason — never a false pass. See TODO(agentic-verify) in the source.
+const scenario: Scenario = {
+  id: "S-001",
+  type: "ui",
+  name: "filter dropdown closes",
+  description: "Open the filter dropdown, click outside, verify it is dismissed.",
+};
 
-beforeAll(async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = String(input);
-    if (url.endsWith("/ok") && init?.method === "POST") {
-      return new Response(JSON.stringify({ received: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    if (url.endsWith("/bad")) {
-      return new Response(JSON.stringify({ error: "bad_signature" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new Response("", { status: 404 });
-  });
-  proofDir = await mkdtemp(join(tmpdir(), "proof-"));
-});
-
-afterAll(async () => {
-  vi.restoreAllMocks();
-  await rm(proofDir, { recursive: true, force: true });
-});
-
-describe("runApiScenario", () => {
-  it("passes when expected status matches", async () => {
-    const result = await runApiScenario({
-      scenario: {
-        id: "ok-200",
-        type: "api",
-        name: "ok",
-        request: { method: "POST", url: "https://example.test/ok", body: {} },
-        expect: { status: 200, body_contains: ["received"] },
-      },
-      proofDir,
+describe("verify-runner stubs (agentic verifier pending)", () => {
+  for (const [label, run] of [
+    ["runApiScenario", runApiScenario],
+    ["runUiScenario", runUiScenario],
+    ["runUiVisualScenario", runUiVisualScenario],
+  ] as const) {
+    it(`${label} reports ok:false with a not-implemented reason`, async () => {
+      const result = await run({ scenario, proofDir: "/tmp/unused" });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/not yet implemented/i);
+      expect(result.id).toBe("S-001");
     });
-    expect(result.ok).toBe(true);
-    expect(result.evidence.status).toBe(200);
-    expect(result.evidence.responseFile).toBeDefined();
-
-    const responseBody = await readFile(
-      join(proofDir, "responses", "ok-200.json"),
-      "utf8",
-    );
-    expect(responseBody).toContain("received");
-  });
-
-  it("resolves root-relative request URLs against the API base URL", async () => {
-    const result = await runApiScenario({
-      scenario: {
-        id: "relative-ok",
-        type: "api",
-        name: "relative ok",
-        request: { method: "POST", url: "/ok", body: {} },
-        expect: { status: 200, body_contains: ["received"] },
-      },
-      proofDir,
-      baseUrl: "https://example.test",
-    });
-
-    expect(result.ok).toBe(true);
-  });
-
-  it("fails when status doesn't match", async () => {
-    const result = await runApiScenario({
-      scenario: {
-        id: "wrong-status",
-        type: "api",
-        name: "wrong",
-        request: { method: "POST", url: "https://example.test/ok", body: {} },
-        expect: { status: 201 },
-      },
-      proofDir,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("status");
-  });
-
-  it("fails when body_contains is missing", async () => {
-    const result = await runApiScenario({
-      scenario: {
-        id: "no-keyword",
-        type: "api",
-        name: "x",
-        request: { method: "POST", url: "https://example.test/ok", body: {} },
-        expect: { status: 200, body_contains: ["nope"] },
-      },
-      proofDir,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("body_contains");
-  });
+  }
 });

@@ -5,31 +5,30 @@ import { z } from "zod";
 import {
   ClaimEvidenceSchema,
   ScenarioFileSchema,
-  type ApiScenario,
   type Claim,
   type ClaimEvidence,
   type ClaimsUpdatedPayload,
   type Scenario,
   type ScenarioFile,
   type ScenarioResult,
-  type UiScenario,
-  type UiVisualScenario,
 } from "@pi-harness/shared";
 import type { ClaimLedgerStore } from "../adapters/mission-store.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 
+// TODO(agentic-verify): runner stubs ignore scenario shape; replaced by the
+// verifier agent in the follow-up plan.
 type RunApiScenario = (opts: {
-  readonly scenario: ApiScenario;
+  readonly scenario: Scenario;
   readonly proofDir: string;
 }) => Promise<ScenarioResult>;
 
 type RunUiScenario = (opts: {
-  readonly scenario: UiScenario;
+  readonly scenario: Scenario;
   readonly proofDir: string;
 }) => Promise<ScenarioResult>;
 
 type RunUiVisualScenario = (opts: {
-  readonly scenario: UiVisualScenario;
+  readonly scenario: Scenario;
   readonly proofDir: string;
 }) => Promise<ScenarioResult>;
 

@@ -13,20 +13,8 @@ describe("runVerify", () => {
       steps: [],
       verificationScenarios: {
         scenarios: [
-          {
-            id: "a",
-            type: "api" as const,
-            name: "a",
-            request: { method: "GET", url: "http://x/y" },
-            expect: { status: 200 },
-          },
-          {
-            id: "b",
-            type: "api" as const,
-            name: "b",
-            request: { method: "GET", url: "http://x/y" },
-            expect: { status: 200 },
-          },
+          { id: "a", type: "api", name: "a", description: "GET /y returns 200 and the body is well-formed." },
+          { id: "b", type: "api", name: "b", description: "GET /y returns 200 and the body is well-formed." },
         ],
       },
       outOfScope: [],
@@ -68,13 +56,7 @@ describe("runVerify", () => {
       steps: [],
       verificationScenarios: {
         scenarios: [
-          {
-            id: "a",
-            type: "api" as const,
-            name: "a",
-            request: { method: "GET", url: "http://x" },
-            expect: { status: 200 },
-          },
+          { id: "a", type: "api", name: "a", description: "GET / returns 200 and the body is well-formed." },
         ],
       },
       outOfScope: [],
