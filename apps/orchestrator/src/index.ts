@@ -19,6 +19,7 @@ import type { PhaseDeps } from "./runner/phase-prompts.js";
 import { buildServer } from "./http/server.js";
 import { ChatSessionStore } from "./adapters/chat-store.js";
 import { TaskWorkflowService } from "./services/task-workflow-service.js";
+import { createGraphifyService } from "./services/graphify-service.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +61,23 @@ async function main(): Promise<void> {
   const artifacts = new ArtifactsStore({ stateDir: config.stateDir });
   const designSystem = new DesignSystemStore({ stateDir: config.stateDir });
   const mockRenderer = new MockRenderer();
+  const graphify = createGraphifyService({
+    cwd: config.repoRoot,
+    config: config.graphify,
+  });
+
+  if (config.graphify.enabled && config.graphify.bootstrap) {
+    const graphifyStatus = await graphify.bootstrap();
+    log.info(
+      {
+        installed: graphifyStatus.installed,
+        version: graphifyStatus.version,
+        graphExists: graphifyStatus.graphExists,
+        job: graphifyStatus.job,
+      },
+      "graphify bootstrap checked",
+    );
+  }
 
   const allTasks = await runs.listTasks();
   const activeTasks = allTasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
@@ -83,6 +101,8 @@ async function main(): Promise<void> {
     preflightSteps,
     claimLedger,
     claimPublisher: liveEvents,
+    graphify,
+    graphifyQueryBudget: config.graphify.queryBudget,
     exec: async (cmd, args, opts) => {
       try {
         const r = await execFileAsync(cmd, args, opts ?? {});
@@ -141,6 +161,9 @@ async function main(): Promise<void> {
     liveEvents,
     preflightSteps,
     chatStore,
+    graphify,
+    graphifyQueryBudget: config.graphify.queryBudget,
+    repoRoot: config.repoRoot,
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   log.info({ port: config.port }, "orchestrator listening");

@@ -149,6 +149,31 @@ export type VerifierRunResult = {
   }[];
 };
 
+export type GraphifyJobStatus = "idle" | "running" | "failed";
+export type GraphifyAction = "update" | "rebuild" | "export";
+export type GraphifyArtifactKind = "report" | "html" | "callflow" | "tree" | "json";
+
+export type GraphifyStatus = {
+  readonly enabled: boolean;
+  readonly bootstrap: boolean;
+  readonly installed: boolean;
+  readonly version: string | null;
+  readonly minVersion: string;
+  readonly graphExists: boolean;
+  readonly reportExists: boolean;
+  readonly htmlExists: boolean;
+  readonly callflowExists: boolean;
+  readonly treeExists: boolean;
+  readonly jsonBytes: number | null;
+  readonly job: {
+    readonly status: GraphifyJobStatus;
+    readonly action: "bootstrap" | "initial-build" | GraphifyAction | null;
+    readonly startedAt: string | null;
+    readonly completedAt: string | null;
+    readonly error: string | null;
+  };
+};
+
 // JSONL events as written by the orchestrator (mirrors AgentEvent's
 // brainstorm_* kinds, but tagged with `kind` directly — no AgentEventBase
 // envelope on disk).
@@ -419,6 +444,9 @@ export type Api = {
     taskId: string,
     payload: { note?: string },
   ) => Promise<{ ok: true; archivedRunId: string; newRunId: string }>;
+  getGraphifyStatus: () => Promise<GraphifyStatus>;
+  getGraphifyReport: () => Promise<string>;
+  runGraphifyAction: (action: GraphifyAction) => Promise<GraphifyStatus>;
   // ── Chat ──────────────────────────────────────────────────────────────────
   createChatThread: (
     input: { title?: string; model?: ChatModelSelection },
@@ -590,6 +618,17 @@ export function api(opts: { baseUrl: string; fetch?: Fetch }): Api {
           body: JSON.stringify(payload),
         },
       ),
+    getGraphifyStatus: () => send<GraphifyStatus>("/api/graphify/status"),
+    getGraphifyReport: async () => {
+      const res = await f(url("/api/graphify/report"));
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        throw new ApiError(res.status, body.message ?? res.statusText, body.error);
+      }
+      return res.text();
+    },
+    runGraphifyAction: (action) =>
+      send<GraphifyStatus>(`/api/graphify/actions/${action}`, { method: "POST" }),
     // ── Chat ──────────────────────────────────────────────────────────────────
     createChatThread: async (input) => {
       const r = await send<ChatThread>("/api/chat/threads", {

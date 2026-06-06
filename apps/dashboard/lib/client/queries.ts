@@ -20,6 +20,8 @@ export const queryKeys = {
   mission: (taskId: string) => ["tasks", taskId, "mission"] as const,
   artifact: (taskId: string, name: "brainstorm" | "plan" | "proof-report") =>
     ["tasks", taskId, "artifacts", name] as const,
+  graphifyStatus: ["graphify", "status"] as const,
+  graphifyReport: ["graphify", "report"] as const,
   chatThreads: ["chat", "threads"] as const,
   chatThread: (id: string) => ["chat", "threads", id] as const,
 };
@@ -56,6 +58,14 @@ export const queries = {
   getArtifact: <T,>(taskId: string, name: "brainstorm" | "plan" | "proof-report") => ({
     queryKey: queryKeys.artifact(taskId, name),
     queryFn: () => proxied.getArtifact<T>(taskId, name),
+  }),
+  getGraphifyStatus: () => ({
+    queryKey: queryKeys.graphifyStatus,
+    queryFn: () => proxied.getGraphifyStatus(),
+  }),
+  getGraphifyReport: () => ({
+    queryKey: queryKeys.graphifyReport,
+    queryFn: () => proxied.getGraphifyReport(),
   }),
   listChatThreads: () => ({
     queryKey: queryKeys.chatThreads,
@@ -94,5 +104,9 @@ export const mutations = {
   }),
   stopChatTurn: (threadId: string) => ({
     mutationFn: () => proxied.stopChatTurn(threadId),
+  }),
+  runGraphifyAction: () => ({
+    mutationFn: (action: Parameters<Api["runGraphifyAction"]>[0]) =>
+      proxied.runGraphifyAction(action),
   }),
 };

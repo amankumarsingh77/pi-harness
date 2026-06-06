@@ -30,6 +30,8 @@ import { registerChatRoutes } from "./routes/chat.js";
 import { ChatSessionStore } from "../adapters/chat-store.js";
 import type { ChatSessionStore as ChatSessionStoreType } from "../adapters/chat-store.js";
 import { registerProviderRoutes } from "./routes/providers.js";
+import { registerGraphifyRoutes } from "./routes/graphify.js";
+import { createGraphifyService, type GraphifyService } from "../services/graphify-service.js";
 
 export type ServerDeps = {
   runs: RunStore;
@@ -63,6 +65,9 @@ export type ServerDeps = {
   chatStore?: ChatSessionStoreType;
   // Injectable createAgentSession for chat routes. Tests provide a scripted mock; production uses the live SDK.
   chatCreateAgentSession?: import("../agents/chat-session.js").CreateAgentSessionFn;
+  graphify?: GraphifyService;
+  graphifyQueryBudget?: number;
+  repoRoot?: string;
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -173,6 +178,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   registerChatRoutes(app, {
     chatStore,
     ...(deps.chatCreateAgentSession ? { createAgentSession: deps.chatCreateAgentSession } : {}),
+    ...(deps.graphify ? { graphify: deps.graphify } : {}),
+    ...(deps.graphifyQueryBudget !== undefined ? { graphifyQueryBudget: deps.graphifyQueryBudget } : {}),
   });
+  const graphify = deps.graphify ?? createGraphifyService({
+    cwd: deps.repoRoot ?? process.cwd(),
+    config: {
+      enabled: false,
+      bootstrap: false,
+      bootBlock: false,
+      minVersion: "0.8.32",
+      bin: "graphify",
+      queryBudget: 2000,
+    },
+  });
+  registerGraphifyRoutes(app, { graphify });
   return app;
 }

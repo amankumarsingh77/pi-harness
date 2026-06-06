@@ -41,6 +41,7 @@ describe("Topbar", () => {
     ]);
     expect(screen.getByRole("navigation")).toHaveTextContent("Board");
     expect(screen.getByRole("navigation")).toHaveTextContent("Runs");
+    expect(screen.getByRole("navigation")).toHaveTextContent("Knowledge");
     expect(strip).toHaveTextContent("running 3");
     expect(strip).toHaveTextContent("review 2");
     expect(strip).toHaveTextContent("blocked 1");
@@ -83,6 +84,14 @@ describe("Topbar", () => {
     const nav = screen.getByRole("navigation", { name: "Primary" });
     const chatLink = within(nav).getByText("Chat").closest("a");
     expect(chatLink).toHaveAttribute("aria-current", "page");
+  });
+
+  it("marks Knowledge link active when pathname starts with /knowledge", () => {
+    pathname.value = "/knowledge";
+    render(<Topbar summary={summary} />);
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const knowledgeLink = within(nav).getByText("Knowledge").closest("a");
+    expect(knowledgeLink).toHaveAttribute("aria-current", "page");
   });
 
   it("does not link primary navigation to missing scenarios route", () => {

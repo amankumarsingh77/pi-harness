@@ -128,4 +128,68 @@ describe("api", () => {
       }),
     );
   });
+
+  it("fetches Graphify status", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        enabled: true,
+        bootstrap: true,
+        installed: true,
+        version: "0.8.32",
+        minVersion: "0.8.32",
+        graphExists: true,
+        reportExists: true,
+        htmlExists: true,
+        callflowExists: false,
+        treeExists: false,
+        jsonBytes: 42,
+        job: {
+          status: "idle",
+          action: null,
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        },
+      }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    const status = await a.getGraphifyStatus();
+
+    expect(status.graphExists).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith("http://x/api/graphify/status", expect.any(Object));
+  });
+
+  it("runs Graphify actions with POST", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({
+        enabled: true,
+        bootstrap: true,
+        installed: true,
+        version: "0.8.32",
+        minVersion: "0.8.32",
+        graphExists: true,
+        reportExists: true,
+        htmlExists: true,
+        callflowExists: false,
+        treeExists: false,
+        jsonBytes: 42,
+        job: {
+          status: "running",
+          action: "update",
+          startedAt: "2026-06-06T00:00:00.000Z",
+          completedAt: null,
+          error: null,
+        },
+      }),
+    );
+    const a = api({ baseUrl: "http://x", fetch: fetchSpy });
+
+    await a.runGraphifyAction("update");
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://x/api/graphify/actions/update",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

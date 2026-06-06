@@ -47,6 +47,12 @@ export function TaskDetailShell({
               workflow <strong>{task.workflow ?? "—"}</strong>
             </MetaPill>
             <Link
+              href="/knowledge"
+              className="inline-flex h-[26px] max-w-full items-center gap-1.5 rounded-full border border-line bg-white/[0.025] px-2.5 font-mono text-[11px] text-fg-mute transition-colors hover:border-fg-faint hover:text-fg"
+            >
+              Knowledge
+            </Link>
+            <Link
               href={`/tasks/${task.id}/mission` as Route}
               className="inline-flex h-[26px] max-w-full items-center gap-1.5 rounded-full border border-line bg-white/[0.025] px-2.5 font-mono text-[11px] text-fg-mute transition-colors hover:border-fg-faint hover:text-fg"
             >

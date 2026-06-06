@@ -22,6 +22,8 @@ import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { makeSubagentFooter } from "./subagent-footer.js";
 import { buildTicketDigest } from "./ticket-digest.js";
 import { ArtifactsStore } from "./artifacts-store.js";
+import { makeGraphifyTools } from "./graphify-tools.js";
+import type { GraphifyService } from "../services/graphify-service.js";
 
 export { PREFLIGHT_SUBAGENTS };
 export type PreflightSubagent = string;
@@ -63,6 +65,8 @@ export type PreflightOpts = {
   specBody: string;
   phaseModel: PhaseModelConfig;
   createAgentSession: CreateAgentSessionFn;
+  graphify?: GraphifyService;
+  graphifyQueryBudget?: number;
   // Lifecycle hook for plan_subagent_started / _ended events. The orchestrator
   // wires this to PlanEventBus.publish in Phase 4; tests stub it to assert
   // ordering and payloads.
@@ -318,6 +322,12 @@ async function runOneSubagent(args: {
   const customTools = [
     ...(gitHistoryTool ? [gitHistoryTool] : []),
     makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent }),
+    ...(opts.graphify
+      ? makeGraphifyTools({
+          graphify: opts.graphify,
+          defaultBudget: opts.graphifyQueryBudget ?? 2000,
+        })
+      : []),
   ];
 
   let session: AgentSession;
@@ -333,6 +343,9 @@ async function runOneSubagent(args: {
         ...def.allowedTools,
         ...(hasGitHistory ? ["git_history"] : []),
         "write_findings",
+        ...customTools
+          .map((tool) => tool.name)
+          .filter((name) => name.startsWith("graphify_")),
       ],
       customTools,
       onEvent: (e) => opts.onSubagentBridgeEvent?.(subagent, e),

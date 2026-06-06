@@ -23,20 +23,36 @@ describe("loadConfig", () => {
       expect(config.stateDir).toBe(join(canonicalRepo, ".harness"));
       expect(config.runsDir).toBe(join(canonicalRepo, ".harness", "runs"));
       expect(config.worktreesDir).toBe(join(canonicalRepo, ".harness", "worktrees"));
-      expect("graphify" in config).toBe(false);
+      expect(config.graphify).toEqual({
+        enabled: true,
+        bootstrap: true,
+        bootBlock: false,
+        minVersion: "0.8.32",
+        bin: "graphify",
+        queryBudget: 2000,
+      });
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }
   });
 
-  it("ignores retired Graphify provider overrides from environment", () => {
+  it("loads Graphify harness integration settings from environment", () => {
     const config = loadConfig({
-      GRAPHIFY_PROVIDER: "custom",
-      GRAPHIFY_MODEL: "model-x",
-      GRAPHIFY_BASE_URL: "https://models.example/v1",
-      GRAPHIFY_API_KEY_ENV: "CUSTOM_API_KEY",
+      HARNESS_GRAPHIFY_ENABLED: "false",
+      HARNESS_GRAPHIFY_BOOTSTRAP: "false",
+      HARNESS_GRAPHIFY_BOOT_BLOCK: "true",
+      HARNESS_GRAPHIFY_MIN_VERSION: "0.9.0",
+      HARNESS_GRAPHIFY_BIN: "/tmp/graphify",
+      HARNESS_GRAPHIFY_QUERY_BUDGET: "800",
     }, "/tmp/repo");
 
-    expect("graphify" in config).toBe(false);
+    expect(config.graphify).toEqual({
+      enabled: false,
+      bootstrap: false,
+      bootBlock: true,
+      minVersion: "0.9.0",
+      bin: "/tmp/graphify",
+      queryBudget: 800,
+    });
   });
 });

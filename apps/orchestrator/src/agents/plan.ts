@@ -43,6 +43,8 @@ import {
   type PreflightSubagent,
   type PreflightSubagentEvent,
 } from "./plan-preflight.js";
+import { makeGraphifyTools } from "./graphify-tools.js";
+import type { GraphifyService } from "../services/graphify-service.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -63,6 +65,8 @@ export type PlanOpts = {
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
+  graphify?: GraphifyService;
+  graphifyQueryBudget?: number;
   ticketTitle: string;
   ticketDescription: string;
   signal?: AbortSignal;
@@ -382,6 +386,8 @@ async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
       specBody: spec.body,
       phaseModel: opts.phaseModel,
       createAgentSession: opts.createAgentSession,
+      ...(opts.graphify !== undefined ? { graphify: opts.graphify } : {}),
+      ...(opts.graphifyQueryBudget !== undefined ? { graphifyQueryBudget: opts.graphifyQueryBudget } : {}),
       ...(preflightSteps !== undefined
         ? { onStep: async (step) => {
             await preflightSteps.upsert(step);
@@ -604,6 +610,12 @@ async function runPlannerStage(
       void cvSession?.abort().catch(() => {});
     };
     innerAbort.signal.addEventListener("abort", onCvAbort, { once: true });
+    const cvGraphifyTools = opts.graphify
+      ? makeGraphifyTools({
+          graphify: opts.graphify,
+          defaultBudget: opts.graphifyQueryBudget ?? 2000,
+        })
+      : [];
     try {
       cvSession = await opts.createAgentSession({
         cwd: opts.cwd,
@@ -618,10 +630,12 @@ async function runPlannerStage(
           ...cvDef.allowedTools,
           "git_history",
           "write_findings",
+          ...cvGraphifyTools.map((tool) => tool.name),
         ],
         customTools: [
           makeGitHistoryTool({ cwd: opts.cwd }),
           makeWriteFindingsTool({ cwd: opts.cwd, taskId: opts.taskId, subagent: "claim-verifier" }),
+          ...cvGraphifyTools,
         ],
         onEvent: cvForward,
       });
@@ -702,6 +716,12 @@ async function runPlannerStage(
   }
 
   const sessionPath = opts.sessionPath;
+  const graphifyTools = opts.graphify
+    ? makeGraphifyTools({
+        graphify: opts.graphify,
+        defaultBudget: opts.graphifyQueryBudget ?? 2000,
+      })
+    : [];
   let session: AgentSession;
   try {
     session = await opts.createAgentSession({
@@ -712,8 +732,12 @@ async function runPlannerStage(
         : {}),
       systemPrompt,
       sessionPath,
-      tools: [...planDef.allowedTools, "mark_ready"],
-      customTools: [markReadyTool],
+      tools: [
+        ...planDef.allowedTools,
+        "mark_ready",
+        ...graphifyTools.map((tool) => tool.name),
+      ],
+      customTools: [markReadyTool, ...graphifyTools],
       onEvent: (e: PiBridgeEvent) => {
         // Forward planner-session bridge events to EventStore (no subagent
         // tag — the dashboard treats untagged events as planner output).

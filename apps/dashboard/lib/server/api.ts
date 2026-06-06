@@ -1,5 +1,5 @@
 import "server-only";
-import { api, ApiError, type Api, type BrainstormBundle, type ChatThreadDetail } from "@/lib/api";
+import { api, ApiError, type Api, type BrainstormBundle, type ChatThreadDetail, type GraphifyStatus } from "@/lib/api";
 import type { ChatThread } from "@pi-harness/shared";
 import {
   MOCK_BRAINSTORM_ARTIFACT,
@@ -99,6 +99,37 @@ export const orchestrator: Api = {
   getPlanDiff: (taskId, kind) => real.getPlanDiff(taskId, kind),
   submitPlanArtifactEdit: (taskId, payload) => real.submitPlanArtifactEdit(taskId, payload),
   restartPlan: (taskId, payload) => real.restartPlan(taskId, payload),
+  getGraphifyStatus: async (): Promise<GraphifyStatus> => {
+    try {
+      return await real.getGraphifyStatus();
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 404 || e.status === 503)) {
+        return {
+          enabled: false,
+          bootstrap: false,
+          installed: false,
+          version: null,
+          minVersion: "0.8.32",
+          graphExists: false,
+          reportExists: false,
+          htmlExists: false,
+          callflowExists: false,
+          treeExists: false,
+          jsonBytes: null,
+          job: {
+            status: "failed",
+            action: null,
+            startedAt: null,
+            completedAt: null,
+            error: "orchestrator unavailable",
+          },
+        };
+      }
+      throw e;
+    }
+  },
+  getGraphifyReport: () => real.getGraphifyReport(),
+  runGraphifyAction: (action) => real.runGraphifyAction(action),
   createChatThread: (input) => real.createChatThread(input),
   listChatThreads: async (): Promise<{ threads: ChatThread[] }> => {
     try {

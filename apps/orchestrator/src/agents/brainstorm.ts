@@ -32,6 +32,8 @@ import {
   makeWriteBrainstormResearchFindingsTool,
   shouldRunWebResearch,
 } from "./web-research-tools.js";
+import { makeGraphifyTools } from "./graphify-tools.js";
+import type { GraphifyService } from "../services/graphify-service.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -47,6 +49,8 @@ export type BrainstormOpts = {
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
+  graphify?: GraphifyService;
+  graphifyQueryBudget?: number;
   ticketTitle?: string;
   ticketDescription?: string;
   signal?: AbortSignal;
@@ -159,6 +163,12 @@ async function runTurn(
     cwd: opts.cwd,
     taskId: opts.taskId,
   });
+  const graphifyTools = opts.graphify
+    ? makeGraphifyTools({
+        graphify: opts.graphify,
+        defaultBudget: opts.graphifyQueryBudget ?? 2000,
+      })
+    : [];
   const writeArtifactTool = makeWriteArtifactTool({
     store: opts.store,
     cwd: opts.cwd,
@@ -301,8 +311,12 @@ async function runTurn(
         replyToUserTool,
         makePiWebSearchTool(),
         makePiWebFetchTool(),
+        ...graphifyTools,
       ],
-      tools: [...brainstormDef.allowedTools],
+      tools: [
+        ...brainstormDef.allowedTools,
+        ...graphifyTools.map((tool) => tool.name),
+      ],
       onEvent: handleEvent,
     });
   } catch (err) {

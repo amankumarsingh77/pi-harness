@@ -18,8 +18,18 @@ export type OrchestratorConfig = {
   // Path to repo root the harness operates on. Worktrees branch off this repo's HEAD.
   // For now this is the same repo the orchestrator runs from; multi-repo support is v2.
   repoRoot: string;
+  graphify: GraphifyConfig;
   logLevel: LogLevel;
   logFormat: LogFormat;
+};
+
+export type GraphifyConfig = {
+  enabled: boolean;
+  bootstrap: boolean;
+  bootBlock: boolean;
+  minVersion: string;
+  bin: string;
+  queryBudget: number;
 };
 
 const VALID_LOG_LEVELS: readonly LogLevel[] = [
@@ -62,6 +72,14 @@ export function loadConfig(
     retryCap: parseInt(env.HARNESS_RETRY_CAP ?? "2", 10),
     executingConcurrency: parseInt(env.HARNESS_EXECUTING_CONCURRENCY ?? "2", 10),
     repoRoot,
+    graphify: {
+      enabled: parseBoolean(env.HARNESS_GRAPHIFY_ENABLED, true),
+      bootstrap: parseBoolean(env.HARNESS_GRAPHIFY_BOOTSTRAP, true),
+      bootBlock: parseBoolean(env.HARNESS_GRAPHIFY_BOOT_BLOCK, false),
+      minVersion: env.HARNESS_GRAPHIFY_MIN_VERSION ?? "0.8.32",
+      bin: env.HARNESS_GRAPHIFY_BIN ?? "graphify",
+      queryBudget: parseInt(env.HARNESS_GRAPHIFY_QUERY_BUDGET ?? "2000", 10),
+    },
     // Default level: info in prod, debug elsewhere. LOG_LEVEL overrides.
     logLevel: parseLogLevel(env.LOG_LEVEL, isProd ? "info" : "debug"),
     // Default format: json in prod, pretty in dev. LOG_FORMAT overrides.
@@ -84,4 +102,11 @@ function resolveRepoRoot(raw: string | undefined, cwd: string): string {
 
 function resolveConfigPath(base: string, path: string): string {
   return isAbsolute(path) ? path : resolve(base, path);
+}
+
+function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined) return fallback;
+  if (raw === "1" || raw.toLowerCase() === "true") return true;
+  if (raw === "0" || raw.toLowerCase() === "false") return false;
+  return fallback;
 }

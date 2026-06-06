@@ -21,6 +21,7 @@ import { DEFAULT_PHASE_MODELS } from "@pi-harness/shared";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import type { ChatSessionStore } from "../../adapters/chat-store.js";
 import { runChatTurn, type CreateAgentSessionFn } from "../../agents/chat-session.js";
+import type { GraphifyService } from "../../services/graphify-service.js";
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -123,6 +124,8 @@ export type ChatRouteDeps = {
    * Tests can override via ServerDeps.
    */
   readonly cwd?: string;
+  readonly graphify?: GraphifyService;
+  readonly graphifyQueryBudget?: number;
   /**
    * Injectable createAgentSession for tests. When absent, the real SDK is imported
    * lazily (only happens in production — never in tests that pass chatStore).
@@ -276,6 +279,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       promptText: parsed.text,
       store: chatStore,
       createAgentSession: resolvedCreateAgentSession,
+      ...(deps.graphify !== undefined ? { graphify: deps.graphify } : {}),
+      ...(deps.graphifyQueryBudget !== undefined ? { graphifyQueryBudget: deps.graphifyQueryBudget } : {}),
       sessionPath: chatStore.sessionPath(threadId),
       signal: controller.signal,
     }).finally(() => {

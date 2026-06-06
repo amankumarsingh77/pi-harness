@@ -20,6 +20,8 @@ import { getSubagent } from "@pi-harness/subagents";
 import type { EventStore } from "../adapters/event-store.js";
 import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
+import { makeGraphifyTools } from "./graphify-tools.js";
+import type { GraphifyService } from "../services/graphify-service.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -31,6 +33,8 @@ export type CodeOpts = {
   eventStore: EventStore;
   phaseModel: PhaseModelConfig;
   createAgentSession: CreateAgentSessionFn;
+  graphify?: GraphifyService;
+  graphifyQueryBudget?: number;
   ticketTitle?: string;
   ticketDescription?: string;
   signal?: AbortSignal;
@@ -308,6 +312,12 @@ async function runOneNode(args: {
   try {
     const def = getSubagent("code");
     const systemPrompt = readFileSync(def.promptPath, "utf8");
+    const graphifyTools = opts.graphify
+      ? makeGraphifyTools({
+          graphify: opts.graphify,
+          defaultBudget: opts.graphifyQueryBudget ?? 2000,
+        })
+      : [];
     await mkdir(join(opts.cwd, ".harness", opts.taskId, "code-sessions"), { recursive: true });
     session = await opts.createAgentSession({
       cwd: opts.cwd,
@@ -317,7 +327,11 @@ async function runOneNode(args: {
         : {}),
       systemPrompt,
       sessionPath: join(opts.cwd, ".harness", opts.taskId, "code-sessions", `${node.id}.jsonl`),
-      tools: [...def.allowedTools],
+      tools: [
+        ...def.allowedTools,
+        ...graphifyTools.map((tool) => tool.name),
+      ],
+      customTools: [...graphifyTools],
       onEvent: (event) => {
         if (event.kind === "message_delta") transcript += event.text;
         forwardCodeBridgeEvent(opts, node.id, event);

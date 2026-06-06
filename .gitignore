@@ -6,7 +6,6 @@ dist
 .reports
 test-results/
 apps/dashboard/test-results/
-.agents/
 *.log
 *.tsbuildinfo
 .env
@@ -14,10 +13,18 @@ apps/dashboard/test-results/
 .env.harness
 .harness/
 coverage
+graphify-out/
 
 # Local agent / tooling state — not project source
 .claude/
-.pi/
+.codex/
+.pi/*
+!.pi/
+!.pi/agent/
+!.pi/agent/skills/
+.pi/agent/skills/*
+!.pi/agent/skills/graphify/
+!.pi/agent/skills/graphify/**
 .playwright-mcp/
 skills-lock.json
 

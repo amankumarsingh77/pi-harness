@@ -16,6 +16,8 @@ import type { AgentSession, AgentSessionOptions, PiBridgeEvent } from "@pi-harne
 import { AuthError } from "@pi-harness/pi-bridge";
 import type { ChatMessage, ChatMessagePart, ChatThread } from "@pi-harness/shared";
 import type { ChatSessionStore } from "../adapters/chat-store.js";
+import { makeGraphifyTools } from "./graphify-tools.js";
+import type { GraphifyService } from "../services/graphify-service.js";
 
 // ── Injectable type for tests ─────────────────────────────────────────────────
 
@@ -40,6 +42,8 @@ export type RunChatTurnOpts = {
   readonly store: Pick<ChatSessionStore, "publishFrame" | "appendMessage">;
   /** Injectable for tests — never hits the live SDK in tests. */
   readonly createAgentSession: CreateAgentSessionFn;
+  readonly graphify?: GraphifyService;
+  readonly graphifyQueryBudget?: number;
   /**
    * Per-thread session file. When set, the pi SDK persists and replays the
    * conversation across turns so follow-up prompts retain context. Without it
@@ -259,6 +263,12 @@ export async function runChatTurn(opts: RunChatTurnOpts): Promise<void> {
 
   let session: AgentSession;
   try {
+    const graphifyTools = opts.graphify
+      ? makeGraphifyTools({
+          graphify: opts.graphify,
+          defaultBudget: opts.graphifyQueryBudget ?? 2000,
+        })
+      : [];
     session = await opts.createAgentSession({
       cwd,
       model: { provider: thread.model.provider, model: thread.model.model },
@@ -266,6 +276,11 @@ export async function runChatTurn(opts: RunChatTurnOpts): Promise<void> {
         ? { thinkingLevel: thread.model.thinkingLevel }
         : {}),
       ...(opts.sessionPath !== undefined ? { sessionPath: opts.sessionPath } : {}),
+      ...(graphifyTools.length > 0
+        ? {
+            customTools: [...graphifyTools],
+          }
+        : {}),
       onEvent,
     });
   } catch (err) {
