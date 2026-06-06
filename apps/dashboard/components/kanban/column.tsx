@@ -41,6 +41,7 @@ export function KanbanColumn({
   activeDragTaskId,
   pendingTaskId,
   humanInterventionTasks,
+  onStartBrainstorm,
 }: {
   status: TaskStatus;
   tasks: Task[];
@@ -48,12 +49,14 @@ export function KanbanColumn({
   activeDragTaskId: string | null;
   pendingTaskId: string | null;
   humanInterventionTasks: ReadonlySet<string>;
+  onStartBrainstorm: (taskId: string) => Promise<void>;
 }) {
   const kind = statusKindFor(status);
   const headerLive = LIVE_STATUSES.has(status) && tasks.length > 0;
   const acceptsBacklogDrop = status === "brainstorming";
   const hasDraggedTask = activeDragTaskId !== null;
-  const dropActive = acceptsBacklogDrop && hasDraggedTask;
+  const dropPending = acceptsBacklogDrop && pendingTaskId !== null;
+  const dropActive = acceptsBacklogDrop && (hasDraggedTask || dropPending);
   const { isDropTarget, ref } = useDroppable<KanbanDndData>({
     id: columnDropId(status),
     data: { kind: "column", status },
@@ -96,9 +99,10 @@ export function KanbanColumn({
             className={clsx(
               "flex h-10 items-center justify-center rounded-md border border-dashed border-st-progress font-mono text-[11.5px] text-st-progress",
               isDropTarget && "bg-white/[0.035]",
+              dropPending && "border-line-hover text-fg-mute",
             )}
           >
-            drop to start brainstorm
+            {dropPrompt({ isDropTarget, dropPending })}
           </div>
         )}
         {tasks.map((t) => (
@@ -107,11 +111,12 @@ export function KanbanColumn({
             task={t}
             pending={pendingTaskId === t.id}
             requiresHumanIntervention={humanInterventionTasks.has(t.id)}
+            onStartBrainstorm={onStartBrainstorm}
           />
         ))}
         {tasks.length === 0 && status === "backlog" && (
           <div className="flex h-10 items-center justify-center rounded-md border border-dashed border-line text-[11.5px] text-fg-faint">
-            drop here · or ⌘N
+            new tasks start here
           </div>
         )}
         {tasks.length === 0 && status !== "backlog" && !dropActive && (
@@ -126,10 +131,21 @@ export function KanbanColumn({
         )}
         {tasks.length > 0 && status === "backlog" && (
           <div className="flex h-10 items-center justify-center rounded-md border border-dashed border-line text-[11.5px] text-fg-faint">
-            drop here · or ⌘N
+            new tasks start here
           </div>
         )}
       </div>
     </section>
   );
+}
+
+function dropPrompt({
+  isDropTarget,
+  dropPending,
+}: {
+  readonly isDropTarget: boolean;
+  readonly dropPending: boolean;
+}): string {
+  if (dropPending) return "starting brainstorm";
+  return isDropTarget ? "release to start brainstorm" : "drop to start brainstorm";
 }

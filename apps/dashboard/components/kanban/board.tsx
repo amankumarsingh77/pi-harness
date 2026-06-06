@@ -1,7 +1,7 @@
 "use client";
 
 import type { Task, TaskPriority, TaskStatus, Workflow } from "@pi-harness/shared";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/react";
 import { SlidersHorizontal } from "lucide-react";
@@ -62,6 +62,7 @@ export function KanbanBoard({
 }) {
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
+  const pendingTaskIdRef = useRef<string | null>(null);
   const [filters, setFilters] = useState<BoardFilters>(initialFilters);
   const transitionTask = onTransition ?? createDefaultTransition();
   const visibleTasks = useMemo(() => filterTasks(tasks, filters), [tasks, filters]);
@@ -93,21 +94,28 @@ export function KanbanBoard({
 
   const handleDragStart = (event: DragStartEvent): void => {
     const data = event.operation.source?.data;
-    setActiveDragTaskId(isTaskDragData(data) ? data.taskId : null);
+    setActiveDragTaskId(isTaskDragData(data) && data.status === "backlog" ? data.taskId : null);
   };
+
+  const startBrainstormFromBoard = useCallback(async (taskId: string): Promise<void> => {
+    if (pendingTaskIdRef.current !== null) return;
+    pendingTaskIdRef.current = taskId;
+    setPendingTaskId(taskId);
+    try {
+      await transitionTask(taskId, START_BRAINSTORM);
+    } finally {
+      pendingTaskIdRef.current = null;
+      setPendingTaskId(null);
+    }
+  }, [transitionTask]);
 
   const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
     setActiveDragTaskId(null);
     const source = event.operation.source?.data;
     const target = event.operation.target?.data;
     if (event.canceled || !isTaskDragData(source) || !isColumnDropData(target)) return;
-    if (target.status !== "brainstorming" || pendingTaskId !== null) return;
-    setPendingTaskId(source.taskId);
-    try {
-      await transitionTask(source.taskId, START_BRAINSTORM);
-    } finally {
-      setPendingTaskId(null);
-    }
+    if (activeDragTaskId !== source.taskId || target.status !== "brainstorming") return;
+    await startBrainstormFromBoard(source.taskId);
   };
 
   return (
@@ -143,6 +151,7 @@ export function KanbanBoard({
                 activeDragTaskId={activeDragTaskId}
                 pendingTaskId={pendingTaskId}
                 humanInterventionTasks={humanInterventionTasks}
+                onStartBrainstorm={startBrainstormFromBoard}
               />
             ))}
           </div>

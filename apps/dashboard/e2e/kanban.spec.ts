@@ -39,23 +39,59 @@ test("dragging backlog card to Brainstorming starts the phase", async ({ page })
   const api = await apiRequest.newContext({ baseURL: orchestratorUrl });
   const created = await api.post("/api/tasks", { data: { title: "e2e-drag-to-brainstorm" } });
   expect(created.ok()).toBeTruthy();
+
+  await page.goto("/");
+  const card = page.getByTestId("kanban-column-backlog").locator("[data-testid^='task-card-']").first();
+  const target = page.getByTestId("kanban-column-brainstorming");
+  await expect(card).toBeAttached();
+  await expect(card).toBeVisible();
+  const href = await card.getByRole("link", { name: /^Open / }).getAttribute("href");
+  const taskId = href?.split("/").at(-1);
+  if (!taskId) throw new Error("Missing task id in card link");
+
+  await dragToColumn(page, card, target);
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect.poll(async () => {
+    const response = await api.get(`/api/tasks/${taskId}`);
+    return (await response.json()).task.status;
+  }).toBe("brainstorming");
+});
+
+test("dragging and releasing away from a drop target stays on the board", async ({ page }) => {
+  const api = await apiRequest.newContext({ baseURL: orchestratorUrl });
+  const created = await api.post("/api/tasks", { data: { title: "e2e-drag-release-away" } });
+  expect(created.ok()).toBeTruthy();
   const task = await created.json();
 
   await page.goto("/");
   const card = page.getByTestId(`task-card-${task.id}`);
-  const target = page.getByTestId("kanban-column-brainstorming");
-  await expect(card).toBeAttached();
   await expect(card).toBeVisible();
-  await longPressDragToColumn(page, card, target);
 
-  await expect(card.getByText("e2e-drag-to-brainstorm")).toBeVisible();
+  await dragAwayFromDropTargets(page, card);
+
+  await expect(page).toHaveURL(/\/$/);
+  const response = await api.get(`/api/tasks/${task.id}`);
+  expect((await response.json()).task.status).toBe("backlog");
+});
+
+test("starting backlog card from the accessible action starts the phase", async ({ page }) => {
+  const api = await apiRequest.newContext({ baseURL: orchestratorUrl });
+  const created = await api.post("/api/tasks", { data: { title: "e2e-action-to-brainstorm" } });
+  expect(created.ok()).toBeTruthy();
+  const task = await created.json();
+
+  await page.goto("/");
+  const card = page.getByTestId(`task-card-${task.id}`);
+  await card.getByRole("button", { name: "Start brainstorm for e2e-action-to-brainstorm" }).click();
+
   await expect.poll(async () => {
     const response = await api.get(`/api/tasks/${task.id}`);
     return (await response.json()).task.status;
   }).toBe("brainstorming");
 });
 
-async function longPressDragToColumn(
+async function dragToColumn(
   page: Page,
   card: Locator,
   target: Locator,
@@ -66,7 +102,7 @@ async function longPressDragToColumn(
 
   const start = {
     x: cardBox.x + cardBox.width / 2,
-    y: cardBox.y + cardBox.height / 2,
+    y: cardBox.y + 14,
   };
   const end = {
     x: targetBox.x + targetBox.width / 2,
@@ -75,7 +111,25 @@ async function longPressDragToColumn(
 
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.waitForTimeout(600);
   await page.mouse.move(end.x, end.y, { steps: 12 });
+  await page.mouse.up();
+}
+
+async function dragAwayFromDropTargets(page: Page, card: Locator): Promise<void> {
+  const cardBox = await card.boundingBox();
+  if (!cardBox) throw new Error("Missing drag geometry");
+
+  const start = {
+    x: cardBox.x + cardBox.width / 2,
+    y: cardBox.y + 14,
+  };
+  const end = {
+    x: start.x,
+    y: start.y + 40,
+  };
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
   await page.mouse.up();
 }
