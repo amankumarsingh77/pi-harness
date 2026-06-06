@@ -55,6 +55,25 @@ export const PLAN_REQUIRED_SECTIONS = [
   "## Out of scope",
 ] as const;
 
+export const PLAN_OVERVIEW_REQUIRED_SECTIONS = [
+  "## Goal",
+  "## Plan Summary",
+  "## Phase DAG",
+  "## Phases",
+  "## Cross-Phase Risks",
+  "## Out of scope",
+] as const;
+
+export const PHASE_PLAN_REQUIRED_SECTIONS = [
+  "## Objective",
+  "## Decisions",
+  "## Touchpoints",
+  "## Work Slices",
+  "## Phase Verification Contract",
+  "## Failure Modes",
+  "## Exit Criteria",
+] as const;
+
 // claim-verifier dispatch state, scoped to one runPlan invocation. The handler
 // receives this so the cap is enforced *across* multiple mark_ready calls
 // within the same run (each rejected mark_ready leaves the agent free to fix
@@ -139,10 +158,12 @@ export function makeMarkReadyTool(deps: {
       if (!blastRadius) return reject("blast-radius.yaml not found");
       const executionDag = await store.readArtifact(cwd, taskId, "execution-dag");
       if (!executionDag) return reject("execution-dag.yaml not found");
+      const phasePlans = await store.listPhasePlanArtifacts(cwd, taskId);
 
       // 2. Frontmatter status invariant: must be draft or ready.
       for (const [name, art] of [
         ["plan.md", plan],
+        ...phasePlans.map((art) => [`plan-${art.fm.phase}.md`, art] as const),
         ["scenarios.yaml", scenarios],
         ["blast-radius.yaml", blastRadius],
         ["execution-dag.yaml", executionDag],
@@ -155,6 +176,10 @@ export function makeMarkReadyTool(deps: {
       // 3. plan.md required sections.
       const missingSection = findMissingSection(plan.body);
       if (missingSection) return reject(missingSection);
+      const phasePlanRefError = validateReferencedPhasePlans(plan.body, phasePlans);
+      if (phasePlanRefError) return reject(phasePlanRefError);
+      const phasePlanSectionError = validatePhasePlanSections(phasePlans);
+      if (phasePlanSectionError) return reject(phasePlanSectionError);
 
       // 4. scenarios.yaml schema.
       const scenariosError = validateScenariosYaml(scenarios.body);
@@ -165,6 +190,8 @@ export function makeMarkReadyTool(deps: {
       if (executionDagError) return reject(`execution-dag.yaml: ${executionDagError}`);
       const planDagError = validatePlanStepsCoveredByDag(plan.body, executionDag.body);
       if (planDagError) return reject(`execution-dag.yaml: ${planDagError}`);
+      const phasePlanDagError = validatePhasePlanStepsCoveredByDag(phasePlans, executionDag.body);
+      if (phasePlanDagError) return reject(`execution-dag.yaml: ${phasePlanDagError}`);
 
       // 5. claim-verifier gate. The vendored claim-verifier subagent reviews
       //    plan.md for unsupported claims; if any come back Falsified the
@@ -173,7 +200,7 @@ export function makeMarkReadyTool(deps: {
       const claimsResult = await runClaimVerifier({
         cwd,
         taskId,
-        planBody: plan.body,
+        planBody: combinedPlanBody(plan, phasePlans),
         dispatchClaimVerifier,
         state: claimVerifierState,
       });
@@ -216,6 +243,7 @@ export function makeMarkReadyTool(deps: {
       // Already-ready: skip the status flip but still terminate.
       const alreadyReady =
         plan.fm.status === "ready" &&
+        phasePlans.every((artifact) => artifact.fm.status === "ready") &&
         scenarios.fm.status === "ready" &&
         blastRadius.fm.status === "ready" &&
         executionDag.fm.status === "ready";
@@ -229,7 +257,7 @@ export function makeMarkReadyTool(deps: {
 
       // 6. Flip both artifacts to ready, write back, publish status_changed.
       const now = new Date().toISOString();
-      for (const cur of [plan, scenarios, blastRadius, executionDag] as const) {
+      for (const cur of [plan, ...phasePlans, scenarios, blastRadius, executionDag] as const) {
         const next: Artifact = {
           fm: {
             ...cur.fm,
@@ -301,11 +329,25 @@ function plannedClaimsFromScenarios(body: string): PlannedClaimInput[] {
 // after its heading line to the next "## " heading (or EOF) and must contain
 // at least one non-whitespace character.
 function findMissingSection(body: string): string | null {
+  const legacyMissing = findMissingSectionFrom(body, PLAN_REQUIRED_SECTIONS, "plan.md");
+  if (legacyMissing === null) return null;
+
+  const overviewMissing = findMissingSectionFrom(body, PLAN_OVERVIEW_REQUIRED_SECTIONS, "plan.md");
+  if (overviewMissing === null) return null;
+  if (body.includes("## Phases") || body.match(/\bplan-\d+\.md\b/)) return overviewMissing;
+  return legacyMissing;
+}
+
+function findMissingSectionFrom(
+  body: string,
+  headings: readonly string[],
+  name: string,
+): string | null {
   const lines = body.split("\n");
-  for (const heading of PLAN_REQUIRED_SECTIONS) {
+  for (const heading of headings) {
     const headingIdx = lines.findIndex((l) => l.trim() === heading);
     if (headingIdx === -1) {
-      return `plan.md missing: ${heading}`;
+      return `${name} missing: ${heading}`;
     }
     let hasContent = false;
     for (let i = headingIdx + 1; i < lines.length; i += 1) {
@@ -317,10 +359,65 @@ function findMissingSection(body: string): string | null {
       }
     }
     if (!hasContent) {
-      return `plan.md missing: ${heading} (empty)`;
+      return `${name} missing: ${heading} (empty)`;
     }
   }
   return null;
+}
+
+function validateReferencedPhasePlans(
+  planBody: string,
+  phasePlans: readonly Artifact[],
+): string | null {
+  const phases = new Set(phasePlans.map((artifact) => artifact.fm.phase).filter(isNumber));
+  const missing = extractReferencedPhaseNumbers(planBody).filter((phase) => !phases.has(phase));
+  return missing.length > 0
+    ? `plan.md references missing phase plan: ${artifactFileNameForPhase(missing[0]!)}`
+    : null;
+}
+
+function validatePhasePlanSections(phasePlans: readonly Artifact[]): string | null {
+  for (const artifact of phasePlans) {
+    const phase = artifact.fm.phase;
+    const name = phase === undefined ? "phase plan" : artifactFileNameForPhase(phase);
+    const missing = findMissingSectionFrom(artifact.body, PHASE_PLAN_REQUIRED_SECTIONS, name);
+    if (missing) return missing;
+  }
+  return null;
+}
+
+function validatePhasePlanStepsCoveredByDag(
+  phasePlans: readonly Artifact[],
+  executionDagBody: string,
+): string | null {
+  const stepIds = [...new Set(phasePlans.flatMap((artifact) => extractPlanStepIds(artifact.body)))];
+  if (stepIds.length === 0) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(executionDagBody);
+  } catch {
+    return null;
+  }
+  const dag = ExecutionDagSchema.safeParse(parsed);
+  if (!dag.success) return null;
+  const dagIds = new Set(dag.data.nodes.map((node) => node.id));
+  const missing = stepIds.filter((id) => !dagIds.has(id));
+  return missing.length > 0
+    ? `phase plan step(s) missing matching DAG node(s): ${missing.join(", ")}`
+    : null;
+}
+
+function combinedPlanBody(plan: Artifact, phasePlans: readonly Artifact[]): string {
+  return [
+    "# plan.md",
+    plan.body,
+    ...phasePlans.flatMap((artifact) => [
+      "",
+      `# ${artifactFileNameForPhase(artifact.fm.phase ?? 0)}`,
+      artifact.body,
+    ]),
+  ].join("\n");
 }
 
 // Parse the scenarios.yaml *body* (frontmatter already stripped by
@@ -380,8 +477,22 @@ function validatePlanStepsCoveredByDag(planBody: string, executionDagBody: strin
 function extractPlanStepIds(planBody: string): string[] {
   return planBody
     .split("\n")
-    .map((line) => line.match(/^\s*(?:\d+\.|-)\s+(C-\d+)\b/)?.[1])
+    .map((line) => line.match(/^\s*(?:#{1,6}\s+|\d+\.\s+|-\s+)?(C-\d+)\b/)?.[1])
     .filter((id): id is string => id !== undefined);
+}
+
+function extractReferencedPhaseNumbers(body: string): number[] {
+  return [...body.matchAll(/\bplan-(\d+)\.md\b/g)]
+    .map((match) => Number.parseInt(match[1] ?? "", 10))
+    .filter((phase) => Number.isInteger(phase) && phase > 0);
+}
+
+function artifactFileNameForPhase(phase: number): string {
+  return `plan-${phase}.md`;
+}
+
+function isNumber(value: number | undefined): value is number {
+  return value !== undefined;
 }
 
 type ClaimVerifierOutcome =

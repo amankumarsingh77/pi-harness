@@ -21,6 +21,7 @@ export function PlanBody({
   planEvents,
   preflightSteps,
   plan,
+  phasePlans,
   blastRadius,
   scenarios,
   executionDag,
@@ -37,6 +38,7 @@ export function PlanBody({
   planEvents: PlanJsonlEvent[];
   preflightSteps: PreflightStep[];
   plan: Artifact | null;
+  phasePlans: readonly Artifact[];
   blastRadius: Artifact | null;
   scenarios: Artifact | null;
   executionDag: Artifact | null;
@@ -54,6 +56,7 @@ export function PlanBody({
       iconKind={iconKind}
       canCancelRun={canCancelRun}
       plan={plan}
+      phasePlans={phasePlans}
       blastRadius={blastRadius}
       scenarios={scenarios}
       executionDag={executionDag}

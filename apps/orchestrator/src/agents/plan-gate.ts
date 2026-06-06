@@ -23,8 +23,9 @@ export async function derivePlanGate(
   taskId: string,
   store: ArtifactsStore,
 ): Promise<PlanGate> {
-  const [plan, scenarios, blastRadius, executionDag] = await Promise.all([
+  const [plan, phasePlans, scenarios, blastRadius, executionDag] = await Promise.all([
     store.readArtifact(cwd, taskId, "plan"),
+    store.listPhasePlanArtifacts(cwd, taskId),
     store.readArtifact(cwd, taskId, "scenarios"),
     store.readArtifact(cwd, taskId, "blast-radius"),
     store.readArtifact(cwd, taskId, "execution-dag"),
@@ -36,6 +37,7 @@ export async function derivePlanGate(
     s === "ready" || s === "human_edited" || s === "approved";
   const artifactsReady =
     isApprovable(plan?.fm.status) &&
+    phasePlans.every((artifact) => isApprovable(artifact.fm.status)) &&
     isApprovable(scenarios?.fm.status) &&
     isApprovable(blastRadius?.fm.status) &&
     isApprovable(executionDag?.fm.status);

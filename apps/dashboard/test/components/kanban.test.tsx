@@ -370,7 +370,7 @@ describe("KanbanBoard", () => {
     );
   });
 
-  it("plan_failed / code_failed / pr_failed bucket under their parent phase columns without phase text", () => {
+  it("plan_failed / code_failed / pr_failed bucket under their parent phase columns without card status badges", () => {
     const tasks = [
       baseTask({ id: "p", title: "plan crashed", status: "plan_failed" }),
       baseTask({ id: "c", title: "code crashed", status: "code_failed" }),
@@ -380,7 +380,10 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("plan crashed")).toBeInTheDocument();
     expect(screen.getByText("code crashed")).toBeInTheDocument();
     expect(screen.getByText("pr crashed")).toBeInTheDocument();
-    expect(screen.getAllByText("blocked").length).toBeGreaterThan(0);
+    expect(screen.queryByText("blocked")).not.toBeInTheDocument();
+    expect(screen.queryByText("plan failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("code failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("pr failed")).not.toBeInTheDocument();
   });
 
   it("renders the board toolbar and disabled future views", () => {

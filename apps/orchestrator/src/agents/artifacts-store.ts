@@ -120,11 +120,21 @@ function toBrainstormMiniature(
 // Per-kind on-disk file name. Markdown for prose artifacts; YAML for the
 // plan phase's structured scenarios file (consumed by the verify phase).
 // Centralized so callers never compose a path themselves.
-export function artifactFileName(kind: ArtifactKind): string {
+export function artifactFileName(kind: ArtifactKind, phase?: number): string {
+  if (kind === "phase-plan") {
+    if (phase === undefined) {
+      throw new Error("phase-plan artifact requires a phase number");
+    }
+    return `plan-${phase}.md`;
+  }
   if (kind === "scenarios" || kind === "blast-radius" || kind === "execution-dag") {
     return `${kind}.yaml`;
   }
   return `${kind}.md`;
+}
+
+function artifactFileNameForArtifact(art: Artifact): string {
+  return artifactFileName(art.fm.kind, art.fm.phase);
 }
 
 type ArtifactWriteResult = {
@@ -176,6 +186,10 @@ export class ArtifactsStore {
     return join(this.currentArtifactDir(cwd, taskId), artifactFileName(kind));
   }
 
+  currentPhasePlanArtifactPath(cwd: string, taskId: string, phase: number): string {
+    return join(this.currentArtifactDir(cwd, taskId), artifactFileName("phase-plan", phase));
+  }
+
   artifactHistoryDir(cwd: string, taskId: string, kind: ArtifactKind): string {
     return join(this.taskDir(cwd, taskId), "artifacts", "history", kind);
   }
@@ -190,6 +204,10 @@ export class ArtifactsStore {
 
   artifactPath(cwd: string, taskId: string, kind: ArtifactKind): string {
     return join(this.artifactDir(cwd, taskId), artifactFileName(kind));
+  }
+
+  phasePlanArtifactPath(cwd: string, taskId: string, phase: number): string {
+    return join(this.artifactDir(cwd, taskId), artifactFileName("phase-plan", phase));
   }
 
   mockDir(cwd: string, taskId: string): string {
@@ -226,6 +244,28 @@ export class ArtifactsStore {
     return parseArtifact(raw);
   }
 
+  async readPhasePlanArtifact(
+    cwd: string,
+    taskId: string,
+    phase: number,
+  ): Promise<Artifact | null> {
+    await this.syncPhasePlanMirrorIfNewer(cwd, taskId, phase);
+    const path = this.currentPhasePlanArtifactPath(cwd, taskId, phase);
+    if (!existsSync(path)) return null;
+    const raw = await readFile(path, "utf8");
+    return parseArtifact(raw);
+  }
+
+  async listPhasePlanArtifacts(cwd: string, taskId: string): Promise<Artifact[]> {
+    const phases = await this.discoverPhasePlanNumbers(cwd, taskId);
+    const artifacts = await Promise.all(
+      phases.map((phase) => this.readPhasePlanArtifact(cwd, taskId, phase)),
+    );
+    return artifacts
+      .filter((artifact): artifact is Artifact => artifact !== null)
+      .sort((a, b) => (a.fm.phase ?? 0) - (b.fm.phase ?? 0));
+  }
+
   async listArtifacts(
     cwd: string,
     taskId: string,
@@ -259,8 +299,8 @@ export class ArtifactsStore {
     art: Artifact,
   ): Promise<ArtifactWriteResult> {
     const serialized = stringifyArtifact(art);
-    const currentPath = this.currentArtifactPath(cwd, taskId, art.fm.kind);
-    const mirrorPath = this.artifactPath(cwd, taskId, art.fm.kind);
+    const currentPath = this.currentArtifactPathForArtifact(cwd, taskId, art);
+    const mirrorPath = this.artifactPathForArtifact(cwd, taskId, art);
     await atomicWrite(currentPath, serialized);
     await atomicWrite(mirrorPath, serialized);
     const artifactRevisionId = await this.writeRevision(cwd, taskId, art, serialized);
@@ -276,13 +316,14 @@ export class ArtifactsStore {
     const revisionId = createRevisionId();
     const revisionPath = join(
       this.artifactHistoryDir(cwd, taskId, art.fm.kind),
-      `${revisionId}.${artifactFileName(art.fm.kind)}`,
+      `${revisionId}.${artifactFileNameForArtifact(art)}`,
     );
     await atomicWrite(revisionPath, serialized);
     return revisionId;
   }
 
   private async syncMirrorIfNewer(cwd: string, taskId: string, kind: ArtifactKind): Promise<void> {
+    if (kind === "phase-plan") return;
     const currentPath = this.currentArtifactPath(cwd, taskId, kind);
     const mirrorPath = this.artifactPath(cwd, taskId, kind);
     if (!existsSync(mirrorPath)) return;
@@ -294,6 +335,50 @@ export class ArtifactsStore {
     const artifact = parseArtifact(raw);
     await atomicWrite(currentPath, raw);
     await this.writeRevision(cwd, taskId, artifact, raw);
+  }
+
+  private async syncPhasePlanMirrorIfNewer(
+    cwd: string,
+    taskId: string,
+    phase: number,
+  ): Promise<void> {
+    const currentPath = this.currentPhasePlanArtifactPath(cwd, taskId, phase);
+    const mirrorPath = this.phasePlanArtifactPath(cwd, taskId, phase);
+    if (!existsSync(mirrorPath)) return;
+    if (existsSync(currentPath)) {
+      const [mirrorStats, currentStats] = await Promise.all([stat(mirrorPath), stat(currentPath)]);
+      if (mirrorStats.mtimeMs <= currentStats.mtimeMs) return;
+    }
+    const raw = await readFile(mirrorPath, "utf8");
+    const artifact = parseArtifact(raw);
+    await atomicWrite(currentPath, raw);
+    await this.writeRevision(cwd, taskId, artifact, raw);
+  }
+
+  private currentArtifactPathForArtifact(cwd: string, taskId: string, art: Artifact): string {
+    if (art.fm.kind === "phase-plan") {
+      return this.currentPhasePlanArtifactPath(cwd, taskId, requirePhase(art));
+    }
+    return this.currentArtifactPath(cwd, taskId, art.fm.kind);
+  }
+
+  private artifactPathForArtifact(cwd: string, taskId: string, art: Artifact): string {
+    if (art.fm.kind === "phase-plan") {
+      return this.phasePlanArtifactPath(cwd, taskId, requirePhase(art));
+    }
+    return this.artifactPath(cwd, taskId, art.fm.kind);
+  }
+
+  private async discoverPhasePlanNumbers(cwd: string, taskId: string): Promise<number[]> {
+    const dirs = [this.currentArtifactDir(cwd, taskId), this.artifactDir(cwd, taskId)];
+    const phases = await Promise.all(dirs.map(readPhasePlanNumbers));
+    return [...new Set(phases.flat())].sort((a, b) => a - b);
+  }
+
+  private async discoverPhasePlanFileNames(cwd: string, taskId: string): Promise<string[]> {
+    return (await this.discoverPhasePlanNumbers(cwd, taskId)).map((phase) =>
+      artifactFileName("phase-plan", phase),
+    );
   }
 
   async readBrainstormMockManifest(
@@ -553,7 +638,10 @@ export class ArtifactsStore {
   ): Promise<void> {
     const archiveDir = this.taskRunDir(cwd, taskId, runId);
     await mkdir(archiveDir, { recursive: true });
-    const candidates = archiveFileNames(phase);
+    const candidates =
+      phase === "plan"
+        ? [...archiveFileNames(phase), ...(await this.discoverPhasePlanFileNames(cwd, taskId))]
+        : archiveFileNames(phase);
     for (const name of candidates) {
       await moveFirstExisting(
         [
@@ -618,6 +706,28 @@ export class ArtifactsStore {
   ): Promise<Artifact> {
     const cur = await this.readArtifact(cwd, taskId, kind);
     if (!cur) throw new Error(`artifact ${kind}.md not found for ${taskId}`);
+    const next: Artifact = {
+      fm: {
+        ...cur.fm,
+        status,
+        last_updated: new Date().toISOString(),
+        last_updated_by: actor,
+      },
+      body: cur.body,
+    };
+    await this.writeArtifactWithRevision(cwd, taskId, next);
+    return next;
+  }
+
+  async setPhasePlanArtifactStatus(
+    cwd: string,
+    taskId: string,
+    phase: number,
+    status: ArtifactStatus,
+    actor: string,
+  ): Promise<Artifact> {
+    const cur = await this.readPhasePlanArtifact(cwd, taskId, phase);
+    if (!cur) throw new Error(`artifact plan-${phase}.md not found for ${taskId}`);
     const next: Artifact = {
       fm: {
         ...cur.fm,
@@ -698,6 +808,23 @@ function archiveFileNames(phase: "brainstorm" | "plan"): ReadonlyArray<string> {
 
 function archiveDirectoryNames(phase: "brainstorm" | "plan"): ReadonlyArray<string> {
   return phase === "brainstorm" ? ["mocks"] : ["research"];
+}
+
+function requirePhase(art: Artifact): number {
+  if (art.fm.phase === undefined) {
+    throw new Error("phase-plan artifact requires frontmatter phase");
+  }
+  return art.fm.phase;
+}
+
+async function readPhasePlanNumbers(dir: string): Promise<number[]> {
+  if (!existsSync(dir)) return [];
+  const entries = await readdir(dir);
+  return entries
+    .map((entry) => entry.match(/^plan-(\d+)\.md$/)?.[1])
+    .filter((phase): phase is string => phase !== undefined)
+    .map((phase) => Number.parseInt(phase, 10))
+    .filter((phase) => Number.isInteger(phase) && phase > 0);
 }
 
 // Legacy run-scoped artifact store. Reads/writes JSON+MD pairs under

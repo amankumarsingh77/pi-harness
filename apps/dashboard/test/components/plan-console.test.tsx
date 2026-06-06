@@ -144,17 +144,39 @@ describe("PlanConsole", () => {
   it("renders compact execution phase rows from execution-dag.yaml", () => {
     renderConsole();
 
+    expect(screen.getByText("Execution map")).toBeInTheDocument();
+    expect(screen.getByText("3 tasks")).toBeInTheDocument();
     expect(screen.getByText("Foundation")).toBeInTheDocument();
     expect(screen.getByText("Parallel Work")).toBeInTheDocument();
     expect(screen.getByText("can run together")).toBeInTheDocument();
     expect(screen.getByText("C-001")).toBeInTheDocument();
     expect(screen.getByText("C-002")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Inspect C-002/ }));
+    expect(screen.getByText("Render compact phases")).toBeInTheDocument();
+    expect(screen.getByText(/waits for C-001/)).toBeInTheDocument();
+    expect(screen.getByText(/phases render/)).toBeInTheDocument();
   });
 
   it("shows a stable empty state when execution-dag.yaml is missing", () => {
     renderConsole({ executionDag: null });
 
     expect(screen.getByText("execution phases not authored yet")).toBeInTheDocument();
+  });
+
+  it("groups phase plan documents under the plan overview", () => {
+    renderConsole({
+      phasePlans: [
+        artifact("phase-plan", phasePlanBody, { phase: 1 }),
+        artifact("phase-plan", phasePlanTwoBody, { phase: 2 }),
+      ],
+    });
+
+    expect(screen.getByRole("region", { name: "Plan documents" })).toHaveTextContent("Plan overview");
+    expect(screen.getByText("Phase 1")).toBeInTheDocument();
+    expect(screen.getByText("plan-1.md")).toBeInTheDocument();
+    expect(screen.getByText("Phase 2")).toBeInTheDocument();
+    expect(screen.getByText("plan-2.md")).toBeInTheDocument();
   });
 
   it("renders the blocked banner with the failure reason when lastBlocked is set", () => {
@@ -303,6 +325,7 @@ function renderConsole(
   opts: {
     readonly liveEvents?: readonly AgentEvent[];
     readonly executionDag?: Artifact | null;
+    readonly phasePlans?: readonly Artifact[];
     readonly lastBlocked?: { reason: string; ts: string } | null;
     readonly preflightSteps?: readonly PreflightStep[];
     readonly taskStatus?: Task["status"];
@@ -324,6 +347,7 @@ function renderConsole(
           iconKind={opts.iconKind ?? "progress"}
           canCancelRun
           plan={artifact("plan", planBody)}
+          phasePlans={opts.phasePlans ?? []}
           blastRadius={artifact("blast-radius", blastRadiusBody)}
           scenarios={artifact("scenarios", scenariosBody)}
           executionDag={
@@ -396,6 +420,18 @@ Replace the task detail page with a focused command surface.
 
 1. Add shell.
 2. Add inspectors.
+`;
+
+const phasePlanBody = `# Phase 1: Foundation
+
+## Objective
+Build the shared foundation.
+`;
+
+const phasePlanTwoBody = `# Phase 2: Dashboard
+
+## Objective
+Render the new plan console.
 `;
 
 const scenariosBody = `scenarios:
@@ -486,12 +522,17 @@ function run(): Run {
   };
 }
 
-function artifact(kind: "plan" | "blast-radius" | "scenarios" | "execution-dag", body: string): Artifact {
+function artifact(
+  kind: "plan" | "phase-plan" | "blast-radius" | "scenarios" | "execution-dag",
+  body: string,
+  opts: { readonly phase?: number } = {},
+): Artifact {
   return {
     fm: {
       task: "T-1",
       kind,
       parent: kind === "plan" ? null : "plan.md",
+      ...(opts.phase !== undefined ? { phase: opts.phase } : {}),
       status: "ready",
       branch: "codex/task-detail-redesign",
       last_updated: "2026-05-15T10:04:00Z",

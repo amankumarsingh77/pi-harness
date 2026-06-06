@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { Artifact, TaskStatus } from "@pi-harness/shared";
+import { ArtifactMarkdown } from "@/components/artifact-markdown";
 import { submitArtifactEditAction } from "@/app/tasks/[id]/actions";
 import type { BrainstormGate } from "@/lib/api";
 import { ApprovalGate } from "./approval-gate";
@@ -108,9 +107,9 @@ function WorkpadDocument({
   return (
     <div className="flex flex-col gap-4">
       <ArtifactEditor taskId={taskId} kind={kind} artifact={artifact} taskStatus={taskStatus} />
-      {sections.length === 0 ? (
+      {sections.length === 0 || pendingBySection.size === 0 ? (
         <section className="workpad-section">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.body.trim()}</ReactMarkdown>
+          <ArtifactMarkdown>{artifact.body}</ArtifactMarkdown>
           {anchor && <AnchorChip anchor={anchor} onJumpToCommit={onJumpToCommit} />}
         </section>
       ) : (
@@ -126,7 +125,7 @@ function WorkpadDocument({
               {pending ? (
                 <PendingSkeleton />
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.body.trim()}</ReactMarkdown>
+                <ArtifactMarkdown>{section.body}</ArtifactMarkdown>
               )}
             </section>
           );

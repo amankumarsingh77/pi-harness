@@ -1,12 +1,11 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { taskStatusLabel, taskStatusVisualKind, type Task } from "@pi-harness/shared";
+import type { Task } from "@pi-harness/shared";
 import { clsx } from "clsx";
 import { PointerActivationConstraints } from "@dnd-kit/dom";
 import { PointerSensor, useDraggable } from "@dnd-kit/react";
 import { useCallback } from "react";
 import { formatRelativeCompact } from "@/lib/format";
-import { StatusBadge, type StatusBadgeTone } from "@/components/ui/status-badge";
 import type { KanbanDndData } from "./drag-types";
 import { taskDragId } from "./drag-types";
 
@@ -110,44 +109,14 @@ export function TaskCard({
 
         {subMeta && (
           <div className="mt-2 flex items-center gap-2">
-            <StatusBadge tone={badgeToneFor(task)}>
-              {taskStatusLabel(task.status)}
-            </StatusBadge>
             <span className="min-w-0 truncate font-mono text-[10.5px] tracking-[0.01em] text-fg-mute">
               {subMeta}
             </span>
           </div>
         )}
-        {!subMeta && (
-          <div className="mt-2">
-            <StatusBadge tone={badgeToneFor(task)}>
-              {taskStatusLabel(task.status)}
-            </StatusBadge>
-          </div>
-        )}
       </div>
     </article>
   );
-}
-
-function badgeToneFor(task: Task): StatusBadgeTone {
-  if (requiresReview(task.status)) return "review";
-  switch (taskStatusVisualKind(task.status)) {
-    case "progress":
-      return "progress";
-    case "blocked":
-      return "blocked";
-    case "shipping":
-      return "review";
-    case "done":
-      return "done";
-    case "intake":
-      return "neutral";
-  }
-}
-
-function requiresReview(status: Task["status"]): boolean {
-  return status === "brainstorming" || status === "planning";
 }
 
 function stripeFor(task: Task, requiresHumanIntervention: boolean): string | null {

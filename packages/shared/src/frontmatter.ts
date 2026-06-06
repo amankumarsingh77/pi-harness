@@ -24,6 +24,7 @@ export function stringifyArtifact(art: Artifact): string {
     task: art.fm.task,
     kind: art.fm.kind,
     parent: art.fm.parent,
+    ...(art.fm.phase !== undefined ? { phase: art.fm.phase } : {}),
     status: art.fm.status,
     ...(art.fm.commit !== undefined ? { commit: art.fm.commit } : {}),
     branch: art.fm.branch,

@@ -87,8 +87,8 @@ export function KanbanColumn({
       <div
         className={clsx(
           "flex flex-col gap-1 rounded-md pb-2 transition-colors",
-          dropActive && "bg-white/[0.04] outline outline-1 outline-st-progress",
-          isDropTarget && "bg-white/[0.06]",
+          dropActive && "bg-white/4 outline outline-st-progress",
+          isDropTarget && "bg-white/6",
         )}
       >
         {dropActive && (

@@ -63,6 +63,7 @@ export function PlanPageLive({
         planEvents={bundle.events}
         preflightSteps={bundle.preflightSteps}
         plan={bundle.plan}
+        phasePlans={bundle.phasePlans ?? []}
         blastRadius={bundle.blastRadius}
         scenarios={bundle.scenarios}
         executionDag={bundle.executionDag}
