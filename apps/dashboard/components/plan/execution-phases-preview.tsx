@@ -14,7 +14,7 @@ export function ExecutionPhasesPreview({
   onExpand,
 }: {
   readonly artifact: Artifact | null;
-  readonly onExpand: () => void;
+  readonly onExpand?: () => void;
 }) {
   const dag = useMemo(() => parseExecutionDag(artifact?.body ?? ""), [artifact]);
   const parsed = groupNodesByPhase(dag.nodes);
@@ -41,13 +41,15 @@ export function ExecutionPhasesPreview({
             <MetricPill value={`${missingAssertions} missing assertions`} muted={missingAssertions === 0} />
           </div>
         )}
-        <button
-          type="button"
-          className="min-h-[26px] rounded-[7px] border border-line bg-white/[0.02] px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
-          onClick={onExpand}
-        >
-          Raw
-        </button>
+        {onExpand && (
+          <button
+            type="button"
+            className="min-h-[26px] rounded-[7px] border border-line bg-white/[0.02] px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
+            onClick={onExpand}
+          >
+            Raw
+          </button>
+        )}
       </header>
 
       {parsed.length === 0 ? (

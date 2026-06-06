@@ -20,19 +20,42 @@ vi.mock("@/app/tasks/[id]/actions", () => ({
 }));
 
 describe("PlanConsole", () => {
-  it("renders the raw plan console regions without workflow decision buttons", () => {
+  it("renders the plan review command center from the plan bundle", () => {
+    renderConsole({ gate: "awaiting_user" });
+
+    expect(screen.getByRole("region", { name: "Plan review command center" })).toHaveTextContent(
+      "Plan Review",
+    );
+    expect(screen.getByRole("region", { name: "Plan stage progress" })).toHaveTextContent(
+      "Review",
+    );
+    expect(screen.getByRole("region", { name: "Plan readiness" })).toHaveTextContent(
+      "execution DAG",
+    );
+    expect(screen.getByRole("region", { name: "Agents" })).toHaveTextContent(
+      "codebase-scout",
+    );
+    expect(screen.getByRole("tab", { name: "Plan" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Execution DAG" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve plan" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+  });
+
+  it("renders the plan review regions without workflow decision buttons while running", () => {
     renderConsole();
 
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toBeInTheDocument();
-    expect(screen.getByText("plan phase")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Plan review command center" })).toBeInTheDocument();
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(agents).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Plan readiness" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Preflight agent navigation" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Live preflight logs" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Live preflight logs" })).toBeNull();
+    expect(within(agents).getByRole("region", { name: "planner agent log" })).toBeInTheDocument();
+    expect(within(agents).queryByText("Finding summary")).toBeNull();
     expect(screen.getByRole("region", { name: "Main artifacts" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "planner agent log" })).toBeInTheDocument();
-    expect(screen.getAllByText("plan.md").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("blast-radius.yaml").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("scenarios.yaml").length).toBeGreaterThan(0);
-    expect(screen.getByText("execution phases")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Plan" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Execution DAG" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve plan" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
   });
@@ -41,10 +64,10 @@ describe("PlanConsole", () => {
     renderConsole();
 
     expect(screen.getByText("1 done · 1 live · 1 queued · 1 blocked")).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "codebase-scout preflight agent" })).toHaveTextContent("done");
-    expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("live");
-    expect(screen.getByRole("article", { name: "claim-verifier preflight agent" })).toHaveTextContent("queued");
-    expect(screen.getByRole("article", { name: "precedent-locator preflight agent" })).toHaveTextContent("blocked");
+    expect(screen.getByRole("button", { name: "codebase-scout agent log" })).toHaveTextContent("done");
+    expect(screen.getByRole("button", { name: "integration-scanner agent log" })).toHaveTextContent("live");
+    expect(screen.getByRole("button", { name: "claim-verifier agent log" })).toHaveTextContent("queued");
+    expect(screen.getByRole("button", { name: "precedent-locator agent log" })).toHaveTextContent("blocked");
   });
 
   it("shows fallback preflight state from durable step data", () => {
@@ -60,29 +83,23 @@ describe("PlanConsole", () => {
     });
 
     expect(screen.getByText(/1 fallback/)).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("fallback");
-    expect(screen.getByRole("article", { name: "integration-scanner preflight agent" })).toHaveTextContent("timed out");
+    expect(screen.getByRole("button", { name: "integration-scanner agent log" })).toHaveTextContent("fallback");
+    expect(screen.getByRole("button", { name: "integration-scanner agent log" })).toHaveTextContent("timed out");
   });
 
-  it("shows phase cancel in the plan header and on active preflight agents", () => {
+  it("shows phase cancel in the plan header and on active agents", () => {
     renderConsole();
 
     expect(screen.getByRole("button", { name: "Cancel plan" })).toBeInTheDocument();
-    const integrationPane = screen.getByRole("article", {
-      name: "integration-scanner preflight agent",
-    });
-    expect(within(integrationPane).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-    const scoutPane = screen.getByRole("article", { name: "codebase-scout preflight agent" });
-    expect(within(scoutPane).queryByRole("button", { name: "Cancel" })).toBeNull();
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(within(agents).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
-  it("opens phase cancel confirmation from an active preflight card", () => {
+  it("opens phase cancel confirmation from an active agent row", () => {
     renderConsole();
 
-    const integrationPane = screen.getByRole("article", {
-      name: "integration-scanner preflight agent",
-    });
-    fireEvent.click(within(integrationPane).getByRole("button", { name: "Cancel" }));
+    const agents = screen.getByRole("region", { name: "Agents" });
+    fireEvent.click(within(agents).getByRole("button", { name: "Cancel" }));
 
     expect(screen.getByRole("dialog", { name: "Cancel plan run" })).toBeInTheDocument();
     expect(screen.getByText(/All plan preflight agents/)).toBeInTheDocument();
@@ -91,7 +108,7 @@ describe("PlanConsole", () => {
   it("opens the full agent drawer and switches timeline, findings, and raw JSONL tabs", () => {
     renderConsole();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Full log" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "codebase-scout agent log" }));
     expect(screen.getByRole("dialog", { name: "codebase-scout full log" })).toBeInTheDocument();
     expect(screen.getAllByText(/No backend change needed/).length).toBeGreaterThan(0);
 
@@ -106,43 +123,34 @@ describe("PlanConsole", () => {
   it("renders live SSE events whose timestamps are still serialized strings", () => {
     renderConsole({ liveEvents: serializedLiveEvents });
 
-    expect(screen.getByRole("article", { name: "codebase-scout preflight agent" })).toHaveTextContent("package.json");
-    fireEvent.click(screen.getAllByRole("button", { name: "Full log" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "codebase-scout agent log" }));
     fireEvent.click(screen.getByRole("button", { name: "Raw JSONL" }));
 
     expect(screen.getByText(/"ts": "2026-05-15T10:02:15.000Z"/)).toBeInTheDocument();
   });
 
-  it("opens expanded artifact modals for plan, blast radius, scenarios, and execution DAG", () => {
+  it("switches artifact tabs for plan, blast radius, scenarios, execution DAG, and raw source", () => {
     renderConsole();
 
-    const mainArtifacts = screen.getByRole("region", { name: "Main artifacts" });
-    const expandButtons = within(mainArtifacts).getAllByRole("button", { name: "Expand" });
+    expect(screen.getByRole("article", { name: "plan.md rendered artifact" })).toHaveTextContent("Approach");
 
-    fireEvent.click(expandButtons[0]!);
-    expect(screen.getByRole("dialog", { name: "plan.md expanded artifact" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Rendered" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Raw source" }));
-    expect(screen.getByText(/## Approach/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close artifact modal" }));
-
-    fireEvent.click(expandButtons[1]!);
-    expect(screen.getByRole("dialog", { name: "blast-radius.yaml expanded artifact" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Blast Radius" }));
     expect(screen.getAllByText(/BR-001/).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Close artifact modal" }));
 
-    fireEvent.click(expandButtons[2]!);
-    expect(screen.getByRole("dialog", { name: "scenarios.yaml expanded artifact" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Scenarios" }));
     expect(screen.getAllByText(/task-detail-inspectors/).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Close artifact modal" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Raw" }));
-    expect(screen.getByRole("dialog", { name: "execution-dag.yaml expanded artifact" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Execution DAG" }));
+    expect(screen.getByRole("article", { name: "Execution map" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Raw" }));
     expect(screen.getAllByText(/C-001/).length).toBeGreaterThan(0);
+    expect(screen.getByText("execution-dag.yaml")).toBeInTheDocument();
   });
 
   it("renders compact execution phase rows from execution-dag.yaml", () => {
     renderConsole();
+    fireEvent.click(screen.getByRole("tab", { name: "Execution DAG" }));
 
     expect(screen.getByText("Execution map")).toBeInTheDocument();
     expect(screen.getByText("3 tasks")).toBeInTheDocument();
@@ -160,6 +168,7 @@ describe("PlanConsole", () => {
 
   it("shows a stable empty state when execution-dag.yaml is missing", () => {
     renderConsole({ executionDag: null });
+    fireEvent.click(screen.getByRole("tab", { name: "Execution DAG" }));
 
     expect(screen.getByText("execution phases not authored yet")).toBeInTheDocument();
   });
@@ -172,7 +181,7 @@ describe("PlanConsole", () => {
       ],
     });
 
-    expect(screen.getByRole("region", { name: "Plan documents" })).toHaveTextContent("Plan overview");
+    fireEvent.click(screen.getByRole("tab", { name: "Phase Plans" }));
     expect(screen.getByText("Phase 1")).toBeInTheDocument();
     expect(screen.getByText("plan-1.md")).toBeInTheDocument();
     expect(screen.getByText("Phase 2")).toBeInTheDocument();
@@ -331,6 +340,7 @@ function renderConsole(
     readonly taskStatus?: Task["status"];
     readonly headerStatus?: string;
     readonly iconKind?: "intake" | "progress" | "review" | "done" | "blocked";
+    readonly gate?: "running" | "awaiting_user";
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -342,7 +352,7 @@ function renderConsole(
         <PlanConsole
           task={task(opts.taskStatus)}
           runs={[run()]}
-          gate="running"
+          gate={opts.gate ?? "running"}
           headerStatus={opts.headerStatus ?? "in progress"}
           iconKind={opts.iconKind ?? "progress"}
           canCancelRun

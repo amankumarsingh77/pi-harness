@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Run, Task } from "@pi-harness/shared";
 import { Topbar } from "@/components/topbar";
-import { PlanApprovalGate } from "@/components/plan/approval-gate";
 import { PlanBody } from "@/components/plan/plan-body";
 import { queries } from "@/lib/client/queries";
 import type { PlanBundle } from "@/lib/api";
@@ -70,7 +69,6 @@ export function PlanPageLive({
         plannerLogDefaultOpen={task.status === "planning"}
         lastBlocked={bundle.lastBlocked}
       />
-      <PlanApprovalGate taskId={task.id} gate={bundle.gate} taskStatus={task.status} />
     </div>
   );
 }

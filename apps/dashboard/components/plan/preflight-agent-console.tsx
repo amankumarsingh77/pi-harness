@@ -70,51 +70,33 @@ export function PreflightAgentConsole({
   return (
     <>
       <section
-        className="mb-3 grid grid-cols-1 items-center gap-3 rounded-[9px] border border-line bg-white/[0.018] px-3 py-2.5 lg:grid-cols-[auto_minmax(0,1fr)_auto]"
+        className="grid grid-cols-1 gap-2 px-3 py-3"
         aria-label="Preflight agent navigation"
       >
-        <div className="font-mono text-[11px] uppercase tracking-[0.075em] text-fg-mute">
-          preflight agents
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-mono text-[11px] uppercase tracking-[0.075em] text-fg-mute">
+            preflight
+          </div>
+          <div className="whitespace-nowrap font-mono text-[10.5px] text-fg-mute">
+            {counts.done} done · {counts.progress} live · {counts.queued} queued
+            {counts.fallback > 0 ? ` · ${counts.fallback} fallback` : ""}
+            {counts.blocked > 0 ? ` · ${counts.blocked} blocked` : ""}
+          </div>
         </div>
-        <div className="scroll-hide flex min-w-0 gap-1.5 overflow-x-auto">
+        <div className="grid gap-1.5">
           {summaries.map((summary) => (
-            <button
+            <AgentRow
               key={summary.name}
-              type="button"
-              className="inline-flex min-h-[30px] items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line bg-transparent px-2 font-mono text-[11px] text-fg-mute transition hover:border-line-hover hover:bg-card hover:text-fg-body"
+              summary={summary}
+              taskId={taskId}
+              canCancelRun={canCancelRun}
               onClick={() => {
                 setSelectedAgent(summary.name);
                 setTab(summary.findingsBody === null ? "timeline" : "findings");
               }}
-            >
-              <StatusIcon kind={statusIconKind(summary.kind)} size={12} live={summary.kind === "progress"} />
-              {summary.name}
-            </button>
+            />
           ))}
         </div>
-        <div className="whitespace-nowrap font-mono text-[11px] text-fg-mute">
-          {counts.done} done · {counts.progress} live · {counts.queued} queued
-          {counts.fallback > 0 ? ` · ${counts.fallback} fallback` : ""}
-          {counts.blocked > 0 ? ` · ${counts.blocked} blocked` : ""}
-        </div>
-      </section>
-
-      <section
-        className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-2"
-        aria-label="Live preflight logs"
-      >
-        {summaries.map((summary) => (
-          <AgentPane
-            key={summary.name}
-            summary={summary}
-            taskId={taskId}
-            canCancelRun={canCancelRun}
-            onOpen={(agentName) => {
-              setSelectedAgent(agentName);
-              setTab(summary.findingsBody === null ? "timeline" : "findings");
-            }}
-          />
-        ))}
       </section>
 
       {selectedSummary && (
@@ -129,112 +111,55 @@ export function PreflightAgentConsole({
   );
 }
 
-function AgentPane({
+function AgentRow({
   summary,
   taskId,
   canCancelRun,
-  onOpen,
+  onClick,
 }: {
   readonly summary: AgentSummary;
   readonly taskId: string;
   readonly canCancelRun: boolean;
-  readonly onOpen: (agentName: string) => void;
+  readonly onClick: () => void;
 }) {
-  const rows = buildLogRows(summary.events);
-
   return (
-    <article
+    <div
       className={[
-        "min-h-[250px] overflow-hidden rounded-[9px] border bg-card",
+        "flex min-w-0 items-center gap-2 rounded-[8px] border px-2.5 py-2",
         summary.kind === "progress"
-          ? "border-st-progress/30 shadow-[0_0_0_1px_rgba(94,106,210,0.05),0_18px_40px_rgba(0,0,0,0.18)]"
-          : "border-line",
+          ? "border-st-progress/35 bg-st-progress/[0.045]"
+          : "border-line bg-white/[0.014]",
       ].join(" ")}
-      aria-label={`${summary.name} preflight agent`}
     >
-      <header className="flex items-start gap-2.5 border-b border-line px-3 py-3">
+      <button
+        type="button"
+        aria-label={`${summary.name} agent log`}
+        className="grid min-h-[38px] min-w-0 flex-1 grid-cols-[14px_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-left"
+        onClick={onClick}
+      >
         <StatusIcon
           kind={statusIconKind(summary.kind)}
-          size={14}
+          size={13}
           live={summary.kind === "progress"}
         />
-        <div className="min-w-0">
-          <div className="truncate font-mono text-[12.5px] font-semibold text-fg">
-            {summary.name}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1 font-mono text-[10.5px] text-fg-mute">
-            {summary.meta.map((item) => (
-              <span key={item}>{item}</span>
-            ))}
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          {canCancelRun && summary.kind === "progress" && (
-            <CancelPhaseRunButton
-              taskId={taskId}
-              phase="plan"
-              disabled={false}
-              compact
-              source="preflight-agent"
-            />
-          )}
-          <button
-            type="button"
-            className="min-h-6.5 rounded-[7px] border border-line bg-white/2 px-2 font-mono text-[10.5px] text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/[0.045]"
-            onClick={() => onOpen(summary.name)}
-          >
-            {summary.kind === "progress" ? "Follow live" : "Full log"}
-          </button>
-        </div>
-      </header>
-
-      <div className="space-y-2.5 px-3 py-2.5">
-        <div className="rounded-[7px] border border-line bg-white/[0.018] px-3 py-2">
-          <div className="mb-1 flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
-            <span>Finding summary</span>
-            <span>{summary.step?.status ?? statusLabel(summary.kind)}</span>
-          </div>
-          <p className="m-0 line-clamp-2 [line-clamp:2] text-[12px] leading-5 text-fg-body">
-            {findingsPreview(summary)}
-          </p>
-        </div>
-        <details className="rounded-[7px] border border-line bg-black/[0.08]">
-          <summary className="cursor-pointer px-3 py-2 font-mono text-[10.5px] text-fg-mute transition-colors hover:text-fg-body">
-            Recent command log
-          </summary>
-          <div className="scroll-hide max-h-36 overflow-y-auto border-t border-line px-3 py-2.5">
-            <LogRows rows={rows} limit={8} emptyText={emptyTextFor(summary.kind)} />
-          </div>
-        </details>
-      </div>
-
-      <footer className="flex items-center justify-between gap-2 border-t border-line px-3 py-2.5 font-mono text-[10.5px] text-fg-mute">
-        <span className="truncate">{summary.meta.join(" · ")}</span>
-        <button
-          type="button"
-          className="rounded-[7px] border border-line bg-white/2 px-2 py-1 text-fg-body transition hover:-translate-y-px hover:border-line-hover hover:bg-white/4.5"
-          onClick={() => onOpen(summary.name)}
-        >
-          Findings
-        </button>
-      </footer>
-    </article>
+        <span className="min-w-0 truncate font-mono text-[11.5px] font-semibold text-fg">
+          {summary.name}
+        </span>
+        <span className="col-start-2 min-w-0 truncate font-mono text-[10.5px] text-fg-mute">
+          {summary.meta.join(" · ")}
+        </span>
+      </button>
+      {canCancelRun && summary.kind === "progress" && (
+        <CancelPhaseRunButton
+          taskId={taskId}
+          phase="plan"
+          disabled={false}
+          compact
+          source="preflight-agent"
+        />
+      )}
+    </div>
   );
-}
-
-function statusLabel(kind: DotKind): string {
-  switch (kind) {
-    case "done":
-      return "complete";
-    case "progress":
-      return "running";
-    case "blocked":
-      return "blocked";
-    case "fallback":
-      return "fallback";
-    case "intake":
-      return "queued";
-  }
 }
 
 function AgentDrawer({
@@ -486,16 +411,6 @@ function emptyTextFor(kind: DotKind): string {
   if (kind === "intake") return "waiting for this preflight agent to start";
   if (kind === "fallback") return "fallback findings were written after bounded retry";
   return "no tool calls yet";
-}
-
-function findingsPreview(summary: AgentSummary): string {
-  if (summary.findingsBody) {
-    return `Finding: ${summary.findingsBody.replace(/\s+/g, " ").trim().slice(0, 92)}`;
-  }
-  if (summary.kind === "intake") return "No findings yet.";
-  if (summary.kind === "progress") return "Live: findings will appear once the agent finishes.";
-  if (summary.kind === "fallback") return "Fallback findings written after bounded retry.";
-  return "Findings were not written.";
 }
 
 function shortError(error: string): string {
