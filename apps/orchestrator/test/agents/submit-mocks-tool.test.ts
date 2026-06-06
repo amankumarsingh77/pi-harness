@@ -24,10 +24,24 @@ describe("submit_mocks tool", () => {
     const tool = makeSubmitMocksTool(d as never);
     const res = await tool.execute("id", {
       mocks: [{ mockId: "m_1", title: "T", summary: "S", recommended: true,
+        evidence: ["apps/dashboard/app/globals.css:3"],
         pages: [{ pageId: "home", title: "Home", html: "<style>.a{color:#f00;}</style>" }] }],
     } as never, undefined, undefined, undefined as never);
     expect(res.details).toMatchObject({ ok: false });
     expect(d.renderer.render).not.toHaveBeenCalled();
+    expect(d.bus.publish).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mock that does not cite current UI design evidence", async () => {
+    const d = deps();
+    const tool = makeSubmitMocksTool(d as never);
+    const res = await tool.execute("id", {
+      mocks: [{ mockId: "m_1", title: "T", summary: "S", recommended: true,
+        pages: [{ pageId: "home", title: "Home", html: "<style>.a{color:var(--fg);}</style>" }] }],
+    } as never, undefined, undefined, undefined as never);
+    expect(res.details).toMatchObject({ ok: false });
+    expect(d.renderer.render).not.toHaveBeenCalled();
+    expect(d.store.writeBrainstormMock).not.toHaveBeenCalled();
     expect(d.bus.publish).not.toHaveBeenCalled();
   });
 
@@ -36,11 +50,15 @@ describe("submit_mocks tool", () => {
     const tool = makeSubmitMocksTool(d as never);
     const res = await tool.execute("id", {
       mocks: [{ mockId: "m_1", title: "T", summary: "S", recommended: true,
+        evidence: ["apps/dashboard/app/globals.css:3"],
         pages: [{ pageId: "home", title: "Home", html: "<style>.a{color:var(--fg);}</style>" }] }],
     } as never, undefined, undefined, undefined as never);
     expect(d.renderer.render).toHaveBeenCalledTimes(1);
     expect(d.store.writeBrainstormMockRender).toHaveBeenCalledTimes(1);
-    expect(d.bus.publish).toHaveBeenCalledWith(expect.objectContaining({ kind: "brainstorm_mock_proposed" }));
+    expect(d.bus.publish).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "brainstorm_mock_proposed",
+      mock: expect.objectContaining({ evidence: ["apps/dashboard/app/globals.css:3"] }),
+    }));
     expect(res.terminate).toBe(true);
   });
 });

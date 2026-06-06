@@ -11,45 +11,7 @@
  * REQ-051 — resume seamlessly: initial messages + streamed frames merged by id.
  */
 
-import { createContext, useContext, type ReactNode } from "react";
 import type { ChatMessage } from "@pi-harness/shared";
-import { useChatStream, type UseChatStreamResult } from "./use-chat-stream";
-
-type ChatLiveContextValue = {
-  readonly threadId: string;
-  readonly stream: UseChatStreamResult;
-};
-
-const ChatLiveContext = createContext<ChatLiveContextValue | null>(null);
-
-export function ChatLiveProvider({
-  threadId,
-  children,
-}: {
-  readonly threadId: string;
-  readonly children: ReactNode;
-}) {
-  const stream = useChatStream(threadId);
-
-  return (
-    <ChatLiveContext.Provider value={{ threadId, stream }}>
-      {children}
-    </ChatLiveContext.Provider>
-  );
-}
-
-export function useChatLive(): ChatLiveContextValue {
-  const ctx = useContext(ChatLiveContext);
-  if (ctx === null) {
-    throw new Error("useChatLive must be used inside <ChatLiveProvider>");
-  }
-  return ctx;
-}
-
-/** Returns null when no provider is present in the tree. */
-export function useOptionalChatLive(): ChatLiveContextValue | null {
-  return useContext(ChatLiveContext);
-}
 
 /**
  * Merges server-fetched messages with a live streaming message.

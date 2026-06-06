@@ -2,15 +2,14 @@
 
 import { useState } from "react";
 import type { BrainstormMockPage } from "@pi-harness/shared";
-import { MockScreenshotView } from "./mock-screenshot-view";
+import { MockHtmlPreview } from "./mock-screenshot-view";
 
-function pngUrl(
+function htmlUrl(
   taskId: string,
   mockId: string,
   pageId: string,
-  viewport: "desktop" | "mobile",
 ): string {
-  return `/api/proxy/tasks/${taskId}/brainstorm/mocks/${mockId}/pages/${pageId}/png/${viewport}`;
+  return `/api/proxy/tasks/${taskId}/brainstorm/mocks/${mockId}/pages/${pageId}/html`;
 }
 
 export function MockPagePreview({
@@ -57,11 +56,10 @@ export function MockPagePreview({
         )}
       </div>
       {activePage ? (
-        <MockScreenshotView
+        <MockHtmlPreview
           key={activePage.pageId}
           title={`${title} — ${activePage.title}`}
-          desktopSrc={pngUrl(taskId, mockId, activePage.pageId, "desktop")}
-          mobileSrc={pngUrl(taskId, mockId, activePage.pageId, "mobile")}
+          htmlSrc={htmlUrl(taskId, mockId, activePage.pageId)}
         />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-card font-mono text-[12px] text-fg-mute">

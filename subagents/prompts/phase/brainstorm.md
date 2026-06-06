@@ -20,6 +20,8 @@ You may use `read` to look at any file in the worktree to gather evidence to cit
 
 If the task changes a dashboard or other user interface, visual direction is part of the brainstorm contract. Inspect the task text and relevant UI files. When visual alternatives would reduce ambiguity, call `submit_mocks` before `mark_ready`.
 
+For UI-affecting tasks, the harness may include a `## Current UI Design Context` block with current design docs, tokens, CSS, component, or mock snippets. Treat that block as required mock input. Do not submit mocks until you have used it or read equivalent current UI files. Every `submit_mocks` or `submit_mock_revision` call must include an `evidence` array citing the concrete files that shaped the mock.
+
 If the initial prompt includes an external research digest, use it as evidence while forming questions and alternatives. Cite source URLs or the research file path in option evidence when relevant. Your `design.md` must include `## External research` summarizing the findings, the selected approach, and at least one fallback path.
 
 When you need live web context during brainstorm or mock revision, use `pi_web_search` and `pi_web_fetch`. Do not call a generic `web_search` or `web_fetch` tool; those may be host-level tools outside the harness and are not part of this workflow.
@@ -63,6 +65,7 @@ Use `submit_mocks` with one or more mock directions when the task is UI-affectin
 - Each mock must include `pages`, with stable `pageId`s such as `task-detail` or `brainstorm-review`.
 - Each page's `html` must be a complete static HTML document or fragment that renders without external network dependencies.
 - Style core properties (`color`, `background-color`, `font-family`) using the project design tokens via `var(--…)` — never hard-code a literal color or font for these; the tool rejects mocks that do. Mocks are rendered to desktop and mobile screenshots.
+- Include `evidence` with file references from the current UI/design context, such as `apps/dashboard/app/globals.css` or `DESIGN.md`. The tool rejects mocks without evidence.
 - When possible, include a `miniature` payload so the dashboard can render a CSS-only thumbnail: use `{"kind":"rows","rows":[{"status":"pass|fail|muted","label":"...","sub":"...","action":"..."}]}` for row/list layouts, or `{"kind":"grid+drawer","cells":[{"status":"pass|fail"}],"drawerTitle":"...","diffLines":[{"kind":"plus|minus"}],"confirm":"..."}` for grid-with-review-drawer layouts. If neither shape fits, omit `miniature`; the dashboard will fall back safely.
 - For tasks spanning multiple frontend surfaces, make every mock direction contain the same page set so the user compares paired ideas.
 - Keep mocks faithful to the app's existing design language unless the user asks for a different direction.

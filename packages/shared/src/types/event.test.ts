@@ -62,6 +62,51 @@ describe("plan_* AgentEvent variants", () => {
     }
   });
 
+  it("plan_agent_node_started carries dynamic graph metadata", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "plan_agent_node_started",
+      nodeId: "node-1",
+      parentId: "planner",
+      role: "codebase-scout",
+      title: "Scout dashboard plan flow",
+      lane: "local",
+      sessionId: "s-node-1",
+      model: "crofai/kimi-k2.6",
+      tools: ["read", "grep", "write_findings"],
+      artifactPath: ".harness/T-001/research/node-1.md",
+      dependsOn: ["planner"],
+    };
+    if (e.kind === "plan_agent_node_started") {
+      expect(e.nodeId).toBe("node-1");
+      expect(e.parentId).toBe("planner");
+      expect(e.tools).toContain("write_findings");
+    } else {
+      expect.fail("expected plan_agent_node_started");
+    }
+  });
+
+  it("plan_agent_node_ended carries graph status and usage", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "plan_agent_node_ended",
+      nodeId: "node-1",
+      ok: false,
+      status: "blocked",
+      durationMs: 1234,
+      costUsd: 0.07,
+      inputTokens: 300,
+      outputTokens: 120,
+      error: "role timed out",
+    };
+    if (e.kind === "plan_agent_node_ended") {
+      expect(e.status).toBe("blocked");
+      expect(e.outputTokens).toBe(120);
+    } else {
+      expect.fail("expected plan_agent_node_ended");
+    }
+  });
+
   it("plan_revision_requested carries comment", () => {
     const e: AgentEvent = {
       ...base,

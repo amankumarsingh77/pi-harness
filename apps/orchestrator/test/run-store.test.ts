@@ -52,6 +52,19 @@ describe("RunStore", () => {
     expect(runs.map((r) => r.phase)).toEqual(["brainstorm", "plan"]);
   });
 
+  it("findOrCreateActiveRun reuses the existing active run for a task phase", async () => {
+    const { runs: store } = createBareTestStores();
+    const t = await store.createTask({ title: "active-run" });
+
+    const first = await store.findOrCreateActiveRun({ taskId: t.id, phase: "code" });
+    const second = await store.findOrCreateActiveRun({ taskId: t.id, phase: "code" });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.run.id).toBe(first.run.id);
+    await expect(store.listRuns(t.id)).resolves.toHaveLength(1);
+  });
+
   it("notifies an observer after task and run writes", async () => {
     const { stateDir } = createBareTestStores();
     const notifications: string[] = [];

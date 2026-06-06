@@ -8,6 +8,7 @@ import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { PlanEventBus } from "../../src/agents/plan-event-bus.js";
 import {
   makeMarkReadyTool,
+  makeWritePlanArtifactTool,
   validateExecutionDagYaml,
   validateScenariosYaml,
   parseFalsifiedClaims,
@@ -242,6 +243,21 @@ async function writePlanArtifacts(
   await store.writeArtifact(cwd, "T-1", executionDag);
 }
 
+function makeArtifact(kind: Artifact["fm"]["kind"], body: string): Artifact {
+  return {
+    fm: {
+      task: "T-1",
+      kind,
+      parent: kind === "design" ? null : "plan.md",
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: "2026-05-16T00:00:00.000Z",
+      last_updated_by: "test",
+    },
+    body,
+  };
+}
+
 async function writePhasePlan(phase: number, body = validPhasePlanBody) {
   const phasePlan: Artifact = {
     fm: {
@@ -284,6 +300,91 @@ const noopDispatcher: DispatchClaimVerifier = async () => ({
   findingsWritten: true,
 });
 const newState = (): ClaimVerifierState => ({ attempts: 0, cap: 2 });
+
+describe("write_plan_artifact", () => {
+  it("writes an existing plan artifact body while preserving frontmatter", async () => {
+    const original = {
+      ...makeArtifact("plan", "old body"),
+      fm: {
+        ...makeArtifact("plan", "old body").fm,
+        last_updated: "2026-05-16T00:00:00.000Z",
+        last_updated_by: "orchestrator",
+      },
+    };
+    await store.writeArtifact(cwd, "T-1", original);
+    const tool = makeWritePlanArtifactTool({ store, cwd, taskId: "T-1" });
+
+    const result = await tool.execute(
+      "write-plan",
+      { kind: "plan", body: "## Goal\nUpdated plan.\n" },
+      undefined,
+      undefined,
+      null as never,
+    );
+
+    const written = await store.readArtifact(cwd, "T-1", "plan");
+    expect(result.details).toMatchObject({ ok: true, kind: "plan" });
+    expect(written?.body).toBe("## Goal\nUpdated plan.\n");
+    expect(written?.fm).toEqual(original.fm);
+  });
+
+  it("creates a phase plan artifact with harness-owned frontmatter", async () => {
+    const tool = makeWritePlanArtifactTool({ store, cwd, taskId: "T-1" });
+
+    const result = await tool.execute(
+      "write-phase",
+      { kind: "phase-plan", phase: 2, body: "## Objective\nShip phase 2.\n" },
+      undefined,
+      undefined,
+      null as never,
+    );
+
+    const written = await store.readPhasePlanArtifact(cwd, "T-1", 2);
+    expect(result.details).toMatchObject({
+      ok: true,
+      kind: "phase-plan",
+      phase: 2,
+    });
+    expect(written?.fm).toMatchObject({
+      task: "T-1",
+      kind: "phase-plan",
+      parent: "plan.md",
+      phase: 2,
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated_by: "plan-agent",
+    });
+    expect(written?.body).toBe("## Objective\nShip phase 2.\n");
+  });
+
+  it("rejects pasted YAML frontmatter and missing phase numbers", async () => {
+    const tool = makeWritePlanArtifactTool({ store, cwd, taskId: "T-1" });
+
+    const frontmatterResult = await tool.execute(
+      "write-frontmatter",
+      { kind: "plan", body: "---\nkind: plan\n---\nbody" },
+      undefined,
+      undefined,
+      null as never,
+    );
+    const phaseResult = await tool.execute(
+      "write-phase",
+      { kind: "phase-plan", body: "## Objective\nMissing phase.\n" },
+      undefined,
+      undefined,
+      null as never,
+    );
+
+    expect(frontmatterResult.details).toMatchObject({
+      ok: false,
+      error: "artifact body must not include YAML frontmatter",
+    });
+    expect(phaseResult.details).toMatchObject({
+      ok: false,
+      error: "phase-plan requires a positive integer phase",
+    });
+  });
+});
 
 describe("mark_ready", () => {
   it("rejects when plan.md is missing", async () => {

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "@fontsource-variable/mona-sans";
+import "@xyflow/react/dist/style.css";
 import "./globals.css";
 import { QueryProvider } from "@/lib/query-provider";
 

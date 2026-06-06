@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z, ZodError } from "zod";
+import { readFile } from "node:fs/promises";
 import type { RunStore } from "../../adapters/run-store.js";
 import type { ArtifactsStore } from "../../agents/artifacts-store.js";
 import type { TaskScheduler } from "../../runner/scheduler.js";
@@ -273,8 +274,13 @@ export function registerBrainstormRoutes(
           message: `mock page ${req.params.pageId} not found`,
         };
       }
+      const tokensCss = await readMockPreviewTokens({
+        designSystem: deps.designSystem,
+        cwd: task.worktreePath,
+        taskId: task.id,
+      });
       reply.type("text/html; charset=utf-8");
-      return html;
+      return withMockPreviewCss(html, tokensCss);
     },
   );
 
@@ -409,6 +415,54 @@ export function registerBrainstormRoutes(
       return deps.workflow.restartBrainstorm(req.params.id, parsed.note);
     },
   );
+}
+
+type MockPreviewTokenDeps = {
+  readonly designSystem: Pick<DesignSystemStore, "read" | "readDraftTokens">;
+  readonly cwd: string;
+  readonly taskId: string;
+};
+
+async function readMockPreviewTokens({
+  designSystem,
+  cwd,
+  taskId,
+}: MockPreviewTokenDeps): Promise<string> {
+  const ds = await designSystem.read(cwd);
+  if (ds.tokensCss.trim().length > 0) return ds.tokensCss;
+  const draftTokens = await designSystem.readDraftTokens(cwd, taskId);
+  if (draftTokens.trim().length > 0) return draftTokens;
+  return readDashboardThemeTokens(cwd);
+}
+
+async function readDashboardThemeTokens(cwd: string): Promise<string> {
+  try {
+    const globalsCss = await readFile(join(cwd, "apps", "dashboard", "app", "globals.css"), "utf8");
+    return dashboardThemeToRootTokens(globalsCss);
+  } catch {
+    return "";
+  }
+}
+
+function dashboardThemeToRootTokens(css: string): string {
+  const match = /@theme\s*{([\s\S]*?)}/.exec(css);
+  const body = match?.[1]?.trim();
+  return body === undefined || body.length === 0 ? "" : `:root{${body}\n}`;
+}
+
+function mockPreviewStyle(tokensCss: string): string {
+  return `<style data-pi-harness-mock-preview>${tokensCss.trim()}
+html,body{margin:0;min-width:100%;min-height:100%;background:var(--color-bg,#0d0e10);}
+*{animation:none!important;transition:none!important;}</style>`;
+}
+
+function withMockPreviewCss(html: string, tokensCss: string): string {
+  if (html.includes("data-pi-harness-mock-preview")) return html;
+  const style = mockPreviewStyle(tokensCss);
+  const head = /<head(?:\s[^>]*)?>/i.exec(html);
+  if (head?.index === undefined) return `${style}${html}`;
+  const insertAt = head.index + head[0].length;
+  return `${html.slice(0, insertAt)}${style}${html.slice(insertAt)}`;
 }
 
 function applyTokenDiff(currentCss: string, diff: { changes: { name: string; after: string | null }[] }): string {

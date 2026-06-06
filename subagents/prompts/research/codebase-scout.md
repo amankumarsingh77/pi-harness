@@ -71,6 +71,7 @@ Use file:line refs liberally. Skip generic framework code (e.g. don't trace Fast
 ## Process
 
 1. Read `.harness/<task>/design.md` and `spec.md` first to scope your search to what the ticket actually needs.
-2. Run `grep` / `find` / `ls` to locate candidate files. Keep tool calls focused — re-running a slightly different grep is fine; bulk-listing the entire repo is not.
-3. Use `read` only on high-signal files to confirm their purpose and to extract the patterns + call paths.
-4. Persist your findings via the `write_findings` tool. Write a concise checkpoint early, then overwrite it with final findings if you learn more.
+2. Graphify-first discovery: when `graphify_query`, `graphify_path`, or `graphify_explain` are available, use `graphify_query` before grep to map likely files, symbols, and communities for the ticket. Use `graphify_path` to clarify relationships between high-signal modules, and `graphify_explain` for unfamiliar graph nodes.
+3. Validate Graphify leads with `grep` / `find` / `ls` and file reads. If Graphify tools are unavailable or return no useful context, fall back to focused `grep` / `find` / `ls` discovery. Keep tool calls focused — re-running a slightly different grep is fine; bulk-listing the entire repo is not.
+4. Use `read` only on high-signal files to confirm their purpose and to extract the patterns + call paths.
+5. Persist your findings via the `write_findings` tool. Write a concise checkpoint early, then overwrite it with final findings if you learn more.

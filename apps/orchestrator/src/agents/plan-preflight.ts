@@ -16,7 +16,7 @@ import {
   type PreflightStep,
   type PreflightStepStatus,
 } from "@pi-harness/shared";
-import { PREFLIGHT_SUBAGENTS, getSubagent } from "@pi-harness/subagents";
+import { PLAN_RESEARCH_SUBAGENTS, getSubagent } from "@pi-harness/subagents";
 import { makeGitHistoryTool } from "./git-history-tool.js";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { makeSubagentFooter } from "./subagent-footer.js";
@@ -25,7 +25,7 @@ import { ArtifactsStore } from "./artifacts-store.js";
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
 
-export { PREFLIGHT_SUBAGENTS };
+export const PREFLIGHT_SUBAGENTS = PLAN_RESEARCH_SUBAGENTS;
 export type PreflightSubagent = string;
 
 export const PREFLIGHT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;

@@ -9,7 +9,7 @@ import type { Phase } from "@pi-harness/shared";
 export type SubagentRole =
   | "phase-driver"
   | "brainstorm-research"
-  | "preflight-research"
+  | "plan-research"
   | "post-plan-audit";
 
 export type BuiltinTool =
@@ -32,7 +32,9 @@ export type CustomTool =
   | "pi_web_search"
   | "pi_web_fetch"
   | "write_findings"
-  | "git_history";
+  | "git_history"
+  | "spawn_plan_agent"
+  | "write_plan_artifact";
 
 export type SubagentMeta = {
   name: string;
@@ -75,8 +77,8 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
     role: "phase-driver",
     promptDir: "phase",
     promptFile: "plan.md",
-    allowedTools: ["read", "grep", "find", "write"],
-    customTools: ["mark_ready"],
+    allowedTools: ["read", "grep", "find"],
+    customTools: ["spawn_plan_agent", "write_plan_artifact", "mark_ready"],
     invokedBy: ["plan"],
     framing: "",
     description: "Reads research findings, authors plan.md + scenarios.yaml",
@@ -94,7 +96,7 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   },
   "codebase-scout": {
     name: "codebase-scout",
-    role: "preflight-research",
+    role: "plan-research",
     promptDir: "research",
     promptFile: "codebase-scout.md",
     allowedTools: ["read", "grep", "find", "ls"],
@@ -124,7 +126,7 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   },
   "integration-scanner": {
     name: "integration-scanner",
-    role: "preflight-research",
+    role: "plan-research",
     promptDir: "research",
     promptFile: "integration-scanner.md",
     allowedTools: ["read", "grep", "find", "ls"],
@@ -138,7 +140,7 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   },
   "precedent-locator": {
     name: "precedent-locator",
-    role: "preflight-research",
+    role: "plan-research",
     promptDir: "research",
     promptFile: "precedent-locator.md",
     allowedTools: ["read", "grep", "find", "ls"],
@@ -167,26 +169,8 @@ export const SUBAGENT_META: Record<string, SubagentMeta> = {
   },
 };
 
-// Filenames intentionally kept on disk but not wired into any phase yet.
-// Loader test asserts the union of (registry, retired) covers every .md.
-export const RETIRED_PROMPTS = [
-  "scope-tracer",
-  "test-case-locator",
-  "thoughts-analyzer",
-  "thoughts-locator",
-  "peer-comparator",
-  "diff-auditor",
-  "proof-capture",
-  "screenshot-taker",
-  "verification-author",
-  // Merged into codebase-scout. Prompts kept on disk for revivability.
-  "codebase-locator",
-  "codebase-pattern-finder",
-  "codebase-analyzer",
-] as const;
-
 // Derived view: ordering follows SUBAGENT_META declaration order, which the
 // dashboard relies on for stable dot positions.
-export const PREFLIGHT_SUBAGENTS: readonly string[] = Object.values(SUBAGENT_META)
-  .filter((s) => s.role === "preflight-research")
+export const PLAN_RESEARCH_SUBAGENTS: readonly string[] = Object.values(SUBAGENT_META)
+  .filter((s) => s.role === "plan-research")
   .map((s) => s.name);

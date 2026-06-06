@@ -270,6 +270,15 @@ describe("runBrainstorm (real-bridge)", () => {
     const { eventStore } = makeFakes();
     const bus = makeBus(eventStore);
     const adapter = createFakeAdapter();
+    await mkdir(join(scratch, "apps", "dashboard", "app"), { recursive: true });
+    await writeFile(
+      join(scratch, "apps", "dashboard", "app", "globals.css"),
+      '@theme { --color-bg: #0d0e10; --font-body: "Mona Sans"; }\n',
+    );
+    await writeFile(
+      join(scratch, "DESIGN.md"),
+      "# Current Design\nUse dense work-focused panels and restrained status accents.\n",
+    );
 
     const promise = runBrainstorm({
       taskId: TASK,
@@ -307,6 +316,11 @@ describe("runBrainstorm (real-bridge)", () => {
     expect(adapter.state.promptCalls[0]!.text).toContain("Begin brainstorming");
     expect(adapter.state.promptCalls[0]!.text).toContain("Title: Add login");
     expect(adapter.state.promptCalls[0]!.text).toContain(`.harness/${TASK}/design.md`);
+    expect(adapter.state.promptCalls[0]!.text).toContain("## Current UI Design Context");
+    expect(adapter.state.promptCalls[0]!.text).toContain("apps/dashboard/app/globals.css");
+    expect(adapter.state.promptCalls[0]!.text).toContain("--color-bg");
+    expect(adapter.state.promptCalls[0]!.text).toContain("DESIGN.md");
+    expect(adapter.state.promptCalls[0]!.text).toContain("dense work-focused panels");
     const toolNames = (adapter.state.createOpts?.customTools ?? []).map((t) => t.name);
     expect(adapter.state.createOpts?.tools).toContain("read");
     expect(adapter.state.createOpts?.tools).not.toContain("write");
@@ -330,6 +344,56 @@ describe("runBrainstorm (real-bridge)", () => {
     );
     const events = jsonl.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(events.filter((e) => e.kind === "brainstorm_question")).toHaveLength(1);
+  });
+
+  it("restart boundary: session_reset-only JSONL starts a fresh initial session", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+    const jsonlPath = join(scratch, ".harness", TASK, "brainstorm.jsonl");
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({
+        ts: "t-reset",
+        kind: "brainstorm_system",
+        systemKind: "session_reset",
+        data: { archivedRunId: "old-run" },
+      }) + "\n",
+    );
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r-new",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+      ticketTitle: "Restarted task",
+      ticketDescription: "Start from scratch.",
+    });
+
+    await driveSubmitQuestions(adapter, [
+      {
+        questionId: "q-after-reset",
+        prompt: "Pick a scope",
+        options: [
+          { id: "narrow", label: "Narrow", recommended: true, evidence: [] },
+          { id: "wide", label: "Wide", recommended: false, evidence: [] },
+        ],
+        sectionTarget: { artifact: "design", section: "Goals" },
+      },
+    ]);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    expect(adapter.state.promptCalls).toHaveLength(1);
+    expect(adapter.state.promptCalls[0]!.text).toContain("Begin brainstorming");
+    expect(adapter.state.promptCalls[0]!.text).toContain("Title: Restarted task");
+    expect(adapter.state.createOpts?.sessionPath).toBe(sessionPath());
   });
 
   it("initial tick: library task runs web research before brainstorm and forwards subagent tool logs", async () => {

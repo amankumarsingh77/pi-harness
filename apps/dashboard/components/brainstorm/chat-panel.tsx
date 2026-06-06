@@ -248,12 +248,10 @@ export function ChatPanel({
   );
   const allAnswered = totalQuestions > 0 && answeredQuestions === totalQuestions;
 
-  // Nudges are usable while the brainstorm run exists and the user isn't
-  // already at the approval step.
+  // Nudges are usable while the brainstorm run exists. A ready-but-not-approved
+  // brainstorm still accepts nudges; the server reopens it as a revision.
   const nudgesEnabled =
     runId !== null &&
-    gate !== "awaiting_user" &&
-    !ready &&
     !blocked &&
     taskStatus === "brainstorming";
 

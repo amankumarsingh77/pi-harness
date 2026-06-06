@@ -83,9 +83,9 @@ export function PreflightAgentConsole({
             {counts.blocked > 0 ? ` · ${counts.blocked} blocked` : ""}
           </div>
         </div>
-        <div className="grid gap-1.5">
+        <div className="grid grid-cols-2 gap-2">
           {summaries.map((summary) => (
-            <AgentRow
+            <AgentCard
               key={summary.name}
               summary={summary}
               taskId={taskId}
@@ -111,7 +111,7 @@ export function PreflightAgentConsole({
   );
 }
 
-function AgentRow({
+function AgentCard({
   summary,
   taskId,
   canCancelRun,
@@ -123,43 +123,66 @@ function AgentRow({
   readonly onClick: () => void;
 }) {
   return (
-    <div
+    <article
       className={[
-        "flex min-w-0 items-center gap-2 rounded-[8px] border px-2.5 py-2",
-        summary.kind === "progress"
-          ? "border-st-progress/35 bg-st-progress/[0.045]"
-          : "border-line bg-white/[0.014]",
+        "relative min-w-0 overflow-hidden rounded-[8px] border transition-colors",
+        "hover:border-line-hover hover:bg-white/[0.035]",
+        agentCardToneClasses(summary.kind),
       ].join(" ")}
     >
       <button
         type="button"
         aria-label={`${summary.name} agent log`}
-        className="grid min-h-[38px] min-w-0 flex-1 grid-cols-[14px_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-left"
+        className={[
+          "grid min-h-[74px] w-full min-w-0 grid-rows-[auto_1fr_auto] gap-1.5 px-2.5 py-2 text-left",
+          canCancelRun && summary.kind === "progress" ? "pr-10" : "",
+        ].join(" ")}
         onClick={onClick}
       >
-        <StatusIcon
-          kind={statusIconKind(summary.kind)}
-          size={13}
-          live={summary.kind === "progress"}
-        />
-        <span className="min-w-0 truncate font-mono text-[11.5px] font-semibold text-fg">
+        <span className="flex min-w-0 items-center justify-between gap-2">
+          <StatusIcon
+            kind={statusIconKind(summary.kind)}
+            size={13}
+            live={summary.kind === "progress"}
+          />
+          <span className="rounded-[5px] border border-line bg-bg/60 px-1.5 py-0.5 font-mono text-[9.5px] uppercase text-fg-mute">
+            {statusLabel(summary.kind)}
+          </span>
+        </span>
+        <span className="min-w-0 self-center truncate font-mono text-[11px] font-semibold leading-4 text-fg">
           {summary.name}
         </span>
-        <span className="col-start-2 min-w-0 truncate font-mono text-[10.5px] text-fg-mute">
+        <span className="min-w-0 truncate font-mono text-[10px] leading-4 text-fg-mute">
           {summary.meta.join(" · ")}
         </span>
       </button>
       {canCancelRun && summary.kind === "progress" && (
-        <CancelPhaseRunButton
-          taskId={taskId}
-          phase="plan"
-          disabled={false}
-          compact
-          source="preflight-agent"
-        />
+        <div className="absolute bottom-1.5 right-1.5">
+          <CancelPhaseRunButton
+            taskId={taskId}
+            phase="plan"
+            disabled={false}
+            compact
+            source="preflight-agent"
+          />
+        </div>
       )}
-    </div>
+    </article>
   );
+}
+
+function agentCardToneClasses(kind: DotKind): string {
+  if (kind === "progress") return "border-st-progress/40 bg-st-progress/[0.055]";
+  if (kind === "blocked") return "border-st-blocked/35 bg-st-blocked/[0.05]";
+  if (kind === "fallback") return "border-st-review/35 bg-st-review/[0.045]";
+  if (kind === "done") return "border-st-done/30 bg-st-done/[0.04]";
+  return "border-line bg-white/[0.014]";
+}
+
+function statusLabel(kind: DotKind): string {
+  if (kind === "intake") return "queued";
+  if (kind === "progress") return "live";
+  return kind;
 }
 
 function AgentDrawer({

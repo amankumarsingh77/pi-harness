@@ -1,16 +1,15 @@
 "use client";
 import { useState } from "react";
 
-export function MockScreenshotView({
+export function MockHtmlPreview({
   title,
-  desktopSrc,
-  mobileSrc,
+  htmlSrc,
 }: {
   title: string;
-  desktopSrc: string;
-  mobileSrc: string;
+  htmlSrc: string;
 }) {
   const [vp, setVp] = useState<"desktop" | "mobile">("desktop");
+  const viewportClass = vp === "desktop" ? "h-[800px] w-[1280px]" : "h-[844px] w-[390px]";
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-card">
       <div className="flex shrink-0 items-center gap-1.5 border-b border-line bg-bg px-6 py-2">
@@ -29,12 +28,15 @@ export function MockScreenshotView({
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-white">
-        <img
-          alt={`Mock preview ${title}`}
-          src={vp === "desktop" ? desktopSrc : mobileSrc}
-          className="block w-full"
-        />
+      <div data-mock-preview-scroll className="min-h-0 flex-1 overflow-auto bg-bg">
+        <div className={`${viewportClass} max-w-none bg-bg`}>
+          <iframe
+            title={`Mock preview ${title}`}
+            src={htmlSrc}
+            sandbox=""
+            className="h-full w-full border-0 bg-bg"
+          />
+        </div>
       </div>
     </div>
   );

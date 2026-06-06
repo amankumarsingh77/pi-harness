@@ -86,6 +86,7 @@ const MOCK_HTML = [
   { pageId: "task-detail", html: "<!doctype html><h1>Task detail</h1>" },
   { pageId: "brainstorm-review", html: "<!doctype html><h1>Brainstorm review</h1>" },
 ];
+const DESIGN_EVIDENCE = ["apps/dashboard/app/globals.css:3"];
 
 async function fakeExecute<P, D>(
   tool: {
@@ -149,6 +150,7 @@ describe("brainstorm mock tools", () => {
           title: "Split pane",
           summary: "Shows options beside artifacts.",
           recommended: true,
+          evidence: DESIGN_EVIDENCE,
           miniature: {
             kind: "rows",
             rows: [
@@ -220,6 +222,7 @@ describe("brainstorm mock tools", () => {
           title: "Split pane",
           summary: "Shows options beside artifacts.",
           recommended: true,
+          evidence: DESIGN_EVIDENCE,
           pages: [{ pageId: "task-detail", title: "Task detail", html: "<h1>A</h1>" }],
         },
         {
@@ -227,6 +230,7 @@ describe("brainstorm mock tools", () => {
           title: "Stacked review",
           summary: "Stacks choices above artifacts.",
           recommended: false,
+          evidence: DESIGN_EVIDENCE,
           pages: [{ pageId: "task-detail", title: "Task detail", html: "<h1>B</h1>" }],
         },
       ],
@@ -238,6 +242,7 @@ describe("brainstorm mock tools", () => {
           title: "Focused review",
           summary: "Narrows the active review.",
           recommended: true,
+          evidence: DESIGN_EVIDENCE,
           pages: [{ pageId: "task-detail", title: "Task detail", html: "<h1>C</h1>" }],
         },
       ],
@@ -263,6 +268,7 @@ describe("brainstorm mock tools", () => {
       editRequestId: "mer_1",
       title: "Split pane refined",
       summary: "Narrows the artifact pane.",
+      evidence: DESIGN_EVIDENCE,
       miniature: {
         kind: "grid+drawer",
         cells: [{ status: "fail" }, { status: "pass" }],
@@ -322,6 +328,7 @@ describe("brainstorm mock tools", () => {
       editRequestId: "mer_2",
       title: "Split pane refined again",
       summary: "Further narrows the artifact pane.",
+      evidence: DESIGN_EVIDENCE,
       pages: [
         {
           pageId: "task-detail",

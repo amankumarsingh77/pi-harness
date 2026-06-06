@@ -2,6 +2,7 @@ import type {
   DashboardSummary,
   Phase,
   PhaseModelConfig,
+  PlanAgentGraph,
   Task,
   Run,
   AgentEvent,
@@ -48,6 +49,7 @@ export type PlanBundle = {
   blastRadius: Artifact | null;
   executionDag: Artifact | null;
   research: Record<string, string | null>;
+  agentGraph: PlanAgentGraph;
   preflightSteps: PreflightStep[];
   preflightBlockedReason: string | null;
   events: PlanJsonlEvent[];
@@ -85,6 +87,32 @@ export type PlanJsonlEvent =
       sessionId: string;
       attemptId?: string;
       ok: boolean;
+      durationMs: number;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      error?: string;
+    }
+  | {
+      kind: "plan_agent_node_started";
+      ts: string;
+      nodeId: string;
+      parentId: string | null;
+      role: string;
+      title: string;
+      lane: string;
+      sessionId: string;
+      model: string;
+      tools: readonly string[];
+      artifactPath: string;
+      dependsOn: readonly string[];
+    }
+  | {
+      kind: "plan_agent_node_ended";
+      ts: string;
+      nodeId: string;
+      ok: boolean;
+      status: "succeeded" | "failed" | "blocked" | "cancelled";
       durationMs: number;
       costUsd: number;
       inputTokens: number;
@@ -151,7 +179,6 @@ export type VerifierRunResult = {
 
 export type GraphifyJobStatus = "idle" | "running" | "failed";
 export type GraphifyAction = "update" | "rebuild" | "export";
-export type GraphifyArtifactKind = "report" | "html" | "callflow" | "tree" | "json";
 
 export type GraphifyStatus = {
   readonly enabled: boolean;

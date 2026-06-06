@@ -17,6 +17,7 @@ import type { MissionStore } from "../adapters/mission-store.js";
 import {
   PhaseEventLogStore,
   type BrainstormPhaseEventInput,
+  type PlanPhaseEventInput,
 } from "../adapters/phase-event-log-store.js";
 import { readJsonl } from "../adapters/jsonl-writer.js";
 import { deriveBrainstormGate } from "../agents/brainstorm-gate.js";
@@ -193,14 +194,8 @@ export class TaskWorkflowService {
     comment: string,
   ): Promise<{ readonly ok: true; readonly nudgeId: string }> {
     return this.runExclusive(taskId, async () => {
-      const task = await this.taskWithWorktree(taskId);
+      const task = await this.taskInStatusWithWorktree(taskId, "brainstorming");
       const gate = await deriveBrainstormGate(task.worktreePath, task.id, this.deps.artifacts);
-      if (gate === "awaiting_user") {
-        throw new WorkflowConflictError(
-          "gate_closed",
-          "brainstorm artifacts are ready and awaiting your approval — request changes instead of nudging",
-        );
-      }
       const nudgeId = `n_${randomUUID()}`;
       await this.phaseEvents.publish({
         phase: "brainstorm",
@@ -213,6 +208,9 @@ export class TaskWorkflowService {
           consumed: false,
         },
       });
+      if (gate === "awaiting_user") {
+        await this.requestBrainstormChanges(task, comment);
+      }
       this.enqueue(task.id);
       return { ok: true, nudgeId };
     });
@@ -425,19 +423,27 @@ export class TaskWorkflowService {
       });
       const newRun = await this.deps.runs.createRun({ taskId: task.id, phase: "plan" });
       const trimmed = note?.trim();
+      const inputs: PlanPhaseEventInput[] = [
+        ...(trimmed
+          ? [{
+              kind: "plan_revision_requested" as const,
+              comment: trimmed,
+            }]
+          : []),
+        {
+          kind: "plan_system",
+          systemKind: "session_reset",
+          data: {
+            archivedRunId: restartRun.id,
+          },
+        },
+      ];
       await this.phaseEvents.publishMany({
         phase: "plan",
         worktreePath: task.worktreePath,
         taskId: task.id,
         runId: newRun.id,
-        inputs: [{
-          kind: "plan_system",
-          systemKind: "session_reset",
-          data: {
-            archivedRunId: restartRun.id,
-            ...(trimmed ? { note: trimmed } : {}),
-          },
-        }],
+        inputs,
       });
       this.enqueue(task.id);
       return { ok: true, archivedRunId: restartRun.id, newRunId: newRun.id };
@@ -674,15 +680,8 @@ export class TaskWorkflowService {
     phase: Phase,
     worktree: WorktreeInfo,
   ): Promise<PreparedPhase> {
-    const run = await this.deps.runs.createRun({ taskId: task.id, phase });
-    await this.deps.events.append({
-      id: randomUUID(),
-      runId: run.id,
-      taskId: task.id,
-      ts: new Date(),
-      kind: "phase_started",
-      phase,
-    });
+    const { run, created } = await this.deps.runs.findOrCreateActiveRun({ taskId: task.id, phase });
+    if (created) await this.appendPhaseStarted(run);
     return {
       kind: "run",
       task,
@@ -697,18 +696,8 @@ export class TaskWorkflowService {
     task: Task,
     phase: Extract<Phase, "brainstorm" | "plan">,
   ): Promise<Run> {
-    const existingRun = await this.deps.runs.findActiveRun(task.id, phase);
-    const run = existingRun ?? await this.deps.runs.createRun({ taskId: task.id, phase });
-    if (!existingRun) {
-      await this.deps.events.append({
-        id: randomUUID(),
-        runId: run.id,
-        taskId: task.id,
-        ts: new Date(),
-        kind: "phase_started",
-        phase,
-      });
-    }
+    const { run, created } = await this.deps.runs.findOrCreateActiveRun({ taskId: task.id, phase });
+    if (created) await this.appendPhaseStarted(run);
     return run.status === "running" ? run : this.deps.runs.updateRun(run.id, { status: "running" });
   }
 
@@ -821,6 +810,17 @@ export class TaskWorkflowService {
       kind: "phase_ended",
       phase: run.phase,
       status,
+    });
+  }
+
+  private async appendPhaseStarted(run: Pick<Run, "id" | "taskId" | "phase">): Promise<void> {
+    await this.deps.events.append({
+      id: randomUUID(),
+      runId: run.id,
+      taskId: run.taskId,
+      ts: new Date(),
+      kind: "phase_started",
+      phase: run.phase,
     });
   }
 

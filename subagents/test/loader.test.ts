@@ -2,11 +2,9 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import {
   SUBAGENTS,
-  PREFLIGHT_SUBAGENTS,
-  RETIRED_PROMPTS,
+  PLAN_RESEARCH_SUBAGENTS,
   getSubagent,
   listPromptAgents,
-  listPromptFiles,
 } from "../index.js";
 
 describe("subagent registry", () => {
@@ -18,27 +16,40 @@ describe("subagent registry", () => {
     }
   });
 
-  it("every .md on disk is either registered or explicitly retired", () => {
+  it("every .md prompt on disk is registered", () => {
     const onDisk = new Set(listPromptAgents());
-    const accounted = new Set<string>([
-      ...Object.keys(SUBAGENTS),
-      ...RETIRED_PROMPTS,
-    ]);
+    const accounted = new Set<string>(Object.keys(SUBAGENTS));
     const orphans = [...onDisk].filter((n) => !accounted.has(n));
     expect(orphans, `unaccounted prompts: ${orphans.join(", ")}`).toEqual([]);
   });
 
-  it("PREFLIGHT_SUBAGENTS is the derived view over preflight-research role", () => {
+  it("PLAN_RESEARCH_SUBAGENTS is the derived view over planner-spawned research roles", () => {
     const expected = Object.values(SUBAGENTS)
-      .filter((s) => s.role === "preflight-research")
+      .filter((s) => s.role === "plan-research")
       .map((s) => s.name);
-    expect([...PREFLIGHT_SUBAGENTS]).toEqual(expected);
+    expect([...PLAN_RESEARCH_SUBAGENTS]).toEqual(expected);
+  });
+
+  it("does not register automatic preflight research roles", () => {
+    expect(Object.values(SUBAGENTS).map((def) => def.role)).not.toContain(
+      "preflight-research",
+    );
   });
 
   it("getSubagent returns the def for a known name", () => {
     const def = getSubagent("codebase-scout");
     expect(def.name).toBe("codebase-scout");
-    expect(def.role).toBe("preflight-research");
+    expect(def.role).toBe("plan-research");
+  });
+
+  it("codebase-scout prompt directs graph-backed discovery before grep fallback", () => {
+    const def = getSubagent("codebase-scout");
+    const prompt = readFileSync(def.promptPath, "utf8");
+
+    expect(prompt).toMatch(/Graphify-first/i);
+    expect(prompt).toContain("graphify_query");
+    expect(prompt).toContain("graphify_path");
+    expect(prompt).toContain("graphify_explain");
   });
 
   it("getSubagent throws for unknown name", () => {
@@ -56,13 +67,12 @@ describe("subagent registry", () => {
     }
   });
 
-  it("retired prompts are explicitly marked retired", () => {
-    for (const name of RETIRED_PROMPTS) {
-      const path = promptPathFor(name);
-      expect(path, name).not.toBeNull();
-      const prompt = readFileSync(path, "utf8");
-      expect(prompt, name).toMatch(/retired prompt/i);
-    }
+  it("planner cannot use the generic write tool", () => {
+    const def = getSubagent("plan");
+    expect(def.allowedTools).toEqual(["read", "grep", "find"]);
+    expect(def.customTools).toContain("spawn_plan_agent");
+    expect(def.customTools).toContain("write_plan_artifact");
+    expect(def.customTools).toContain("mark_ready");
   });
 });
 
@@ -78,12 +88,4 @@ function parseFrontmatterTools(prompt: string): string[] {
     .split(",")
     .map((tool) => tool.trim())
     .filter((tool) => tool.length > 0);
-}
-
-function promptPathFor(name: string): string {
-  const registered = SUBAGENTS[name];
-  if (registered) return registered.promptPath;
-  const prompt = listPromptFiles().find((file) => file.name === name);
-  if (!prompt) throw new Error(`prompt not found: ${name}`);
-  return prompt.path;
 }
