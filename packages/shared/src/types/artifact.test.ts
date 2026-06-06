@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ArtifactKindSchema } from "./artifact.js";
 
 describe("ArtifactKindSchema", () => {
-  it.each(["design", "spec", "plan", "scenarios", "blast-radius"] as const)("accepts %s", (k) => {
+  it.each(["design", "spec", "plan", "phase-plan", "scenarios", "blast-radius", "execution-dag"] as const)("accepts %s", (k) => {
     expect(ArtifactKindSchema.parse(k)).toBe(k);
   });
 

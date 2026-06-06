@@ -8,6 +8,7 @@ export const ArtifactKindSchema = z.enum([
   "design",
   "spec",
   "plan",
+  "phase-plan",
   "scenarios",
   "blast-radius",
   "execution-dag",
@@ -25,6 +26,7 @@ export const FrontmatterSchema = z.object({
   task: z.string(),                          // "T-NNN"
   kind: ArtifactKindSchema,
   parent: z.string().nullable(),             // path to parent artifact, or null
+  phase: z.number().int().positive().optional(), // for phase-plan artifacts (plan-1.md, plan-2.md, ...)
   status: ArtifactStatusSchema,
   commit: z.string().optional(),             // sha at write time, optional
   branch: z.string(),                        // "pi/T-NNN"

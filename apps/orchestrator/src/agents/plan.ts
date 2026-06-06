@@ -91,6 +91,7 @@ export type PlanResult = {
 type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
 
 const PLANNER_RECOVERY_CAP = 2;
+const CLAIM_VERIFIER_TIMEOUT_MS = 5 * 60 * 1000;
 
 // Drives one plan tick. Two-stage shape:
 //
@@ -168,8 +169,8 @@ function buildInitialPrompt(cwd: string, taskId: string): string {
     `2. Read spec.md: ${paths.spec}.`,
     `3. Read blast-radius.yaml: ${paths.blastRadius}.`,
     `4. Read every file under ${paths.researchDir} — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
-    `5. Author plan.md at ${paths.plan} and scenarios.yaml at ${paths.scenarios} per the protocol in your system prompt.`,
-    "6. Call mark_ready when both authored artifacts are complete and you have cross-checked your citations.",
+    `5. Author plan.md at ${paths.plan}, phase plans as ${paths.phasePlans}, scenarios.yaml at ${paths.scenarios}, and execution-dag.yaml at ${paths.executionDag} per the protocol in your system prompt.`,
+    "6. Call mark_ready when all authored artifacts are complete and you have cross-checked your citations.",
   ].join("\n");
 }
 
@@ -180,8 +181,8 @@ function buildRevisionPrompt(cwd: string, taskId: string, comment: string): stri
     "",
     `> ${comment}`,
     "",
-    `Read your existing plan.md (${paths.plan}), scenarios.yaml (${paths.scenarios}), and blast-radius.yaml (${paths.blastRadius}).`,
-    "Revise plan.md/scenarios.yaml in place to address the comment, then call mark_ready again.",
+    `Read your existing plan.md (${paths.plan}), any phase plans (${paths.phasePlans}), scenarios.yaml (${paths.scenarios}), execution-dag.yaml (${paths.executionDag}), and blast-radius.yaml (${paths.blastRadius}).`,
+    "Revise plan.md, plan-N.md, scenarios.yaml, and execution-dag.yaml in place to address the comment, then call mark_ready again.",
     "",
     `The research findings under ${paths.researchDir} and blast-radius.yaml have not changed — use them as-is.`,
   ].join("\n");
@@ -206,9 +207,11 @@ function buildRecoveryPrompt(
     `- blast-radius.yaml: ${paths.blastRadius}`,
     `- research directory: ${paths.researchDir}`,
     `- plan.md output: ${paths.plan}`,
+    `- phase plan outputs: ${paths.phasePlans}`,
     `- scenarios.yaml output: ${paths.scenarios}`,
+    `- execution-dag.yaml output: ${paths.executionDag}`,
     "",
-    "Repair or complete plan.md and scenarios.yaml in place. Then call mark_ready. Do not stop after exploratory tool calls.",
+    "Repair or complete plan.md, plan-N.md, scenarios.yaml, and execution-dag.yaml in place. Then call mark_ready. Do not stop after exploratory tool calls.",
   ].join("\n");
 }
 
@@ -220,7 +223,9 @@ function artifactPaths(cwd: string, taskId: string): Record<string, string> {
     blastRadius: join(root, "blast-radius.yaml"),
     researchDir: join(root, "research"),
     plan: join(root, "plan.md"),
+    phasePlans: join(root, "plan-N.md"),
     scenarios: join(root, "scenarios.yaml"),
+    executionDag: join(root, "execution-dag.yaml"),
   };
 }
 
@@ -299,13 +304,14 @@ function isValidBlastRadiusBody(body: string): boolean {
 }
 
 async function readPlanArtifacts(opts: PlanOpts): Promise<PlanArtifactsSnapshot> {
-  const [plan, scenarios, blastRadius, executionDag] = await Promise.all([
+  const [plan, phasePlans, scenarios, blastRadius, executionDag] = await Promise.all([
     opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
+    opts.store.listPhasePlanArtifacts(opts.cwd, opts.taskId),
     opts.store.readArtifact(opts.cwd, opts.taskId, "scenarios"),
     opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius"),
     opts.store.readArtifact(opts.cwd, opts.taskId, "execution-dag"),
   ]);
-  return { plan, scenarios, blastRadius, executionDag };
+  return { plan, phasePlans, scenarios, blastRadius, executionDag };
 }
 
 async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
@@ -592,6 +598,8 @@ async function runPlannerStage(
     let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
     let dispatchError: string | undefined;
     let cvSession: AgentSession | null = null;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let promptPromise: Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> | undefined;
     const onCvAbort = (): void => {
       void cvSession?.abort().catch(() => {});
     };
@@ -618,8 +626,17 @@ async function runPlannerStage(
         onEvent: cvForward,
       });
       try {
-        usage = await cvSession.prompt(userPrompt);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            void cvSession?.abort().catch(() => {});
+            reject(new Error(`claim-verifier timed out after ${CLAIM_VERIFIER_TIMEOUT_MS}ms`));
+          }, CLAIM_VERIFIER_TIMEOUT_MS);
+        });
+        promptPromise = cvSession.prompt(userPrompt);
+        usage = await Promise.race([promptPromise, timeoutPromise]);
       } finally {
+        if (timeout) clearTimeout(timeout);
+        void promptPromise?.catch(() => {});
         await cvSession.close().catch(() => {});
       }
     } catch (err) {

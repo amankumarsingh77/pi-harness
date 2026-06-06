@@ -569,6 +569,18 @@ export class TaskWorkflowService {
       },
     });
     await this.deps.artifacts.setArtifactStatus(worktreePath, task.id, "plan", "draft", "user-revision");
+    const phasePlans = await this.deps.artifacts.listPhasePlanArtifacts(worktreePath, task.id);
+    for (const phasePlan of phasePlans) {
+      if (phasePlan.fm.phase !== undefined) {
+        await this.deps.artifacts.setPhasePlanArtifactStatus(
+          worktreePath,
+          task.id,
+          phasePlan.fm.phase,
+          "draft",
+          "user-revision",
+        );
+      }
+    }
     await this.deps.artifacts.setArtifactStatus(worktreePath, task.id, "scenarios", "draft", "user-revision");
     await this.deps.artifacts.setArtifactStatus(worktreePath, task.id, "blast-radius", "draft", "user-revision");
     await this.deps.artifacts.setArtifactStatus(worktreePath, task.id, "execution-dag", "draft", "user-revision");
@@ -780,14 +792,16 @@ export class TaskWorkflowService {
 
   private async planArtifactsReady(task: Task): Promise<boolean> {
     const { worktreePath } = this.requireWorktree(task);
-    const [plan, scenarios, blastRadius, executionDag] = await Promise.all([
+    const [plan, phasePlans, scenarios, blastRadius, executionDag] = await Promise.all([
       this.deps.artifacts.readArtifact(worktreePath, task.id, "plan"),
+      this.deps.artifacts.listPhasePlanArtifacts(worktreePath, task.id),
       this.deps.artifacts.readArtifact(worktreePath, task.id, "scenarios"),
       this.deps.artifacts.readArtifact(worktreePath, task.id, "blast-radius"),
       this.deps.artifacts.readArtifact(worktreePath, task.id, "execution-dag"),
     ]);
     return (
       plan?.fm.status === "ready" &&
+      phasePlans.every((artifact) => artifact.fm.status === "ready") &&
       scenarios?.fm.status === "ready" &&
       blastRadius?.fm.status === "ready" &&
       executionDag?.fm.status === "ready"

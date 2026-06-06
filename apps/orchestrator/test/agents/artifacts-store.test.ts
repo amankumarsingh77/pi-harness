@@ -93,6 +93,31 @@ describe("ArtifactsStore", () => {
     expect(await readFile(store.artifactPath(cwd, "T-1", "design"), "utf8")).toContain("# Design");
   });
 
+  it("round-trips numbered phase plan artifacts", async () => {
+    const store = new ArtifactsStore({ stateDir });
+    const phasePlan: Artifact = {
+      fm: {
+        task: "T-1",
+        kind: "phase-plan",
+        parent: "plan.md",
+        phase: 1,
+        status: "draft",
+        branch: "pi/T-1",
+        last_updated: "2026-05-09T00:00:00.000Z",
+        last_updated_by: "plan-agent",
+      },
+      body: "# Phase 1\n\n## Objective\nShip contracts.\n",
+    };
+
+    await store.writeArtifact(cwd, "T-1", phasePlan);
+
+    const got = await store.readPhasePlanArtifact(cwd, "T-1", 1);
+    expect(got?.body).toContain("Ship contracts");
+    expect(await readFile(store.phasePlanArtifactPath(cwd, "T-1", 1), "utf8")).toContain("kind: phase-plan");
+    expect(await readFile(store.currentPhasePlanArtifactPath(cwd, "T-1", 1), "utf8")).toContain("# Phase 1");
+    expect((await store.listPhasePlanArtifacts(cwd, "T-1")).map((art) => art.fm.phase)).toEqual([1]);
+  });
+
   it("writeArtifact is atomic (no .tmp file remains on success)", async () => {
     const store = new ArtifactsStore({ stateDir });
     await store.writeArtifact(cwd, "T-1", sample);

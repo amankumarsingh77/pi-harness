@@ -379,6 +379,104 @@ describe("runPlan", () => {
       vi.useRealTimers();
     }
   });
+
+  it("times out a hung claim-verifier launched from mark_ready", async () => {
+    vi.useFakeTimers();
+    await appendPlanJsonl([
+      { kind: "plan_system", systemKind: "preflight_complete", data: { count: 3 } },
+    ]);
+    await seedPlannerOutputArtifacts();
+
+    let claimVerifierAbortCalled = false;
+    let markVerifierPromptStarted: (() => void) | undefined;
+    let finishVerifierPrompt: ((usage: { costUsd: number; inputTokens: number; outputTokens: number }) => void) | undefined;
+    const verifierPromptStarted = new Promise<void>((resolve) => {
+      markVerifierPromptStarted = resolve;
+    });
+    const controller = new AbortController();
+    let markReadySettled = false;
+
+    const resultPromise = runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async (opts) => {
+        const writeFindings = (opts.customTools ?? []).some(
+          (tool) => tool.name === "write_findings",
+        );
+        if (writeFindings) {
+          return {
+            async prompt() {
+              markVerifierPromptStarted?.();
+              return new Promise<{ costUsd: number; inputTokens: number; outputTokens: number }>((resolve) => {
+                finishVerifierPrompt = resolve;
+              });
+            },
+            async abort() {
+              claimVerifierAbortCalled = true;
+              finishVerifierPrompt?.({ costUsd: 0, inputTokens: 0, outputTokens: 0 });
+            },
+            async close() {},
+          } satisfies AgentSession;
+        }
+
+        return {
+          async prompt() {
+            const markReady = (opts.customTools ?? []).find(
+              (tool) => tool.name === "mark_ready",
+            );
+            if (!markReady) throw new Error("mark_ready tool not registered");
+            const result = await markReady.execute(
+              "mark-ready",
+              {},
+              undefined,
+              undefined,
+              undefined as never,
+            );
+            markReadySettled = true;
+            expect(result.details.ok).toBe(false);
+            expect(result.details.missing).toContain("claim-verifier");
+            return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
+          },
+          async abort() {},
+          async close() {},
+        } satisfies AgentSession;
+      },
+      ticketTitle: "Verifier timeout",
+      ticketDescription: "Claim verifier hangs.",
+      signal: controller.signal,
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    try {
+      await verifierPromptStarted;
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+
+      const result = await resultPromise;
+      expect(markReadySettled).toBe(true);
+      expect(claimVerifierAbortCalled).toBe(true);
+      expect(result.ok).toBe(true);
+      expect(result.ready).toBe(false);
+      const planJsonl = await readPlanJsonl();
+      expect(planJsonl).toContain("claim-verifier timed out");
+      expect(planJsonl).toContain("\"planner_turn_completed\"");
+      expect(planJsonl).toContain("\"ready\":false");
+    } finally {
+      controller.abort();
+      finishVerifierPrompt?.({ costUsd: 0, inputTokens: 0, outputTokens: 0 });
+      await resultPromise.catch(() => {});
+      vi.useRealTimers();
+    }
+  });
 });
 
 function makeBus(): PlanEventBus {
@@ -412,6 +510,13 @@ async function seedPlanInputs(): Promise<void> {
   }
 }
 
+async function seedPlannerOutputArtifacts(): Promise<void> {
+  await store.writeArtifact(cwd, "T-1", makeArtifact("plan", validIndexedPlanBody));
+  await store.writeArtifact(cwd, "T-1", makePhaseArtifact(1, validPhasePlanBody));
+  await store.writeArtifact(cwd, "T-1", makeArtifact("scenarios", validScenariosYaml));
+  await store.writeArtifact(cwd, "T-1", makeArtifact("execution-dag", validExecutionDagYaml));
+}
+
 function makeArtifact(kind: Artifact["fm"]["kind"], body: string): Artifact {
   return {
     fm: {
@@ -426,3 +531,110 @@ function makeArtifact(kind: Artifact["fm"]["kind"], body: string): Artifact {
     body,
   };
 }
+
+function makePhaseArtifact(phase: number, body: string): Artifact {
+  return {
+    fm: {
+      task: "T-1",
+      kind: "phase-plan",
+      parent: "plan.md",
+      phase,
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: "2026-05-16T00:00:00.000Z",
+      last_updated_by: "test",
+    },
+    body,
+  };
+}
+
+const validScenariosYaml = `scenarios:
+  - id: s1
+    type: api
+    name: smoke
+    description: GET /health returns 200 and the body reports the service is up.
+    requirementRefs:
+      - REQ-001
+    blastRadiusRefs:
+      - BR-001
+`;
+
+const validExecutionDagYaml = `version: 1
+nodes:
+  - id: C-001
+    title: Add backoff helper
+    phase: Foundation
+    kind: api
+    lane: orchestrator
+    safety: exclusive
+    dependsOn: []
+    writes:
+      - src/webhooks.ts
+    reads:
+      - src/foo.ts
+    verifies:
+      - pnpm test
+    covers:
+      - REQ-001
+    blastRadius:
+      - BR-001
+    assertion: webhook test passes with 5 retries
+waves:
+  - id: W-001
+    name: Foundation
+    policy: sequential
+    nodes:
+      - C-001
+`;
+
+const validIndexedPlanBody = [
+  "# Plan",
+  "",
+  "## Goal",
+  "Add retry to webhooks.",
+  "",
+  "## Plan Summary",
+  "Phase 1 builds the retry foundation.",
+  "",
+  "## Phase DAG",
+  "Foundation -> Verification",
+  "",
+  "## Phases",
+  "- Phase 1: Foundation — Details: plan-1.md — Covers: REQ-001 — Blast radius: BR-001",
+  "",
+  "## Cross-Phase Risks",
+  "- Retry behavior must not double-send webhooks.",
+  "",
+  "## Out of scope",
+  "- Inbound webhook receipts",
+].join("\n");
+
+const validPhasePlanBody = [
+  "# Phase 1: Foundation",
+  "",
+  "## Objective",
+  "Build the retry foundation.",
+  "",
+  "## Decisions",
+  "- Reuse the existing webhook route shape.",
+  "",
+  "## Touchpoints",
+  "- `src/webhooks.ts` — retry send path.",
+  "",
+  "## Work Slices",
+  "### C-001: Add backoff helper",
+  "- Files: modify `src/webhooks.ts`",
+  "- Covers: REQ-001",
+  "- Blast radius: BR-001",
+  "- Assertion: webhook test passes with 5 retries",
+  "",
+  "## Phase Verification Contract",
+  "- Run `pnpm test`.",
+  "- Scenario `s1` proves the route stays healthy.",
+  "",
+  "## Failure Modes",
+  "- Retrying can double-send webhooks.",
+  "",
+  "## Exit Criteria",
+  "- C-001 is implemented and verified.",
+].join("\n");

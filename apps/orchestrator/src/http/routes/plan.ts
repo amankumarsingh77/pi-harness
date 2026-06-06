@@ -52,6 +52,7 @@ export function registerPlanRoutes(
         gate: "running" as const,
         status: task.status,
         plan: null,
+        phasePlans: [],
         scenarios: null,
         blastRadius: null,
         executionDag: null,
@@ -66,8 +67,9 @@ export function registerPlanRoutes(
     const latestPlanRun = [...(await deps.runs.listRuns(task.id))]
       .reverse()
       .find((run) => run.phase === "plan") ?? null;
-    const [plan, scenarios, blastRadius, executionDag, events, gate, research, preflightSteps] = await Promise.all([
+    const [plan, phasePlans, scenarios, blastRadius, executionDag, events, gate, research, preflightSteps] = await Promise.all([
       deps.artifacts.readArtifact(cwd, task.id, "plan"),
+      deps.artifacts.listPhasePlanArtifacts(cwd, task.id),
       deps.artifacts.readArtifact(cwd, task.id, "scenarios"),
       deps.artifacts.readArtifact(cwd, task.id, "blast-radius"),
       deps.artifacts.readArtifact(cwd, task.id, "execution-dag"),
@@ -83,6 +85,7 @@ export function registerPlanRoutes(
       gate,
       status: task.status,
       plan,
+      phasePlans,
       scenarios,
       blastRadius,
       executionDag,

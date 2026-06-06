@@ -118,6 +118,58 @@ const validPlanBody = [
   "- Inbound webhook receipts",
 ].join("\n");
 
+const validIndexedPlanBody = [
+  "# Plan",
+  "",
+  "## Goal",
+  "Add retry to webhooks.",
+  "",
+  "## Plan Summary",
+  "Phase 1 builds the retry foundation.",
+  "",
+  "## Phase DAG",
+  "Foundation -> Verification",
+  "",
+  "## Phases",
+  "- Phase 1: Foundation — Details: plan-1.md — Covers: REQ-001 — Blast radius: BR-001",
+  "",
+  "## Cross-Phase Risks",
+  "- Retry behavior must not double-send webhooks.",
+  "",
+  "## Out of scope",
+  "- Inbound webhook receipts",
+].join("\n");
+
+const validPhasePlanBody = [
+  "# Phase 1: Foundation",
+  "",
+  "## Objective",
+  "Build the retry foundation.",
+  "",
+  "## Decisions",
+  "- Reuse the existing webhook route shape.",
+  "",
+  "## Touchpoints",
+  "- `src/webhooks.ts` — retry send path.",
+  "",
+  "## Work Slices",
+  "### C-001: Add backoff helper",
+  "- Files: modify `src/webhooks.ts`",
+  "- Covers: REQ-001",
+  "- Blast radius: BR-001",
+  "- Assertion: webhook test passes with 5 retries",
+  "",
+  "## Phase Verification Contract",
+  "- Run `pnpm test`.",
+  "- Scenario `s1` proves the route stays healthy.",
+  "",
+  "## Failure Modes",
+  "- Retrying can double-send webhooks.",
+  "",
+  "## Exit Criteria",
+  "- C-001 is implemented and verified.",
+].join("\n");
+
 async function seedRepo() {
   const git = simpleGit(cwd);
   await git.init();
@@ -190,6 +242,23 @@ async function writePlanArtifacts(
   await store.writeArtifact(cwd, "T-1", executionDag);
 }
 
+async function writePhasePlan(phase: number, body = validPhasePlanBody) {
+  const phasePlan: Artifact = {
+    fm: {
+      task: "T-1",
+      kind: "phase-plan",
+      parent: "plan.md",
+      phase,
+      status: "draft",
+      branch: "pi/T-1",
+      last_updated: new Date().toISOString(),
+      last_updated_by: "plan-agent",
+    },
+    body,
+  };
+  await store.writeArtifact(cwd, "T-1", phasePlan);
+}
+
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "plan-tools-test-"));
   cwd = join(scratch, "wt");
@@ -226,6 +295,50 @@ describe("mark_ready", () => {
     const result = await tool.execute("t1", {}, undefined, undefined, null as never);
     expect(result.details.ok).toBe(false);
     expect(result.details.missing).toBe("plan.md not found");
+  });
+
+  it("rejects when plan.md references a missing phase plan", async () => {
+    await writePlanArtifacts(validIndexedPlanBody, validScenariosYaml);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toBe("plan.md references missing phase plan: plan-1.md");
+  });
+
+  it("rejects when a phase plan work slice is missing from execution-dag.yaml", async () => {
+    await writePlanArtifacts(validIndexedPlanBody, validScenariosYaml, validBlastRadiusYaml, `version: 1
+nodes:
+  - id: C-002
+    title: Other task
+    phase: Foundation
+    kind: api
+    lane: orchestrator
+    safety: exclusive
+    dependsOn: []
+    writes: [src/other.ts]
+    reads: [src/foo.ts]
+    verifies: [pnpm test]
+    covers: [REQ-001]
+    blastRadius: [BR-001]
+    assertion: other test passes
+`);
+    await writePhasePlan(1);
+    const tool = makeMarkReadyTool({
+      store, bus, cwd, taskId: "T-1",
+      dispatchClaimVerifier: noopDispatcher,
+      claimVerifierState: newState(),
+    });
+
+    const result = await tool.execute("t1", {}, undefined, undefined, null as never);
+
+    expect(result.details.ok).toBe(false);
+    expect(result.details.missing).toBe("execution-dag.yaml: phase plan step(s) missing matching DAG node(s): C-001");
   });
 
   it("rejects when scenarios.yaml is missing", async () => {

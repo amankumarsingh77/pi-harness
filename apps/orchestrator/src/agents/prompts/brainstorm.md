@@ -15,6 +15,7 @@ product or implementation choices remain unresolved, and produce:
 ## Questioning behavior
 
 - Ask questions only when the answer materially changes requirements, architecture, edge cases, or verification.
+- Ask questions if you are uncertain, spotted a conflict.
 - Prefer small focused batches of related multiple-choice questions.
 - Include a recommended option and evidence when repo files support it.
 - Do not enforce a 3-5 question cap. Ask enough to remove ambiguity, and no more.
