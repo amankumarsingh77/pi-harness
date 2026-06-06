@@ -240,7 +240,11 @@ export async function runPhase(
         store: deps.store,
         claimLedger: deps.claimLedger,
         ...(deps.claimPublisher !== undefined
-          ? { publishClaimsUpdated: deps.claimPublisher.publishClaimsUpdated }
+          ? {
+              publishClaimsUpdated: deps.claimPublisher.publishClaimsUpdated.bind(
+                deps.claimPublisher,
+              ),
+            }
           : {}),
         runApiScenario,
         runUiScenario,

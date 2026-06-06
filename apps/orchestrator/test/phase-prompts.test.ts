@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_PHASE_MODELS } from "@pi-harness/shared";
+import { DEFAULT_PHASE_MODELS, type ClaimsUpdatedPayload } from "@pi-harness/shared";
 import type { AgentSessionOptions } from "@pi-harness/pi-bridge";
 import { runPlan } from "../src/agents/plan.js";
 import { runVerifierSidecar } from "../src/agents/verifier-sidecar.js";
@@ -90,9 +90,53 @@ describe("runPhase", () => {
         runId: "run-1",
         cwd: "/tmp/pi-harness-phase-prompts",
         claimLedger,
-        publishClaimsUpdated: claimPublisher.publishClaimsUpdated,
+        publishClaimsUpdated: expect.any(Function),
       }),
     );
+  });
+
+  it("passes a bound claim publisher into the verifier sidecar", async () => {
+    const published: ClaimsUpdatedPayload[] = [];
+    const claimPublisher = {
+      published,
+      async publishClaimsUpdated(
+        this: { readonly published: ClaimsUpdatedPayload[] },
+        _taskId: string,
+        payload: ClaimsUpdatedPayload,
+      ): Promise<void> {
+        this.published.push(payload);
+      },
+    };
+    const deps: PhaseDeps = {
+      cwd: "/tmp/pi-harness-phase-prompts",
+      onEvent: () => {},
+      createAgentSession: async (_opts: AgentSessionOptions) => {
+        throw new Error("not used");
+      },
+      store: {},
+      eventStore: {},
+      claimLedger: { listClaims: vi.fn() },
+      claimPublisher,
+      exec: async () => ({ ok: true, stdout: "" }),
+    } as PhaseDeps;
+
+    await runPhase("verify", {
+      taskId: "T-1",
+      runId: "run-1",
+      phaseModel: DEFAULT_PHASE_MODELS.verify,
+    }, deps);
+
+    const verifierOpts = vi.mocked(runVerifierSidecar).mock.calls.at(-1)?.[0];
+    if (!verifierOpts?.publishClaimsUpdated) throw new Error("publishClaimsUpdated was not passed");
+    const payload: ClaimsUpdatedPayload = {
+      taskId: "T-1",
+      claims: [],
+      claimEvents: [],
+    };
+
+    await verifierOpts.publishClaimsUpdated("T-1", payload);
+
+    expect(published).toEqual([payload]);
   });
 
   it("fails verify when the verifier sidecar challenges a claim", async () => {
