@@ -29,8 +29,9 @@ describe("PlanConsole", () => {
     expect(screen.getByRole("region", { name: "Plan stage progress" })).toHaveTextContent(
       "Review",
     );
-    expect(screen.getByRole("region", { name: "Plan readiness" })).toHaveTextContent(
-      "execution DAG",
+    expect(screen.queryByRole("region", { name: "Plan readiness" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Plan risks" })).toHaveTextContent(
+      "Preflight blocked",
     );
     expect(screen.getByRole("region", { name: "Agents" })).toHaveTextContent(
       "codebase-scout",
@@ -48,7 +49,8 @@ describe("PlanConsole", () => {
     expect(screen.getByRole("region", { name: "Plan review command center" })).toBeInTheDocument();
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(agents).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Plan readiness" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Plan readiness" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Plan risks" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Preflight agent navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Live preflight logs" })).toBeNull();
     expect(within(agents).getByRole("region", { name: "planner agent log" })).toBeInTheDocument();

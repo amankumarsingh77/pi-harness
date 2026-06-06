@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import type { AgentEvent, Artifact, PreflightStep, Run, Task } from "@pi-harness/shared";
 import { approvePlan, requestPlanChanges } from "@/app/tasks/[id]/plan/actions";
 import type { PlanGate, PlanJsonlEvent } from "@/lib/api";
+import { parseExecutionDag } from "@/lib/code/parse-execution-dag";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import { CancelPhaseRunButton } from "@/components/task-detail/cancel-phase-run-button";
 import { Alert } from "@/components/ui/alert";
@@ -74,6 +75,19 @@ export function PlanConsole({
         lastBlocked,
       }),
     [plan, phasePlans, scenarios, blastRadius, executionDag, preflight, gate, lastBlocked],
+  );
+  const planRisks = useMemo(
+    () =>
+      buildPlanRisks({
+        plan,
+        scenarios,
+        blastRadius,
+        executionDag,
+        preflight,
+        gate,
+        lastBlocked,
+      }),
+    [plan, scenarios, blastRadius, executionDag, preflight, gate, lastBlocked],
   );
   const plannerLogOpen = plannerLogDefaultOpen && gate === "running";
 
@@ -219,7 +233,7 @@ export function PlanConsole({
             executionDag={executionDag}
           />
 
-          <PlanReadinessPanel items={readiness} preflight={preflight} />
+          <PlanRisksPanel risks={planRisks} />
         </div>
 
       </div>
@@ -239,6 +253,14 @@ type ReadinessItem = {
   readonly label: string;
   readonly value: string;
   readonly ready: boolean;
+};
+
+type PlanRiskTone = "blocked" | "warn" | "info" | "ok";
+
+type PlanRisk = {
+  readonly title: string;
+  readonly detail: string;
+  readonly tone: PlanRiskTone;
 };
 
 function derivePreflightSummary({
@@ -309,6 +331,64 @@ function readiness(label: string, value: string, ready: boolean): ReadinessItem 
 function isArtifactReady(artifact: Artifact | null): boolean {
   if (!artifact) return false;
   return artifact.fm.status === "ready" || artifact.fm.status === "human_edited" || artifact.fm.status === "approved";
+}
+
+function buildPlanRisks({
+  plan,
+  scenarios,
+  blastRadius,
+  executionDag,
+  preflight,
+  gate,
+  lastBlocked,
+}: {
+  readonly plan: Artifact | null;
+  readonly scenarios: Artifact | null;
+  readonly blastRadius: Artifact | null;
+  readonly executionDag: Artifact | null;
+  readonly preflight: PreflightSummary;
+  readonly gate: PlanGate;
+  readonly lastBlocked: { reason: string; ts: string } | null;
+}): readonly PlanRisk[] {
+  const dag = parseExecutionDag(executionDag?.body ?? "");
+  const missingAssertions = dag.nodes.filter((node) => node.assertion === null).length;
+  const risks: PlanRisk[] = [
+    ...(lastBlocked
+      ? [risk("Active blocker", lastBlocked.reason || "No reason recorded.", "blocked")]
+      : []),
+    ...(preflight.blocked > 0
+      ? [risk("Preflight blocked", `${preflight.blocked} agent${plural(preflight.blocked)} need attention before approval.`, "blocked")]
+      : []),
+    ...(preflight.progress > 0 || preflight.queued > 0
+      ? [risk("Agent evidence incomplete", `${preflight.progress} live · ${preflight.queued} queued`, "warn")]
+      : []),
+    ...(!isArtifactReady(plan)
+      ? [risk("Plan still draft", "The main plan has not reached a reviewable artifact status.", "warn")]
+      : []),
+    ...(!isArtifactReady(scenarios)
+      ? [risk("Missing scenarios", "Verifier sidecar cannot prove claims without runnable scenarios.", "warn")]
+      : []),
+    ...(!isArtifactReady(blastRadius)
+      ? [risk("Missing impact map", "Reviewers cannot inspect affected files, APIs, or workflows.", "warn")]
+      : []),
+    ...(!isArtifactReady(executionDag)
+      ? [risk("Execution map not ready", "Coding order and dependency safety are not reviewable yet.", "warn")]
+      : []),
+    ...(missingAssertions > 0
+      ? [risk("DAG assertions missing", `${missingAssertions} execution task${plural(missingAssertions)} lack verification assertions.`, "warn")]
+      : []),
+    ...(gate === "awaiting_user"
+      ? [risk("Reviewer action available", "Plan gate is open for approval or requested changes.", "info")]
+      : []),
+  ];
+
+  return risks.length > 0
+    ? risks
+    : [risk("No high-risk items", "Artifacts and agent evidence do not expose an immediate review risk.", "ok")];
+}
+
+function risk(title: string, detail: string, tone: PlanRiskTone): PlanRisk {
+  return { title, detail, tone };
 }
 
 function countYamlListItems(body: string, key: string): number {
@@ -509,42 +589,44 @@ function InlinePlanApprovalActions({
   );
 }
 
-function PlanReadinessPanel({
-  items,
-  preflight,
-}: {
-  readonly items: readonly ReadinessItem[];
-  readonly preflight: PreflightSummary;
-}) {
-  const readyCount = items.filter((item) => item.ready).length;
+function PlanRisksPanel({ risks }: { readonly risks: readonly PlanRisk[] }) {
+  const blockedCount = risks.filter((item) => item.tone === "blocked").length;
+  const warnCount = risks.filter((item) => item.tone === "warn").length;
 
   return (
     <section
-      aria-label="Plan readiness"
+      aria-label="Plan risks"
       className="min-w-0 rounded-[9px] border border-line bg-card"
     >
       <header className="border-b border-line px-3 py-3">
-        <div className="text-[13px] font-semibold text-fg">Readiness</div>
+        <div className="text-[13px] font-semibold text-fg">Plan risks</div>
         <div className="mt-1 font-mono text-[10.5px] text-fg-mute">
-          {readyCount}/{items.length} checks ready · {preflight.done} done · {preflight.progress} live
+          {blockedCount} blocked · {warnCount} warnings
         </div>
       </header>
       <div className="grid gap-2 p-3">
-        {items.map((item) => (
+        {risks.map((item) => (
           <div
-            key={item.label}
+            key={`${item.tone}:${item.title}`}
             className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 rounded-[7px] border border-line bg-white/[0.014] px-2.5 py-2"
           >
-            <StatusIcon kind={item.ready ? "done" : "intake"} size={13} />
+            <StatusIcon kind={riskIconKind(item.tone)} size={13} />
             <div className="min-w-0">
-              <div className="truncate text-[12px] font-medium text-fg-body">{item.label}</div>
-              <div className="mt-0.5 truncate font-mono text-[10.5px] text-fg-mute">{item.value}</div>
+              <div className="truncate text-[12px] font-medium text-fg-body">{item.title}</div>
+              <div className="mt-0.5 text-[11px] leading-4 text-fg-mute">{item.detail}</div>
             </div>
           </div>
         ))}
       </div>
     </section>
   );
+}
+
+function riskIconKind(tone: PlanRiskTone): "intake" | "progress" | "review" | "done" | "blocked" {
+  if (tone === "blocked") return "blocked";
+  if (tone === "warn") return "review";
+  if (tone === "ok") return "done";
+  return "intake";
 }
 
 function statusIconKind(kind: DotKind): "intake" | "progress" | "review" | "done" | "blocked" {
