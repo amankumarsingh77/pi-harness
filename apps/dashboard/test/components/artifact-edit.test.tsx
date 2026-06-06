@@ -43,6 +43,21 @@ const SAMPLE: Artifact = {
 };
 
 describe("ArtifactBlock — edit mode", () => {
+  it("renders final markdown inside the readable artifact document wrapper", () => {
+    render(
+      withQuery(
+        <ArtifactBlock
+          taskId="t1"
+          taskStatus="planning"
+          kind="design"
+          artifact={SAMPLE}
+        />,
+      ),
+    );
+
+    expect(screen.getByRole("heading", { name: "Design" }).closest(".artifact-doc")).not.toBeNull();
+  });
+
   it("hides the Edit toggle once the task is past brainstorming", () => {
     render(
       withQuery(

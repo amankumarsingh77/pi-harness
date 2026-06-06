@@ -1,9 +1,8 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
 import { useQuery } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { Artifact, TaskStatus } from "@pi-harness/shared";
+import { ArtifactMarkdown } from "@/components/artifact-markdown";
 import { api, type BrainstormDiff } from "@/lib/api";
 import { submitArtifactEditAction } from "@/app/tasks/[id]/actions";
 import { StatusBadge } from "./status-badge";
@@ -113,9 +112,9 @@ export function ArtifactBlock({
       </header>
       {artifact ? (
         mode === "final" ? (
-          <div className="scroll-hide markdown-body min-h-0 flex-1 overflow-y-auto px-6 py-3.5 text-[13px] leading-[1.65] text-fg-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.body.trim()}</ReactMarkdown>
-          </div>
+          <ArtifactMarkdown className="scroll-hide min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {artifact.body}
+          </ArtifactMarkdown>
         ) : mode === "diff" ? (
           <DiffPane diff={diffQuery.data} loading={diffQuery.isPending} fallback={artifact.body} />
         ) : (

@@ -43,6 +43,7 @@ export type PlanBundle = {
   gate: PlanGate;
   status: Task["status"];
   plan: Artifact | null;
+  phasePlans: Artifact[];
   scenarios: Artifact | null;
   blastRadius: Artifact | null;
   executionDag: Artifact | null;

@@ -19,6 +19,7 @@ export function PlanConsole({
   iconKind,
   canCancelRun,
   plan,
+  phasePlans,
   blastRadius,
   scenarios,
   executionDag,
@@ -37,6 +38,7 @@ export function PlanConsole({
   readonly iconKind: "intake" | "progress" | "review" | "done" | "blocked";
   readonly canCancelRun: boolean;
   readonly plan: Artifact | null;
+  readonly phasePlans: readonly Artifact[];
   readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
   readonly executionDag: Artifact | null;
@@ -150,6 +152,7 @@ export function PlanConsole({
 
         <PlanArtifactConsole
           plan={plan}
+          phasePlans={phasePlans}
           blastRadius={blastRadius}
           scenarios={scenarios}
           executionDag={executionDag}

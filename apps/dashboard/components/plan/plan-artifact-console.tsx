@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Artifact } from "@pi-harness/shared";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { ArtifactMarkdown } from "@/components/artifact-markdown";
 import { StatusIcon } from "@/components/kanban/status-icon";
 import { ExecutionPhasesPreview } from "./execution-phases-preview";
 
@@ -12,11 +11,13 @@ type ArtifactTab = "rendered" | "raw" | "diff";
 
 export function PlanArtifactConsole({
   plan,
+  phasePlans,
   blastRadius,
   scenarios,
   executionDag,
 }: {
   readonly plan: Artifact | null;
+  readonly phasePlans: readonly Artifact[];
   readonly blastRadius: Artifact | null;
   readonly scenarios: Artifact | null;
   readonly executionDag: Artifact | null;
@@ -53,6 +54,7 @@ export function PlanArtifactConsole({
           setTab("raw");
         }}
       />
+      <PlanDocuments plan={plan} phasePlans={phasePlans} />
       <section
         className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.72fr)_minmax(0,0.72fr)]"
         aria-label="Main artifacts"
@@ -140,6 +142,80 @@ export function PlanArtifactConsole({
   );
 }
 
+function PlanDocuments({
+  plan,
+  phasePlans,
+}: {
+  readonly plan: Artifact | null;
+  readonly phasePlans: readonly Artifact[];
+}) {
+  return (
+    <section
+      className="mb-3 overflow-hidden rounded-[9px] border border-line bg-card"
+      aria-label="Plan documents"
+    >
+      <header className="flex items-center gap-2.5 border-b border-line px-3 py-3">
+        <span className="text-[13px] font-semibold text-fg">Plan documents</span>
+        <span className="ml-auto font-mono text-[10.5px] text-fg-mute">
+          {phasePlans.length > 0 ? `${phasePlans.length} phase docs` : "single overview"}
+        </span>
+      </header>
+      <div className="grid gap-2 p-3 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <DocumentRow
+          title="Plan overview"
+          filename="plan.md"
+          status={plan?.fm.status ?? "missing"}
+          body={plan?.body ?? "plan.md has not been authored yet"}
+        />
+        <div className="grid gap-2">
+          {phasePlans.length === 0 ? (
+            <p className="m-0 rounded-[7px] border border-dashed border-line px-3 py-3 font-mono text-[11.5px] text-fg-mute">
+              phase-level plan docs not authored yet
+            </p>
+          ) : (
+            phasePlans.map((artifact) => (
+              <DocumentRow
+                key={artifact.fm.phase ?? artifact.body}
+                title={`Phase ${artifact.fm.phase ?? "?"}`}
+                filename={`plan-${artifact.fm.phase ?? "?"}.md`}
+                status={artifact.fm.status}
+                body={artifact.body}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DocumentRow({
+  title,
+  filename,
+  status,
+  body,
+}: {
+  readonly title: string;
+  readonly filename: string;
+  readonly status: string;
+  readonly body: string;
+}) {
+  return (
+    <article className="min-w-0 rounded-[7px] border border-line bg-white/[0.014] px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[12.5px] font-semibold text-fg">{title}</span>
+        <span className="font-mono text-[10.5px] text-fg-mute">{filename}</span>
+        <span className="ml-auto rounded-full border border-line px-2 py-0.5 font-mono text-[10px] text-fg-mute">
+          {status}
+        </span>
+      </div>
+      <p className="m-0 mt-1 line-clamp-2 text-[12px] leading-5 text-fg-body">
+        {firstContentLine(body)}
+      </p>
+    </article>
+  );
+}
+
 function ArtifactPane({
   kind,
   title,
@@ -193,11 +269,7 @@ function ArtifactPreview({
     return <pre className="whitespace-pre font-mono text-[11.5px] leading-[1.58] text-fg-body">{artifact.body.trim()}</pre>;
   }
 
-  return (
-    <div className="markdown-body text-[13.5px] leading-[1.65] text-fg-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.body.trim()}</ReactMarkdown>
-    </div>
-  );
+  return <ArtifactMarkdown>{artifact.body}</ArtifactMarkdown>;
 }
 
 function ArtifactModalBody({
@@ -233,11 +305,7 @@ function ArtifactModalBody({
     );
   }
 
-  return (
-    <div className="markdown-body text-[13.5px] leading-[1.65] text-fg-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.body.trim()}</ReactMarkdown>
-    </div>
-  );
+  return <ArtifactMarkdown>{artifact.body}</ArtifactMarkdown>;
 }
 
 function artifactTitle(kind: ArtifactKind) {
@@ -245,6 +313,14 @@ function artifactTitle(kind: ArtifactKind) {
   if (kind === "blastRadius") return "blast-radius.yaml";
   if (kind === "executionDag") return "execution-dag.yaml";
   return "scenarios.yaml";
+}
+
+function firstContentLine(body: string): string {
+  const line = body
+    .split("\n")
+    .map((part) => part.trim())
+    .find((part) => part.length > 0 && !part.startsWith("---") && !part.startsWith("#"));
+  return line ?? "No content yet";
 }
 
 function ArtifactTabButton({

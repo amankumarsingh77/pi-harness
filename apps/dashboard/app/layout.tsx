@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import "@fontsource-variable/mona-sans";
 import "./globals.css";
 import { QueryProvider } from "@/lib/query-provider";
 
