@@ -1,0 +1,1779 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Plan Graph Mock - Dynamic Agents</title>
+    <style>
+      :root {
+        /* Project design tokens — mirror apps/dashboard/app/globals.css exactly. */
+        --color-bg: #0d0e10;
+        --color-card: #131418;
+        --color-card-hover: #181a1f;
+        --color-sub: #18181b;
+        --color-muted: #0f0f10;
+        --color-input: #0a0b0d;
+
+        --color-fg: #f7f8f8;
+        --color-fg-body: #e6e7e9;
+        --color-fg-label: #a1a1aa;
+        --color-fg-mute: #8a8f98;
+        --color-fg-subtle: #71717a;
+        --color-fg-faint: #4a4e57;
+        --color-fg-ghost: #3f3f46;
+
+        --color-border: #27272a;
+        --color-border-soft: #1f1f23;
+        --color-border-strong: #3f3f46;
+        --color-line: rgba(255, 255, 255, 0.06);
+        --color-line-hover: rgba(255, 255, 255, 0.12);
+        --color-line-strong: rgba(255, 255, 255, 0.18);
+
+        /* Status palette — used ONLY by status icons / accent words, never as bg. */
+        --color-st-idle: #8a8f98;
+        --color-st-progress: #5e6ad2;
+        --color-st-review: #f2c94c;
+        --color-st-blocked: #eb5757;
+        --color-st-shipping: #c084fc;
+        --color-st-done: #4cb782;
+
+        --color-cyan-fg: #22d3ee;
+
+        /* Mock aliases mapped onto project tokens (keeps existing rules working). */
+        --bg: var(--color-bg);
+        --panel: var(--color-card);
+        --panel-2: var(--color-card-hover);
+        --panel-3: var(--color-sub);
+        --ink: var(--color-fg);
+        --body: var(--color-fg-body);
+        --muted: var(--color-fg-mute);
+        --faint: var(--color-fg-faint);
+        --line: var(--color-line);
+        --line-2: var(--color-line-hover);
+        --blue: var(--color-st-progress);
+        --teal: var(--color-st-done);
+        --green: var(--color-st-done);
+        --yellow: var(--color-st-review);
+        --red: var(--color-st-blocked);
+        --violet: var(--color-st-shipping);
+        --cyan: var(--color-cyan-fg);
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+        --mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+        --sans: "Mona Sans Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        min-width: 1180px;
+        overflow: hidden;
+        background:
+          linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+          var(--bg);
+        background-size: 24px 24px;
+        color: var(--body);
+        font-family: var(--sans);
+        font-size: 13px;
+        letter-spacing: 0;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .app {
+        display: grid;
+        grid-template-rows: 48px 1fr 34px;
+        height: 100%;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr) auto;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: color-mix(in srgb, var(--color-bg) 90%, transparent);
+        backdrop-filter: blur(12px);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 16px;
+        min-width: 0;
+      }
+
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--line-2);
+        color: var(--teal);
+        background: var(--color-sub);
+        border-radius: 6px;
+      }
+
+      .crumbs {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .crumbs strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .titleline {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        gap: 10px;
+      }
+
+      .phase-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 24px;
+        padding: 0 10px;
+        border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent);
+        border-radius: 999px;
+        color: var(--yellow);
+        background: color-mix(in srgb, var(--yellow) 8%, transparent);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .pulse {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 12px currentColor;
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.42; }
+      }
+
+      .task-title {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .top-actions {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+      }
+
+      .run-totals {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        padding-right: 4px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      .run-total {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.035);
+        white-space: nowrap;
+      }
+
+      .run-total strong {
+        color: var(--ink);
+        font-size: 12px;
+      }
+
+      .icon-btn,
+      .tool-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--color-input);
+        color: var(--muted);
+      }
+
+      .icon-btn:hover,
+      .tool-btn:hover,
+      .seg button:hover {
+        border-color: var(--line-2);
+        color: var(--ink);
+        background: var(--color-card-hover);
+      }
+
+      .primary {
+        height: 32px;
+        padding: 0 14px;
+        border: 1px solid color-mix(in srgb, var(--green) 45%, transparent);
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--green) 12%, var(--color-input));
+        color: var(--green);
+        font-weight: 650;
+      }
+
+      .primary:disabled {
+        cursor: not-allowed;
+        border-color: var(--line);
+        background: var(--color-card);
+        color: var(--faint);
+      }
+
+      .main {
+        display: grid;
+        grid-template-columns: 280px 1fr 390px;
+        min-height: 0;
+      }
+
+      .rail,
+      .inspector {
+        min-height: 0;
+        overflow: auto;
+        background: rgba(17, 19, 24, 0.96);
+      }
+
+      .rail {
+        border-right: 1px solid var(--line);
+      }
+
+      .inspector {
+        border-left: 1px solid var(--line);
+      }
+
+      .rail-section,
+      .inspect-section {
+        padding: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 9px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--color-input);
+      }
+
+      .search input {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--body);
+      }
+
+      .agent-list {
+        display: grid;
+        gap: 7px;
+      }
+
+      .agent-row {
+        display: grid;
+        grid-template-columns: 18px 1fr auto;
+        gap: 9px;
+        align-items: center;
+        width: 100%;
+        min-height: 42px;
+        padding: 7px 9px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--color-input);
+        color: var(--body);
+        text-align: left;
+      }
+
+      .agent-row:hover,
+      .agent-row.selected {
+        border-color: var(--line-2);
+        background: var(--color-card-hover);
+      }
+
+      .agent-title {
+        overflow: hidden;
+        color: var(--ink);
+        font-size: 12.5px;
+        font-weight: 640;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .agent-sub {
+        overflow: hidden;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--faint);
+        box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 9%, transparent);
+      }
+
+      .done { color: var(--green); }
+      .running { color: var(--blue); }
+      .waiting { color: var(--yellow); }
+      .blocked { color: var(--red); }
+      .queued { color: var(--faint); }
+      .synthesis { color: var(--violet); }
+      .artifact { color: var(--cyan); }
+
+      .status-dot.done { background: var(--green); }
+      .status-dot.running { background: var(--blue); animation: pulse 1.4s infinite; }
+      .status-dot.waiting { background: var(--yellow); }
+      .status-dot.blocked { background: var(--red); }
+      .status-dot.queued { background: var(--faint); }
+      .status-dot.synthesis { background: var(--violet); }
+      .status-dot.artifact { background: var(--cyan); }
+
+      .mini {
+        width: 86px;
+        height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--color-input);
+      }
+
+      .canvas-wrap {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .canvas-toolbar {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        pointer-events: none;
+      }
+
+      .toolbar-cluster {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        pointer-events: auto;
+      }
+
+      .seg {
+        display: flex;
+        height: 32px;
+        padding: 2px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--color-bg) 84%, transparent);
+        backdrop-filter: blur(10px);
+      }
+
+      .seg button {
+        min-width: 72px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .seg button.active {
+        background: var(--color-card-hover);
+        color: var(--ink);
+      }
+
+      .canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .graph {
+        width: 100%;
+        height: 100%;
+        user-select: none;
+      }
+
+      .edge {
+        fill: none;
+        stroke: rgba(166, 173, 184, 0.5);
+        stroke-width: 1.4;
+      }
+
+      .edge.hot {
+        stroke: var(--blue);
+        stroke-width: 2;
+      }
+
+      .edge.blocked {
+        stroke: var(--red);
+        stroke-dasharray: 7 5;
+      }
+
+      .edge.pending {
+        stroke-dasharray: 4 6;
+        opacity: 0.55;
+      }
+
+      .node-card {
+        cursor: pointer;
+      }
+
+      .node-bg {
+        fill: var(--color-card);
+        stroke: rgba(255, 255, 255, 0.14);
+        stroke-width: 1;
+        rx: 8;
+      }
+
+      .node-card:hover .node-bg,
+      .node-card.selected .node-bg {
+        fill: var(--color-card-hover);
+        stroke: rgba(255, 255, 255, 0.3);
+      }
+
+      .node-card.selected .node-bg {
+        stroke: var(--blue);
+        stroke-width: 2;
+      }
+
+      .node-title {
+        fill: var(--ink);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .node-meta {
+        fill: var(--muted);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      .node-chip {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .node-chip-bg {
+        fill: rgba(255, 255, 255, 0.06);
+        rx: 5;
+      }
+
+      .inspector-head {
+        padding: 16px 16px 13px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .inspect-kicker {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 650;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .inspect-title {
+        margin-top: 5px;
+        color: var(--ink);
+        font-size: 18px;
+        font-weight: 720;
+        line-height: 1.2;
+      }
+
+      .inspect-desc {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .inspect-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1px;
+        padding: 5px;
+        border-bottom: 1px solid var(--line);
+        background: var(--color-input);
+      }
+
+      .inspect-tabs button {
+        height: 30px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .inspect-tabs button.active {
+        background: var(--color-card-hover);
+        color: var(--ink);
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 104px 1fr;
+        gap: 8px;
+        padding: 7px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+      }
+
+      .kv dt {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      .kv dd {
+        margin: 0;
+        color: var(--body);
+      }
+
+      .log {
+        display: grid;
+        gap: 8px;
+      }
+
+      /* Flat agent log — mirrors apps/dashboard plan-log-rows.tsx:
+         monospace [time] [verb] [detail] grid, no cards or borders. */
+      .live-log {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.7;
+        color: var(--color-fg-body);
+      }
+
+      /* Logs panel header: event count + open-in-dialog button. */
+      .logs-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+
+      .logs-count {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .logs-expand-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--color-input);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .logs-expand-btn:hover:not(:disabled) {
+        border-color: var(--line-2);
+        color: var(--ink);
+        background: var(--color-card-hover);
+      }
+
+      .logs-expand-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .log-entry {
+        border-radius: 6px;
+      }
+
+      .log-entry.expanded {
+        background: rgba(255, 255, 255, 0.022);
+      }
+
+      .log-line {
+        display: grid;
+        grid-template-columns: 64px 48px minmax(0, 1fr) 14px;
+        align-items: baseline;
+        gap: 10px;
+        width: 100%;
+        padding: 1px 6px 1px 4px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .log-line:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .log-time {
+        color: var(--color-fg-faint);
+      }
+
+      .log-verb.progress { color: var(--color-st-progress); }
+      .log-verb.done { color: var(--color-st-done); }
+      .log-verb.blocked { color: var(--color-st-blocked); }
+      .log-verb.muted { color: var(--color-fg-mute); }
+
+      .log-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .log-chevron {
+        justify-self: end;
+        color: var(--faint);
+        transition: transform 0.12s ease;
+      }
+
+      .log-entry.expanded .log-chevron {
+        transform: rotate(90deg);
+        color: var(--muted);
+      }
+
+      .log-detail {
+        display: none;
+        gap: 5px;
+        margin: 2px 6px 8px 0;
+        padding: 8px 10px;
+        border-left: 2px solid var(--line-2);
+      }
+
+      .log-entry.expanded .log-detail {
+        display: grid;
+      }
+
+      .log-d-row {
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr);
+        gap: 10px;
+        align-items: baseline;
+      }
+
+      .log-d-key {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .log-d-val {
+        color: var(--body);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .log-d-val.mono {
+        color: var(--cyan);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .log-empty {
+        margin: 0;
+        padding: 8px 4px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--color-fg-mute);
+      }
+
+      .stream-cursor {
+        display: inline-block;
+        width: 6px;
+        height: 12px;
+        margin-left: 4px;
+        vertical-align: -2px;
+        background: var(--color-st-progress);
+        animation: cursorBlink 1s steps(2, start) infinite;
+      }
+
+      @keyframes cursorBlink {
+        50% { opacity: 0; }
+      }
+
+      /* ── Logs modal dialog ── */
+      .logs-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+      }
+
+      .logs-modal-scrim {
+        position: absolute;
+        inset: 0;
+        background: rgba(5, 6, 8, 0.62);
+        backdrop-filter: blur(2px);
+      }
+
+      .logs-modal-card {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        width: min(760px, 100%);
+        max-height: min(80vh, 720px);
+        border: 1px solid var(--line-2);
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        animation: modalIn 0.14s ease-out;
+      }
+
+      @keyframes modalIn {
+        from { opacity: 0; transform: translateY(6px) scale(0.99); }
+        to { opacity: 1; transform: none; }
+      }
+
+      .logs-modal-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 16px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .logs-modal-title {
+        margin-top: 5px;
+        color: var(--ink);
+        font-size: 17px;
+        font-weight: 720;
+        line-height: 1.2;
+      }
+
+      .logs-modal-sub {
+        margin-top: 4px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .logs-modal-body {
+        min-height: 0;
+        overflow: auto;
+        padding: 14px 16px 18px;
+      }
+
+      .live-log--modal {
+        font-size: 12px;
+        line-height: 1.85;
+      }
+
+      .live-log--modal .log-line {
+        grid-template-columns: 72px 56px minmax(0, 1fr) 14px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+      }
+
+      .artifact-card {
+        display: grid;
+        gap: 6px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--color-input);
+      }
+
+      .artifact-card strong {
+        color: var(--ink);
+      }
+
+      .artifact-card code {
+        color: var(--cyan);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .timeline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        border-top: 1px solid var(--line);
+        background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .ticker {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 22px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        background: var(--color-input);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        white-space: nowrap;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 900px) {
+        body {
+          min-width: 0;
+          overflow: auto;
+        }
+
+        .app {
+          min-height: 1000px;
+        }
+
+        .topbar {
+          grid-template-columns: 1fr;
+          height: auto;
+          gap: 8px;
+          padding: 10px 0;
+        }
+
+        .top-actions {
+          justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .run-totals {
+          flex-wrap: wrap;
+        }
+
+        .main {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto 620px auto;
+        }
+
+        .rail,
+        .inspector {
+          max-height: 360px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12h14M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="crumbs">
+            <span>pi-harness</span><span>/</span><strong>plan graph</strong>
+          </div>
+        </div>
+        <div class="titleline">
+          <span class="phase-pill"><span class="pulse"></span>planning</span>
+          <div class="task-title">Add dynamic parent planner subagent delegation and visual plan hierarchy</div>
+        </div>
+        <div class="top-actions">
+          <div class="run-totals" aria-label="Total agent usage">
+            <span class="run-total"><strong id="totalCost">$0.43</strong> cost</span>
+            <span class="run-total"><strong id="totalInput">24.7k</strong> in</span>
+            <span class="run-total"><strong id="totalOutput">13.3k</strong> out</span>
+          </div>
+          <button class="icon-btn" id="toggleLive" title="Pause or resume live simulation" aria-label="Toggle live simulation">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button class="icon-btn" id="addAgent" title="Add sample dynamic agent" aria-label="Add sample dynamic agent">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button class="icon-btn" id="focusBlocked" title="Focus blocked nodes" aria-label="Focus blocked nodes">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M12 8v5M12 17h.01M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <button class="primary" id="approveBtn" disabled>Approve plan</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <aside class="rail">
+          <section class="rail-section">
+            <div class="eyebrow">Find</div>
+            <label class="search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <input id="search" type="search" placeholder="Search agents, artifacts, claims" />
+            </label>
+          </section>
+
+          <section class="rail-section">
+            <div class="eyebrow">Agents</div>
+            <div class="agent-list" id="agentList"></div>
+          </section>
+        </aside>
+
+        <section class="canvas-wrap" aria-label="Plan graph canvas">
+          <div class="canvas-toolbar">
+            <div class="toolbar-cluster">
+              <div class="seg" role="tablist" aria-label="Graph view mode">
+                <button class="active" data-layout="hierarchy">Hierarchy</button>
+                <button data-layout="lanes">Lanes</button>
+                <button data-layout="compact">Compact</button>
+              </div>
+            </div>
+            <div class="toolbar-cluster">
+              <button class="tool-btn" id="zoomOut" title="Zoom out" aria-label="Zoom out">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+              <button class="tool-btn" id="fit" title="Fit graph" aria-label="Fit graph">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+              <button class="tool-btn" id="zoomIn" title="Zoom in" aria-label="Zoom in">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="canvas" id="canvas">
+            <svg class="graph" id="graph" viewBox="0 0 1160 760" role="img" aria-label="Dynamic plan hierarchy graph">
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(166,173,184,0.72)"></path>
+                </marker>
+                <marker id="arrowHot" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5e6ad2"></path>
+                </marker>
+                <marker id="arrowBlocked" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#eb5757"></path>
+                </marker>
+              </defs>
+              <g id="graphLayer"></g>
+            </svg>
+          </div>
+        </section>
+
+        <aside class="inspector">
+          <div class="inspector-head">
+            <div class="inspect-kicker" id="inspectType">Parent Planner</div>
+            <div class="inspect-title" id="inspectTitle">Planner Orchestrator</div>
+            <div class="inspect-desc" id="inspectDesc">Owns dynamic delegation, reads child findings, and produces plan artifacts.</div>
+          </div>
+          <div class="inspect-tabs">
+            <button class="active" data-tab="overview">Overview</button>
+            <button data-tab="logs">Logs</button>
+            <button data-tab="artifacts">Artifacts</button>
+          </div>
+          <section class="inspect-section" id="panel-overview"></section>
+          <section class="inspect-section hidden" id="panel-logs"></section>
+          <section class="inspect-section hidden" id="panel-artifacts"></section>
+        </aside>
+      </main>
+
+      <footer class="timeline">
+        <span class="badge"><span class="status-dot running"></span> live events</span>
+        <span class="ticker" id="ticker">planner delegated security-scout because auth/session files appeared in blast radius</span>
+      </footer>
+    </div>
+
+    <div class="logs-modal hidden" id="logsModal" role="dialog" aria-modal="true" aria-labelledby="logsModalTitle">
+      <div class="logs-modal-scrim" id="logsModalScrim"></div>
+      <div class="logs-modal-card">
+        <header class="logs-modal-head">
+          <div class="logs-modal-heading">
+            <div class="inspect-kicker">Agent log</div>
+            <div class="logs-modal-title" id="logsModalTitle">Agent</div>
+            <div class="logs-modal-sub" id="logsModalSub"></div>
+          </div>
+          <button class="icon-btn" id="logsModalClose" title="Close (Esc)" aria-label="Close log dialog">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </header>
+        <div class="logs-modal-body" id="logsModalBody"></div>
+      </div>
+    </div>
+
+    <script>
+      const nodes = [
+        {
+          id: "planner",
+          type: "parent planner",
+          title: "Planner Orchestrator",
+          lane: "control",
+          status: "running",
+          x: 480,
+          y: 52,
+          w: 210,
+          h: 86,
+          desc: "Chooses which specialist agents to launch, waits for evidence, then synthesizes the plan.",
+          owner: "plan phase",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.11",
+          tokens: "9.8k",
+          artifacts: [".harness/task/plan.jsonl", ".harness/task/research/"],
+          events: [
+            "Opened resumable pi planner session",
+            "Read design.md and spec.md",
+            "Requested local code scout, integration scanner, docs researcher, and precedent locator"
+          ]
+        },
+        {
+          id: "scout",
+          type: "subagent",
+          title: "codebase-scout",
+          lane: "local",
+          status: "done",
+          x: 110,
+          y: 206,
+          w: 190,
+          h: 78,
+          desc: "Mapped files, call paths, and existing plan-page components.",
+          owner: "planner",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.06",
+          tokens: "5.3k",
+          artifacts: [".harness/task/research/codebase-scout.md"],
+          events: ["Read dashboard plan components", "Found static preflight UI assumptions", "Wrote findings"]
+        },
+        {
+          id: "researcher",
+          type: "subagent",
+          title: "docs-researcher",
+          lane: "external",
+          status: "running",
+          x: 354,
+          y: 206,
+          w: 190,
+          h: 78,
+          desc: "Checks React Flow and Pi extension behavior before we depend on graph interaction.",
+          owner: "planner",
+          model: "openai-codex/gpt-5.1",
+          cost: "$0.09",
+          tokens: "7.1k",
+          artifacts: [".harness/task/research/docs-researcher.md"],
+          events: ["Opened library docs", "Comparing canvas libraries", "Still streaming source-backed recommendation"]
+        },
+        {
+          id: "integration",
+          type: "subagent",
+          title: "integration-scanner",
+          lane: "system",
+          status: "done",
+          x: 598,
+          y: 206,
+          w: 190,
+          h: 78,
+          desc: "Identified event-store, run-store, and plan page data contracts.",
+          owner: "planner",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.05",
+          tokens: "4.4k",
+          artifacts: [".harness/task/research/integration-scanner.md"],
+          events: ["Followed AgentEvent types", "Mapped live event provider", "Wrote inbound/outbound edges"]
+        },
+        {
+          id: "precedent",
+          type: "subagent",
+          title: "precedent-locator",
+          lane: "history",
+          status: "done",
+          x: 842,
+          y: 206,
+          w: 190,
+          h: 78,
+          desc: "Looked for prior page redesign and agent console changes in git history.",
+          owner: "planner",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.04",
+          tokens: "3.6k",
+          artifacts: [".harness/task/research/precedent-locator.md"],
+          events: ["Scanned recent commits", "Found plan console refactors", "Wrote precedent notes"]
+        },
+        {
+          id: "security",
+          type: "subagent",
+          title: "security-scout",
+          lane: "risk",
+          status: "blocked",
+          x: 232,
+          y: 360,
+          w: 190,
+          h: 78,
+          desc: "Needs a decision: should children inherit OAuth-backed provider credentials or only harness-scoped credentials?",
+          owner: "planner",
+          model: "crofai/deepseek-v4-pro",
+          cost: "$0.03",
+          tokens: "2.9k",
+          artifacts: [".harness/task/research/security-scout.md"],
+          events: ["Found provider credential boundary", "Raised needs-attention event", "Waiting for parent decision"]
+        },
+        {
+          id: "claims",
+          type: "audit agent",
+          title: "claim-verifier",
+          lane: "audit",
+          status: "queued",
+          x: 720,
+          y: 360,
+          w: 190,
+          h: 78,
+          desc: "Will audit plan.md after synthesis before mark_ready is accepted.",
+          owner: "planner",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.00",
+          tokens: "0",
+          artifacts: [".harness/task/research/claim-verifier.md"],
+          events: ["Queued by planner", "Waiting for plan draft"]
+        },
+        {
+          id: "synthesis",
+          type: "synthesis",
+          title: "Plan Synthesis",
+          lane: "control",
+          status: "waiting",
+          x: 480,
+          y: 508,
+          w: 210,
+          h: 84,
+          desc: "Merges child evidence into one implementation plan and execution DAG.",
+          owner: "planner",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.00",
+          tokens: "0",
+          artifacts: ["plan.md", "scenarios.yaml", "execution-dag.yaml"],
+          events: ["Waiting for docs-researcher", "Waiting for security decision"]
+        },
+        {
+          id: "artifact-pack",
+          type: "artifact bundle",
+          title: "Plan Artifacts",
+          lane: "files",
+          status: "artifact",
+          x: 480,
+          y: 646,
+          w: 210,
+          h: 78,
+          desc: "Final files that unlock the human approval gate.",
+          owner: "orchestrator",
+          model: "none",
+          cost: "$0.00",
+          tokens: "0",
+          artifacts: ["plan.md", "plan-code.md", "scenarios.yaml", "execution-dag.yaml", "blast-radius.yaml"],
+          events: ["Draft artifacts visible", "Approval blocked until all required files are ready"]
+        }
+      ];
+
+      const usageById = {
+        planner: { input: 6200, output: 3600, cost: 0.11, runtime: 268 },
+        scout: { input: 3400, output: 1900, cost: 0.06, runtime: 152 },
+        researcher: { input: 4800, output: 2300, cost: 0.09, runtime: 211 },
+        integration: { input: 2900, output: 1500, cost: 0.05, runtime: 134 },
+        precedent: { input: 2500, output: 1100, cost: 0.04, runtime: 119 },
+        security: { input: 2100, output: 800, cost: 0.03, runtime: 96 },
+        claims: { input: 0, output: 0, cost: 0, runtime: 0 },
+        synthesis: { input: 1800, output: 900, cost: 0.05, runtime: 42 },
+        "artifact-pack": { input: 1000, output: 1200, cost: 0, runtime: 18 }
+      };
+
+      const logsById = {
+        planner: [
+          { kind: "message", at: "+00:03", text: "Opened resumable pi planner session and loaded run state." },
+          { kind: "tool-call", at: "+00:12", tool: "rg", text: "Search for plan page and preflight console ownership.", input: "apps/dashboard/components/plan" },
+          { kind: "tool-result", at: "+00:14", tool: "rg", text: "Matched plan page, preflight console, and event stream consumers.", output: "12 files scanned" },
+          { kind: "tool-call", at: "+00:31", tool: "spawn_agent", text: "Launch codebase-scout for local UI and state contract mapping.", input: "scope=dashboard plan graph" },
+          { kind: "message", at: "+03:42", text: "Waiting on security-scout before writing synthesis artifact." }
+        ],
+        scout: [
+          { kind: "tool-call", at: "+00:09", tool: "read", text: "Read current plan page component tree.", input: "apps/dashboard/components/plan" },
+          { kind: "tool-result", at: "+00:21", tool: "read", text: "Found static three-agent preflight assumption in console layout.", output: "preflight-agent-console.tsx" },
+          { kind: "tool-call", at: "+01:06", tool: "write_artifact", text: "Persist local code map for planner.", input: ".harness/task/research/codebase-scout.md" },
+          { kind: "message", at: "+02:32", text: "Completed local codebase scan." }
+        ],
+        researcher: [
+          { kind: "tool-call", at: "+00:18", tool: "docs", text: "Check canvas graph libraries and interaction APIs.", input: "React Flow, xyflow, lightweight SVG canvas" },
+          { kind: "tool-result", at: "+01:44", tool: "docs", text: "React Flow fits hierarchy interaction, minimap, handles, and viewport controls.", output: "source notes appended" },
+          { kind: "tool-call", at: "+03:16", tool: "browser", text: "Validate graph interaction examples and keyboard behavior.", input: "library examples" },
+          { kind: "message", at: "+03:31", text: "Streaming recommendation summary." }
+        ],
+        integration: [
+          { kind: "tool-call", at: "+00:07", tool: "rg", text: "Find orchestrator event types and dashboard consumers.", input: "AgentEvent RunStore PlanEvent" },
+          { kind: "tool-result", at: "+00:28", tool: "rg", text: "Mapped run-store, SSE route, and shared schemas.", output: "event surface identified" },
+          { kind: "tool-call", at: "+01:18", tool: "write_artifact", text: "Write data contract notes.", input: ".harness/task/research/integration-scanner.md" },
+          { kind: "message", at: "+02:14", text: "Completed integration scan." }
+        ],
+        precedent: [
+          { kind: "tool-call", at: "+00:11", tool: "git_log", text: "Search prior plan console changes.", input: "plan preflight console" },
+          { kind: "tool-result", at: "+00:43", tool: "git_log", text: "Found dashboard console refactors and raw plan console work.", output: "4 relevant commits" },
+          { kind: "message", at: "+01:59", text: "Precedent notes ready." }
+        ],
+        security: [
+          { kind: "tool-call", at: "+00:15", tool: "read", text: "Inspect provider credential boundary.", input: "packages/pi-bridge apps/orchestrator" },
+          { kind: "tool-result", at: "+00:55", tool: "read", text: "Credential ownership crosses parent runtime and child agent sessions.", output: "decision required" },
+          { kind: "message", at: "+01:24", text: "Raised needs-attention event: child permissions inheritance must be explicit." }
+        ],
+        claims: [
+          { kind: "message", at: "+00:00", text: "Queued until plan synthesis artifact exists." }
+        ],
+        synthesis: [
+          { kind: "message", at: "+00:00", text: "Waiting for docs-researcher and security decision." }
+        ],
+        "artifact-pack": [
+          { kind: "tool-call", at: "+00:04", tool: "write_artifact", text: "Stage visible plan artifact bundle.", input: "plan.md, execution-dag.yaml, blast-radius.yaml" },
+          { kind: "tool-result", at: "+00:18", tool: "write_artifact", text: "Artifact bundle is visible but approval remains blocked.", output: "5 files staged" }
+        ]
+      };
+
+      const edges = [
+        ["planner", "scout", "hot"],
+        ["planner", "researcher", "hot"],
+        ["planner", "integration", "hot"],
+        ["planner", "precedent", "hot"],
+        ["scout", "security", "blocked"],
+        ["integration", "security", "blocked"],
+        ["integration", "claims", "pending"],
+        ["scout", "synthesis", "hot"],
+        ["researcher", "synthesis", "pending"],
+        ["precedent", "synthesis", "hot"],
+        ["security", "synthesis", "blocked"],
+        ["claims", "synthesis", "pending"],
+        ["synthesis", "artifact-pack", "pending"]
+      ];
+
+      const colorByStatus = {
+        done: "#4cb782",
+        running: "#5e6ad2",
+        waiting: "#f2c94c",
+        blocked: "#eb5757",
+        queued: "#4a4e57",
+        synthesis: "#c084fc",
+        artifact: "#22d3ee"
+      };
+
+      const graphLayer = document.getElementById("graphLayer");
+      const agentList = document.getElementById("agentList");
+      const search = document.getElementById("search");
+      const ticker = document.getElementById("ticker");
+      const approveBtn = document.getElementById("approveBtn");
+      const totalCost = document.getElementById("totalCost");
+      const totalInput = document.getElementById("totalInput");
+      const totalOutput = document.getElementById("totalOutput");
+      let selectedId = "planner";
+      let filter = "all";
+      let zoom = 1;
+      let live = true;
+      let elapsed = 268;
+      let dynamicIndex = 0;
+
+      function center(node) {
+        return { x: node.x + node.w / 2, y: node.y + node.h / 2 };
+      }
+
+      function edgePath(from, to) {
+        const a = center(from);
+        const b = center(to);
+        const y1 = from.y + from.h;
+        const y2 = to.y;
+        const c1 = y1 + Math.max(52, (y2 - y1) * 0.42);
+        const c2 = y2 - Math.max(52, (y2 - y1) * 0.42);
+        return `M ${a.x} ${y1} C ${a.x} ${c1}, ${b.x} ${c2}, ${b.x} ${y2}`;
+      }
+
+      function visibleNode(node) {
+        const q = search.value.trim().toLowerCase();
+        const matchesSearch = !q || [node.title, node.type, node.desc, node.lane, ...node.artifacts].join(" ").toLowerCase().includes(q);
+        const matchesFilter = filter === "all" || node.status === filter || (filter === "artifact" && node.type.includes("artifact"));
+        return matchesSearch && matchesFilter;
+      }
+
+      function renderGraph() {
+        const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+        graphLayer.innerHTML = "";
+        graphLayer.setAttribute("transform", `scale(${zoom}) translate(${(1 - zoom) * 90} ${(1 - zoom) * 30})`);
+
+        for (const [fromId, toId, kind] of edges) {
+          const from = byId[fromId];
+          const to = byId[toId];
+          if (!from || !to || !visibleNode(from) || !visibleNode(to)) continue;
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", edgePath(from, to));
+          path.setAttribute("class", `edge ${kind}`);
+          path.setAttribute("marker-end", kind === "hot" ? "url(#arrowHot)" : kind === "blocked" ? "url(#arrowBlocked)" : "url(#arrow)");
+          graphLayer.appendChild(path);
+        }
+
+        for (const node of nodes) {
+          if (!visibleNode(node)) continue;
+          const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          g.setAttribute("class", `node-card ${node.id === selectedId ? "selected" : ""}`);
+          g.setAttribute("tabindex", "0");
+          g.setAttribute("role", "button");
+          g.dataset.id = node.id;
+          g.innerHTML = `
+            <rect class="node-bg" x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" />
+            <circle cx="${node.x + 18}" cy="${node.y + 20}" r="5.5" fill="${colorByStatus[node.status] || colorByStatus.queued}" />
+            <text class="node-title" x="${node.x + 32}" y="${node.y + 24}">${escapeXml(node.title)}</text>
+            <text class="node-meta" x="${node.x + 16}" y="${node.y + 48}">${escapeXml(node.type)} / ${escapeXml(node.lane)}</text>
+            <rect class="node-chip-bg" x="${node.x + 14}" y="${node.y + node.h - 25}" width="72" height="18" />
+            <text class="node-chip" x="${node.x + 24}" y="${node.y + node.h - 12}" fill="${colorByStatus[node.status] || colorByStatus.queued}">${escapeXml(node.status)}</text>
+            <text class="node-meta" x="${node.x + 96}" y="${node.y + node.h - 12}">${escapeXml(node.tokens)} tok</text>
+          `;
+          g.addEventListener("click", () => selectNode(node.id));
+          g.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") selectNode(node.id);
+          });
+          graphLayer.appendChild(g);
+        }
+      }
+
+      function escapeXml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function formatTokens(value) {
+        if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+        return String(value);
+      }
+
+      function formatCost(value) {
+        return `$${value.toFixed(2)}`;
+      }
+
+      function formatRuntime(seconds) {
+        const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+        const ss = String(seconds % 60).padStart(2, "0");
+        return `${mm}:${ss}`;
+      }
+
+      function usageFor(node) {
+        return usageById[node.id] || { input: 0, output: 0, cost: 0, runtime: 0 };
+      }
+
+      function logsFor(node) {
+        return logsById[node.id] || node.events.map((event, index) => ({
+          kind: "message",
+          at: `+${String(index + 1).padStart(2, "0")}m`,
+          text: event
+        }));
+      }
+
+      function updateTotals() {
+        const totals = nodes.reduce((acc, node) => {
+          const usage = usageFor(node);
+          return {
+            cost: acc.cost + usage.cost,
+            input: acc.input + usage.input,
+            output: acc.output + usage.output
+          };
+        }, { cost: 0, input: 0, output: 0 });
+        totalCost.textContent = formatCost(totals.cost);
+        totalInput.textContent = formatTokens(totals.input);
+        totalOutput.textContent = formatTokens(totals.output);
+      }
+
+      function selectNode(id) {
+        selectedId = id;
+        renderGraph();
+        renderList();
+        renderInspector();
+      }
+
+      function renderList() {
+        agentList.innerHTML = nodes
+          .filter((node) => !node.type.includes("artifact"))
+          .map((node) => `
+            <button class="agent-row ${node.id === selectedId ? "selected" : ""}" data-id="${node.id}">
+              <span class="status-dot ${node.status}"></span>
+              <span>
+                <span class="agent-title">${escapeXml(node.title)}</span>
+                <span class="agent-sub">${escapeXml(node.type)} / ${escapeXml(node.lane)}</span>
+              </span>
+              <span class="agent-sub">${escapeXml(node.cost)}</span>
+            </button>
+          `)
+          .join("");
+        agentList.querySelectorAll("button").forEach((button) => {
+          button.addEventListener("click", () => selectNode(button.dataset.id));
+        });
+      }
+
+      function renderInspector() {
+        const node = nodes.find((n) => n.id === selectedId) || nodes[0];
+        const usage = usageFor(node);
+        document.getElementById("inspectType").textContent = node.type;
+        document.getElementById("inspectTitle").textContent = node.title;
+        document.getElementById("inspectDesc").textContent = node.desc;
+
+        document.getElementById("panel-overview").innerHTML = `
+          <dl>
+            <div class="kv"><dt>Status</dt><dd><span class="${node.status}">${node.status}</span></dd></div>
+            <div class="kv"><dt>Runtime</dt><dd>${escapeXml(formatRuntime(usage.runtime))}</dd></div>
+            <div class="kv"><dt>Model</dt><dd>${escapeXml(node.model)}</dd></div>
+            <div class="kv"><dt>Tokens in</dt><dd>${escapeXml(formatTokens(usage.input))}</dd></div>
+            <div class="kv"><dt>Tokens out</dt><dd>${escapeXml(formatTokens(usage.output))}</dd></div>
+            <div class="kv"><dt>Cost</dt><dd>${escapeXml(formatCost(usage.cost))}</dd></div>
+            <div class="kv"><dt>Owner</dt><dd>${escapeXml(node.owner)}</dd></div>
+            <div class="kv"><dt>Lane</dt><dd>${escapeXml(node.lane)}</dd></div>
+          </dl>
+        `;
+
+        const logRows = logsFor(node);
+        document.getElementById("panel-logs").innerHTML = `
+          <div class="logs-head">
+            <span class="logs-count">${logRows.length} ${logRows.length === 1 ? "event" : "events"}</span>
+            <button class="logs-expand-btn" id="openLogsModal" ${logRows.length ? "" : "disabled"}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M15 3h6v6M21 3l-9 9M9 21H3v-6M3 21l9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Open in dialog
+            </button>
+          </div>
+          ${logRows.length
+            ? `<div class="live-log" data-scope="panel">${logRows.map((entry, index) => renderLogRow(entry, index, "panel")).join("")}</div>`
+            : `<p class="log-empty">no tool calls yet</p>`}
+        `;
+        document.getElementById("openLogsModal")?.addEventListener("click", () => openLogsModal(node.id));
+        const panelLog = document.querySelector('#panel-logs .live-log[data-scope="panel"]');
+        if (panelLog) bindLogToggles(panelLog);
+        if (logsModalOpen && logsModalNodeId === node.id) renderLogsModal();
+
+        document.getElementById("panel-artifacts").innerHTML = `
+          <div class="log">
+            ${node.artifacts.map((artifact) => `
+              <div class="artifact-card">
+                <strong>${escapeXml(artifact.split("/").pop())}</strong>
+                <code>${escapeXml(artifact)}</code>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      // Tracks which rows are expanded, keyed by "scope:index" so inline
+      // expansion survives the live re-render loop. "panel" and "modal" are
+      // independent scopes so the side panel and dialog expand separately.
+      const expandedLogs = new Set();
+
+      // Flat, scannable rows that mirror the harness dashboard log style
+      // (apps/dashboard/components/plan/plan-log-rows.tsx): a three-column
+      // monospace grid of [time] [verb] [detail]. Clicking a row expands it
+      // inline to reveal the full tool / input / output detail.
+      // verb tone: tool call -> progress, ok -> done, fail -> blocked, msg -> muted.
+      function logRowParts(entry) {
+        if (entry.kind === "tool-call") {
+          return { verb: normalizeToolName(entry.tool || "agent"), tone: "progress", detail: entry.input || entry.text };
+        }
+        if (entry.kind === "tool-result") {
+          return { verb: "ok", tone: "done", detail: entry.output || entry.text };
+        }
+        return { verb: "msg", tone: "muted", detail: entry.text };
+      }
+
+      function renderLogRow(entry, index, scope) {
+        const { verb, tone, detail } = logRowParts(entry);
+        const streaming = entry.kind === "tool-call" && entry.streaming
+          ? '<span class="stream-cursor"></span>'
+          : "";
+        const key = `${scope}:${index}`;
+        const open = expandedLogs.has(key);
+        const kindLabel = entry.kind === "tool-call" ? "call" : entry.kind === "tool-result" ? "result" : "log";
+        const detailRows = [
+          entry.tool ? `<div class="log-d-row"><span class="log-d-key">tool</span><span class="log-d-val">${escapeXml(entry.tool)}</span></div>` : "",
+          `<div class="log-d-row"><span class="log-d-key">kind</span><span class="log-d-val">${escapeXml(kindLabel)}</span></div>`,
+          `<div class="log-d-row"><span class="log-d-key">message</span><span class="log-d-val">${escapeXml(entry.text)}</span></div>`,
+          entry.input ? `<div class="log-d-row"><span class="log-d-key">input</span><span class="log-d-val mono">${escapeXml(entry.input)}</span></div>` : "",
+          entry.output ? `<div class="log-d-row"><span class="log-d-key">result</span><span class="log-d-val mono">${escapeXml(entry.output)}</span></div>` : "",
+        ].join("");
+        return `
+          <div class="log-entry ${open ? "expanded" : ""}" data-key="${key}">
+            <button class="log-line" type="button">
+              <span class="log-time">${escapeXml(entry.at)}</span>
+              <span class="log-verb ${tone}">${escapeXml(verb)}</span>
+              <span class="log-text">${escapeXml(detail)}${streaming}</span>
+              <span class="log-chevron" aria-hidden="true">›</span>
+            </button>
+            <div class="log-detail">${detailRows}</div>
+          </div>
+        `;
+      }
+
+      // Toggle inline expansion via event delegation on a log container.
+      function bindLogToggles(container) {
+        container.addEventListener("click", (event) => {
+          const line = event.target.closest(".log-line");
+          if (!line) return;
+          const entry = line.closest(".log-entry");
+          const key = entry?.dataset.key;
+          if (!key) return;
+          if (expandedLogs.has(key)) expandedLogs.delete(key);
+          else expandedLogs.add(key);
+          entry.classList.toggle("expanded");
+        });
+      }
+
+      // ── Logs modal ──────────────────────────────────────────────────
+      let logsModalOpen = false;
+      let logsModalNodeId = null;
+
+      function openLogsModal(nodeId) {
+        logsModalOpen = true;
+        logsModalNodeId = nodeId;
+        renderLogsModal();
+        const overlay = document.getElementById("logsModal");
+        overlay.classList.remove("hidden");
+        document.getElementById("logsModalClose").focus();
+      }
+
+      function closeLogsModal() {
+        logsModalOpen = false;
+        logsModalNodeId = null;
+        document.getElementById("logsModal").classList.add("hidden");
+      }
+
+      function renderLogsModal() {
+        const node = nodes.find((n) => n.id === logsModalNodeId);
+        if (!node) return closeLogsModal();
+        const rows = logsFor(node);
+        document.getElementById("logsModalTitle").textContent = node.title;
+        document.getElementById("logsModalSub").textContent = `${node.type} / ${node.lane} · ${rows.length} ${rows.length === 1 ? "event" : "events"}`;
+        const body = document.getElementById("logsModalBody");
+        body.innerHTML = rows.length
+          ? `<div class="live-log live-log--modal" data-scope="modal">${rows.map((entry, index) => renderLogRow(entry, index, "modal")).join("")}</div>`
+          : `<p class="log-empty">no tool calls yet</p>`;
+        const modalLog = body.querySelector('.live-log[data-scope="modal"]');
+        if (modalLog) bindLogToggles(modalLog);
+      }
+
+      function normalizeToolName(tool) {
+        const t = String(tool).toLowerCase();
+        if (t === "bash" || t === "shell") return "bash";
+        if (t === "read" || t === "read_file") return "read";
+        if (t === "write" || t === "write_artifact" || t === "write_file") return "write";
+        if (t === "edit" || t === "str_replace") return "edit";
+        if (t === "grep" || t === "rg") return "grep";
+        if (t === "glob") return "glob";
+        if (t === "git_log") return "git";
+        if (t === "spawn_agent") return "spawn";
+        return t.length <= 8 ? t : t.slice(0, 7) + "…";
+      }
+
+      function setTab(name) {
+        document.querySelectorAll(".inspect-tabs button").forEach((button) => {
+          button.classList.toggle("active", button.dataset.tab === name);
+        });
+        ["overview", "logs", "artifacts"].forEach((panel) => {
+          document.getElementById(`panel-${panel}`).classList.toggle("hidden", panel !== name);
+        });
+      }
+
+      function flash(text) {
+        ticker.textContent = text;
+      }
+
+      function updateApproveState() {
+        const blocked = nodes.some((n) => n.status === "blocked" || n.status === "running" || n.status === "waiting" || n.status === "queued");
+        approveBtn.disabled = blocked;
+      }
+
+      function tick() {
+        if (!live) return;
+        elapsed += 1;
+        for (const node of nodes) {
+          if (node.status === "running" && usageById[node.id]) usageById[node.id] = { ...usageById[node.id], runtime: usageById[node.id].runtime + 1 };
+        }
+        appendLiveLog();
+        renderInspector();
+        updateTotals();
+        if (elapsed % 9 === 0) flash("docs-researcher streamed a source note into research/docs-researcher.md");
+        if (elapsed % 13 === 0) flash("planner is still waiting on security-scout before synthesis");
+      }
+
+      function appendLiveLog() {
+        if (elapsed % 7 !== 0) return;
+        const node = nodes.find((n) => n.id === selectedId);
+        if (!node || node.status !== "running") return;
+        const seconds = usageFor(node).runtime;
+        const isResult = elapsed % 14 === 0;
+        const entry = {
+          kind: isResult ? "tool-result" : "tool-call",
+          at: `+${formatRuntime(seconds)}`,
+          tool: isResult ? "read" : "rg",
+          text: isResult ? "Streamed new evidence into the agent log." : "Checking assigned files for fresh context.",
+          input: isResult ? undefined : `${node.lane} apps/dashboard/components/plan`,
+          output: isResult ? "1 update appended" : undefined,
+          streaming: !isResult
+        };
+        // Clear the streaming cursor on the previous live row before appending.
+        const prior = logsFor(node).map((e) => ({ ...e, streaming: false }));
+        logsById[node.id] = [...prior, entry].slice(-8);
+      }
+
+      function addDynamicAgent() {
+        const id = `agent-${dynamicIndex}`;
+        dynamicIndex += 1;
+        const x = dynamicIndex % 2 ? 110 : 842;
+        const y = 498 + dynamicIndex * 34;
+        nodes.push({
+          id,
+          type: "dynamic subagent",
+          title: dynamicIndex % 2 ? "test-scout" : "ui-scout",
+          lane: dynamicIndex % 2 ? "validation" : "interface",
+          status: "running",
+          x,
+          y,
+          w: 190,
+          h: 78,
+          desc: "A planner-requested specialist added after the run started.",
+          owner: "planner",
+          model: "crofai/kimi-k2.6",
+          cost: "$0.00",
+          tokens: "0.4k",
+          artifacts: [`.harness/task/research/${id}.md`],
+          events: ["Spawned dynamically by parent planner", "Reading assigned context"]
+        });
+        usageById[id] = { input: 300, output: 100, cost: 0.01, runtime: 0 };
+        logsById[id] = [
+          { kind: "message", at: "+00:00", text: "Spawned dynamically by parent planner." },
+          { kind: "tool-call", at: "+00:03", tool: "read", text: "Reading assigned context window.", input: id }
+        ];
+        edges.push(["planner", id, "hot"], [id, "synthesis", "pending"]);
+        selectNode(id);
+        updateApproveState();
+        updateTotals();
+        flash("planner spawned a new dynamic specialist");
+      }
+
+      document.querySelectorAll(".inspect-tabs button").forEach((button) => {
+        button.addEventListener("click", () => setTab(button.dataset.tab));
+      });
+
+      document.querySelectorAll("[data-layout]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-layout]").forEach((b) => b.classList.toggle("active", b === button));
+          flash(`layout switched to ${button.dataset.layout}`);
+        });
+      });
+
+      search.addEventListener("input", renderGraph);
+      document.getElementById("zoomIn").addEventListener("click", () => { zoom = Math.min(1.35, zoom + 0.08); renderGraph(); });
+      document.getElementById("zoomOut").addEventListener("click", () => { zoom = Math.max(0.72, zoom - 0.08); renderGraph(); });
+      document.getElementById("fit").addEventListener("click", () => { zoom = 1; renderGraph(); flash("graph fit to canvas"); });
+      document.getElementById("toggleLive").addEventListener("click", () => { live = !live; flash(live ? "live simulation resumed" : "live simulation paused"); });
+      document.getElementById("addAgent").addEventListener("click", addDynamicAgent);
+      document.getElementById("focusBlocked").addEventListener("click", () => {
+        filter = "all";
+        selectNode(nodes.find((n) => n.status === "blocked")?.id || selectedId);
+        flash("focused nodes that need attention");
+      });
+      approveBtn.addEventListener("click", () => flash("approval would transition planning -> executing"));
+
+      document.getElementById("logsModalClose").addEventListener("click", closeLogsModal);
+      document.getElementById("logsModalScrim").addEventListener("click", closeLogsModal);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && logsModalOpen) closeLogsModal();
+      });
+
+      renderGraph();
+      renderList();
+      renderInspector();
+      updateTotals();
+      updateApproveState();
+      setInterval(tick, 1000);
+    </script>
+  </body>
+</html>

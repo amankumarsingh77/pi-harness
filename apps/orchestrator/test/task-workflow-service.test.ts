@@ -90,6 +90,51 @@ describe("TaskWorkflowService", () => {
     expect(enqueue).toHaveBeenCalledWith(task.id);
   });
 
+  it("nudges a ready brainstorm back to draft and records a revision request", async () => {
+    const task = await runs.createTask({ title: "nudge ready brainstorm" });
+    const worktreePath = await makeWorktree();
+    await Promise.all([
+      writeArtifact(worktreePath, task.id, "design", "ready"),
+      writeArtifact(worktreePath, task.id, "spec", "ready"),
+    ]);
+    await runs.updateTask(task.id, {
+      status: "brainstorming",
+      workflow: "backend-feature",
+      worktreePath,
+      branchName: `pi/${task.id}`,
+    });
+
+    const result = await workflow.submitBrainstormNudge(
+      task.id,
+      "Actually include the mock state before approval.",
+    );
+
+    expect(result.ok).toBe(true);
+    await expect(artifacts.readArtifact(worktreePath, task.id, "design")).resolves.toMatchObject({
+      fm: { status: "draft" },
+    });
+    await expect(artifacts.readArtifact(worktreePath, task.id, "spec")).resolves.toMatchObject({
+      fm: { status: "draft" },
+    });
+    const jsonl = await readJsonl<{ readonly kind?: string; readonly comment?: string }>(
+      join(worktreePath, ".harness", task.id, "brainstorm.jsonl"),
+    );
+    expect(jsonl).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "brainstorm_user_nudge",
+          comment: "Actually include the mock state before approval.",
+        }),
+        expect.objectContaining({
+          kind: "brainstorm_revision_requested",
+          comment: "Actually include the mock state before approval.",
+        }),
+      ]),
+    );
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(task.id);
+  });
+
   it("requests plan changes by resetting all plan artifacts and recording one revision event", async () => {
     const task = await runs.createTask({ title: "revise plan" });
     const worktreePath = await makeWorktree();
@@ -127,6 +172,34 @@ describe("TaskWorkflowService", () => {
         }),
       ]),
     );
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(task.id);
+  });
+
+  it("approves plan by closing the active run and moving to executing", async () => {
+    const task = await runs.createTask({ title: "approve plan" });
+    const worktreePath = await makeWorktree();
+    for (const kind of ["plan", "scenarios", "blast-radius", "execution-dag"] as const) {
+      await writeArtifact(worktreePath, task.id, kind, "ready");
+    }
+    await runs.updateTask(task.id, {
+      status: "planning",
+      workflow: "backend-feature",
+      worktreePath,
+      branchName: `pi/${task.id}`,
+    });
+    const run = await runs.createRun({ taskId: task.id, phase: "plan" });
+    await runs.updateRun(run.id, { status: "running" });
+
+    const result = await workflow.applyUserTransition(task.id, {
+      type: "user_approve_plan",
+    });
+
+    expect(result.task.status).toBe("executing");
+    await expect(runs.getRun(run.id)).resolves.toMatchObject({
+      status: "succeeded",
+      error: null,
+    });
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(enqueue).toHaveBeenCalledWith(task.id);
   });

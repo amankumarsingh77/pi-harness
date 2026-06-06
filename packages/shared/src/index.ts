@@ -3,6 +3,7 @@ export * from "./types/run.js";
 export * from "./types/event.js";
 export * from "./types/live-event.js";
 export * from "./types/preflight.js";
+export * from "./types/plan-graph.js";
 export * from "./types/mission.js";
 export * from "./types/scenario.js";
 export * from "./types/execution-dag.js";

@@ -11,6 +11,7 @@ import type { PreflightStepStore } from "../../adapters/preflight-step-store.js"
 import { readJsonl } from "../../adapters/jsonl-writer.js";
 import { ValidationError } from "../../domain/errors.js";
 import { derivePlanGate } from "../../agents/plan-gate.js";
+import { derivePlanAgentGraph } from "../../agents/plan-agent-graph.js";
 import { PREFLIGHT_SUBAGENTS } from "../../agents/plan-preflight.js";
 import type { TaskWorkflowService } from "../../services/task-workflow-service.js";
 
@@ -57,6 +58,7 @@ export function registerPlanRoutes(
         blastRadius: null,
         executionDag: null,
         research: emptyResearch(),
+        agentGraph: derivePlanAgentGraph({ events: [], artifactNames: [] }),
         events: [],
         preflightSteps: [],
         preflightBlockedReason: null,
@@ -81,6 +83,14 @@ export function registerPlanRoutes(
         : Promise.resolve([]),
     ]);
 
+    const artifactNames = [
+      ...(plan ? ["plan.md"] : []),
+      ...phasePlans.map((artifact) => `plan-${artifact.fm.phase ?? "?"}.md`),
+      ...(scenarios ? ["scenarios.yaml"] : []),
+      ...(blastRadius ? ["blast-radius.yaml"] : []),
+      ...(executionDag ? ["execution-dag.yaml"] : []),
+    ];
+
     return {
       gate,
       status: task.status,
@@ -90,6 +100,7 @@ export function registerPlanRoutes(
       blastRadius,
       executionDag,
       research,
+      agentGraph: derivePlanAgentGraph({ events, artifactNames }),
       events,
       preflightSteps,
       preflightBlockedReason: derivePreflightBlockedReason(preflightSteps),

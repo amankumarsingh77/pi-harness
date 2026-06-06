@@ -91,7 +91,7 @@ describe("NudgeInput", () => {
 });
 
 describe("MockPagePreview", () => {
-  it("switches the screenshot src between mock pages", () => {
+  it("switches the live HTML iframe between mock pages", () => {
     render(
       <MockPagePreview
         title="Split pane review"
@@ -113,19 +113,15 @@ describe("MockPagePreview", () => {
       />,
     );
 
-    const img = screen.getByRole("img", {
-      name: /mock preview split pane review/i,
-    }) as HTMLImageElement;
-    expect(img.src).toContain(
-      "/api/proxy/tasks/t1/brainstorm/mocks/mock-a/pages/task-detail/png/desktop",
+    const frame = screen.getByTitle(/split pane review/i) as HTMLIFrameElement;
+    expect(frame.src).toContain(
+      "/api/proxy/tasks/t1/brainstorm/mocks/mock-a/pages/task-detail/html",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Brainstorm review" }));
 
-    expect(
-      (screen.getByRole("img", { name: /brainstorm review/i }) as HTMLImageElement).src,
-    ).toContain(
-      "/api/proxy/tasks/t1/brainstorm/mocks/mock-a/pages/brainstorm-review/png/desktop",
+    expect((screen.getByTitle(/brainstorm review/i) as HTMLIFrameElement).src).toContain(
+      "/api/proxy/tasks/t1/brainstorm/mocks/mock-a/pages/brainstorm-review/html",
     );
   });
 });
@@ -212,7 +208,7 @@ describe("ChatPanel — nudges in transcript", () => {
     expect(screen.getByLabelText(/nudge the agent/i)).toBeDisabled();
   });
 
-  it("disables NudgeInput when gate is awaiting_user", () => {
+  it("enables NudgeInput when gate is awaiting_user and task is still brainstorming", () => {
     render(
       <ChatPanel
         taskId="t1"
@@ -222,7 +218,7 @@ describe("ChatPanel — nudges in transcript", () => {
         taskStatus="brainstorming"
       />,
     );
-    expect(screen.getByLabelText(/nudge the agent/i)).toBeDisabled();
+    expect(screen.getByLabelText(/nudge the agent/i)).toBeEnabled();
   });
 
   it("disables NudgeInput when no run exists yet (runId null)", () => {

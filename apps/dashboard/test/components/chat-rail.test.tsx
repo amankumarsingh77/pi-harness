@@ -118,7 +118,7 @@ describe("ChatRail", () => {
       />,
     );
 
-    expect(screen.getByText("Chat May 30")).toBeInTheDocument();
+    expect(screen.getByText(/^Chat (May 30|30 May)$/)).toBeInTheDocument();
     expect(screen.queryByText(threadId)).not.toBeInTheDocument();
   });
 

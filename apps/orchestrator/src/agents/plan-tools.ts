@@ -7,6 +7,7 @@ import {
   ExecutionDagSchema,
   ScenarioFileSchema,
   type Artifact,
+  type ArtifactKind,
   type ClaimsUpdatedPayload,
 } from "@pi-harness/shared";
 import type { ArtifactsStore } from "./artifacts-store.js";
@@ -39,8 +40,33 @@ type ToolLike<TParams extends TSchema, TDetails> = {
 };
 
 const MarkReadyParams = Type.Object({});
+const WritablePlanArtifactKindParam = Type.Union([
+  Type.Literal("plan"),
+  Type.Literal("phase-plan"),
+  Type.Literal("scenarios"),
+  Type.Literal("blast-radius"),
+  Type.Literal("execution-dag"),
+]);
+
+const WritePlanArtifactParams = Type.Object({
+  kind: WritablePlanArtifactKindParam,
+  phase: Type.Optional(Type.Integer({ minimum: 1 })),
+  body: Type.String({ minLength: 1, maxLength: 500_000 }),
+});
 
 export type MarkReadyDetails = { ok: boolean; missing?: string };
+export type WritablePlanArtifactKind = Extract<
+  ArtifactKind,
+  "plan" | "phase-plan" | "scenarios" | "blast-radius" | "execution-dag"
+>;
+export type WritePlanArtifactDetails = {
+  readonly ok: boolean;
+  readonly kind: WritablePlanArtifactKind;
+  readonly phase?: number;
+  readonly path?: string;
+  readonly bytes?: number;
+  readonly error?: string;
+};
 
 // Required prose sections in plan.md (heading literal + non-empty body
 // underneath). The planner system prompt enumerates these; the tool enforces
@@ -107,6 +133,98 @@ export type ClaimPublisher = {
     payload: ClaimsUpdatedPayload,
   ) => Promise<unknown>;
 };
+
+function startsWithYamlFrontmatter(body: string): boolean {
+  return body.trimStart().startsWith("---\n") || body.trimStart() === "---";
+}
+
+export function makeWritePlanArtifactTool(deps: {
+  store: ArtifactsStore;
+  cwd: string;
+  taskId: string;
+}): ToolLike<typeof WritePlanArtifactParams, WritePlanArtifactDetails> {
+  const { store, cwd, taskId } = deps;
+
+  function fail(
+    params: Static<typeof WritePlanArtifactParams>,
+    error: string,
+  ): ToolResult<WritePlanArtifactDetails> {
+    return {
+      content: [{ type: "text", text: error }],
+      details: {
+        ok: false,
+        kind: params.kind,
+        ...(params.phase !== undefined ? { phase: params.phase } : {}),
+        error,
+      },
+    };
+  }
+
+  return {
+    name: "write_plan_artifact",
+    label: "Write plan artifact body",
+    description:
+      "Replace a plan-phase artifact body while preserving harness-owned frontmatter. For phase-plan, pass a positive phase number and markdown body. Do not include YAML frontmatter.",
+    parameters: WritePlanArtifactParams,
+    async execute(_id, params) {
+      if (startsWithYamlFrontmatter(params.body)) {
+        return fail(params, "artifact body must not include YAML frontmatter");
+      }
+
+      if (params.kind === "phase-plan") {
+        if (params.phase === undefined) {
+          return fail(params, "phase-plan requires a positive integer phase");
+        }
+        const current = await store.readPhasePlanArtifact(cwd, taskId, params.phase);
+        const artifact: Artifact = {
+          fm: current?.fm ?? {
+            task: taskId,
+            kind: "phase-plan",
+            parent: "plan.md",
+            phase: params.phase,
+            status: "draft",
+            branch: `pi/${taskId}`,
+            last_updated: new Date().toISOString(),
+            last_updated_by: "plan-agent",
+          },
+          body: params.body,
+        };
+        await store.writeArtifact(cwd, taskId, artifact);
+        const path = store.phasePlanArtifactPath(cwd, taskId, params.phase);
+        return {
+          content: [{ type: "text", text: `wrote plan-${params.phase}.md body` }],
+          details: {
+            ok: true,
+            kind: params.kind,
+            phase: params.phase,
+            path,
+            bytes: params.body.length,
+          },
+        };
+      }
+
+      if (params.phase !== undefined) {
+        return fail(params, "phase is only valid for phase-plan artifacts");
+      }
+
+      const current = await store.readArtifact(cwd, taskId, params.kind);
+      if (!current) {
+        return fail(params, `${params.kind} artifact not found`);
+      }
+      await store.writeArtifact(cwd, taskId, { fm: current.fm, body: params.body });
+      const path = store.artifactPath(cwd, taskId, params.kind);
+      return {
+        content: [{ type: "text", text: `wrote ${params.kind} body` }],
+        details: {
+          ok: true,
+          kind: params.kind,
+          path,
+          bytes: params.body.length,
+        },
+      };
+    },
+  };
+}
 
 export function makeMarkReadyTool(deps: {
   store: ArtifactsStore;

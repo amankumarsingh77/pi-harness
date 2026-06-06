@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
-import yaml from "js-yaml";
 import type {
   AgentSession,
   AgentSessionOptions,
@@ -10,11 +9,10 @@ import type {
 } from "@pi-harness/pi-bridge";
 import { AuthError } from "@pi-harness/pi-bridge";
 import {
-  BlastRadiusFileSchema,
   type AgentEvent,
   type PhaseModelConfig,
 } from "@pi-harness/shared";
-import { getSubagent, PREFLIGHT_SUBAGENTS } from "@pi-harness/subagents";
+import { getSubagent } from "@pi-harness/subagents";
 import { makeGitHistoryTool } from "./git-history-tool.js";
 import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { makeSubagentFooter } from "./subagent-footer.js";
@@ -32,19 +30,15 @@ import type { ArtifactsStore } from "./artifacts-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
 import {
   makeMarkReadyTool,
+  makeWritePlanArtifactTool,
   parseFalsifiedClaims,
   type ClaimPublisher,
   type ClaimVerifierState,
   type DispatchClaimVerifier,
 } from "./plan-tools.js";
-import {
-  runPreflight,
-  type PreflightResult,
-  type PreflightSubagent,
-  type PreflightSubagentEvent,
-} from "./plan-preflight.js";
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
+import { makeSpawnPlanAgentTool } from "./plan-spawn-agent-tool.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -77,7 +71,7 @@ export type PlanOpts = {
   // Optional override for tests. Production callers leave this unset and the
   // driver wires its own forwarder that tags events with the subagent name
   // and pushes them to EventStore.
-  onSubagentBridgeEvent?: (subagent: PreflightSubagent, e: PiBridgeEvent) => void;
+  onSubagentBridgeEvent?: (subagent: string, e: PiBridgeEvent) => void;
   preflightSubagentTimeoutMs?: number;
   preflightRetrySubagentTimeoutMs?: number;
 };
@@ -97,32 +91,16 @@ type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
 const PLANNER_RECOVERY_CAP = 2;
 const CLAIM_VERIFIER_TIMEOUT_MS = 5 * 60 * 1000;
 
-// Drives one plan tick. Two-stage shape:
-//
-//   Stage 1 (preflight): runPreflight dispatches the seven research
-//   subagents (skipping any whose findings file already exists). On
-//   completion, returns ok:true with ready:false so the run-loop re-enters
-//   for the planner stage.
-//
-//   Stage 2 (planner): opens or resumes a real pi session at
-//   pi-session-plan.jsonl, reads the chosen prompt (initial or revision),
-//   drains one prompt(), and reports usage. The mark_ready tool is the only
-//   halt-causing custom tool — its handler validates artifacts + dispatches
-//   claim-verifier and flips status to ready on success.
+// Drives one plan tick. The parent planner owns decomposition and may call
+// spawn_plan_agent for bounded child research. mark_ready remains the only
+// halt-causing custom tool: it validates artifacts, dispatches claim-verifier,
+// and flips status to ready on success.
 export async function runPlan(opts: PlanOpts): Promise<PlanResult> {
   const events = await readJsonl<JsonlEvent>(
     join(opts.cwd, ".harness", opts.taskId, "plan.jsonl"),
   );
 
-  // Stage 1: preflight. We're done with stage 1 once every subagent's findings
-  // file exists. The "preflight_complete" event is published once when the
-  // last missing findings file lands, so any tick after that goes straight to
-  // the planner.
-  if (!(await isPreflightComplete(opts))) {
-    return runPreflightStage(opts);
-  }
-
-  // Stage 2: planner. Derive state from durable JSONL + artifact frontmatter
+  // Parent planner. Derive state from durable JSONL + artifact frontmatter
   // instead of trusting an in-memory run tick. A prior planner_started without
   // ready artifacts is recoverable, not a permanent no-op.
   const artifacts = await readPlanArtifacts(opts);
@@ -171,10 +149,11 @@ function buildInitialPrompt(cwd: string, taskId: string): string {
     "",
     `1. Read design.md: ${paths.design}.`,
     `2. Read spec.md: ${paths.spec}.`,
-    `3. Read blast-radius.yaml: ${paths.blastRadius}.`,
-    `4. Read every file under ${paths.researchDir} — there are ${PREFLIGHT_SUBAGENTS.length} research findings, one per subagent.`,
-    `5. Author plan.md at ${paths.plan}, phase plans as ${paths.phasePlans}, scenarios.yaml at ${paths.scenarios}, and execution-dag.yaml at ${paths.executionDag} per the protocol in your system prompt.`,
-    "6. Call mark_ready when all authored artifacts are complete and you have cross-checked your citations.",
+    `3. Use spawn_plan_agent to launch the child agents you need. Start with a codebase-scout style child for local context, then spawn any focused follow-ups required by the design/spec.`,
+    `4. Read child findings from ${paths.researchDir} as each child returns. Do not write final plan artifacts until you have enough child evidence.`,
+    `5. Update blast-radius.yaml at ${paths.blastRadius} if the child findings reveal concrete impacted areas.`,
+    `6. Author plan.md at ${paths.plan}, phase plans as ${paths.phasePlans}, scenarios.yaml at ${paths.scenarios}, and execution-dag.yaml at ${paths.executionDag} per the protocol in your system prompt.`,
+    "7. Call mark_ready when all authored artifacts are complete and you have cross-checked your citations.",
   ].join("\n");
 }
 
@@ -282,31 +261,6 @@ function lastIndexWhere(
   return -1;
 }
 
-async function isPreflightComplete(opts: PlanOpts): Promise<boolean> {
-  const blastRadius = await opts.store.readArtifact(opts.cwd, opts.taskId, "blast-radius");
-  return (
-    missingPreflightFindings(opts.cwd, opts.taskId).length === 0 &&
-    Boolean(blastRadius && isValidBlastRadiusBody(blastRadius.body))
-  );
-}
-
-function missingPreflightFindings(cwd: string, taskId: string): string[] {
-  const researchDir = join(cwd, ".harness", taskId, "research");
-  return PREFLIGHT_SUBAGENTS.filter((sa) => {
-    const path = join(researchDir, `${sa}.md`);
-    if (!existsSync(path)) return true;
-    return readFileSync(path, "utf8").trim().length === 0;
-  });
-}
-
-function isValidBlastRadiusBody(body: string): boolean {
-  try {
-    return BlastRadiusFileSchema.safeParse(yaml.load(body)).success;
-  } catch {
-    return false;
-  }
-}
-
 async function readPlanArtifacts(opts: PlanOpts): Promise<PlanArtifactsSnapshot> {
   const [plan, phasePlans, scenarios, blastRadius, executionDag] = await Promise.all([
     opts.store.readArtifact(opts.cwd, opts.taskId, "plan"),
@@ -316,203 +270,6 @@ async function readPlanArtifacts(opts: PlanOpts): Promise<PlanArtifactsSnapshot>
     opts.store.readArtifact(opts.cwd, opts.taskId, "execution-dag"),
   ]);
   return { plan, phasePlans, scenarios, blastRadius, executionDag };
-}
-
-async function runPreflightStage(opts: PlanOpts): Promise<PlanResult> {
-  const attemptId = `preflight_${randomUUID()}`;
-  await opts.bus.publish({
-    kind: "plan_system",
-    systemKind: "preflight_started",
-    data: { attemptId },
-  });
-
-  const [design, spec] = await Promise.all([
-    opts.store.readArtifact(opts.cwd, opts.taskId, "design"),
-    opts.store.readArtifact(opts.cwd, opts.taskId, "spec"),
-  ]);
-  if (!design || !spec) {
-    await opts.bus.publish({
-      kind: "plan_system",
-      systemKind: "blocked",
-      data: { reason: "design.md or spec.md missing — brainstorm not approved?" },
-    });
-    return zeroUsage({
-      ok: false,
-      ready: false,
-      error: "plan: missing brainstorm artifacts",
-    });
-  }
-
-  // Default forwarder: tag every bridge event with the subagent name and push
-  // it to EventStore so the dashboard's per-agent drawer can filter by
-  // subagent. Skip turn_end / error (control-plane only) and the harness's
-  // own custom-tool calls (planner publishes richer events for those).
-  // Tests can pass their own onSubagentBridgeEvent to assert ordering.
-  const defaultForward = (subagent: PreflightSubagent, e: PiBridgeEvent): void => {
-    if (e.kind === "turn_end" || e.kind === "error") return;
-    const base = { runId: opts.runId, taskId: opts.taskId };
-    let event: AgentEvent | null = null;
-    if (e.kind === "message_delta") {
-      event = mkEvent({ ...base, kind: "message_delta", text: e.text, subagent });
-    } else if (e.kind === "tool_call") {
-      event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input, subagent });
-    } else if (e.kind === "tool_result") {
-      event = mkEvent({
-        ...base,
-        kind: "tool_result",
-        callId: e.callId,
-        tool: e.tool,
-        ok: e.ok,
-        ...(e.output !== undefined ? { output: e.output } : {}),
-        subagent,
-      });
-    } else if (e.kind === "log") {
-      event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text, subagent });
-    }
-    if (event) void opts.eventStore.append(event).catch(() => {});
-  };
-
-  const preflightSteps = opts.preflightSteps;
-  let result: PreflightResult;
-  try {
-    result = await runPreflight({
-      cwd: opts.cwd,
-      taskId: opts.taskId,
-      runId: opts.runId,
-      attemptId,
-      ticketTitle: opts.ticketTitle,
-      ticketDescription: opts.ticketDescription,
-      designBody: design.body,
-      specBody: spec.body,
-      phaseModel: opts.phaseModel,
-      createAgentSession: opts.createAgentSession,
-      ...(opts.graphify !== undefined ? { graphify: opts.graphify } : {}),
-      ...(opts.graphifyQueryBudget !== undefined ? { graphifyQueryBudget: opts.graphifyQueryBudget } : {}),
-      ...(preflightSteps !== undefined
-        ? { onStep: async (step) => {
-            await preflightSteps.upsert(step);
-          } }
-        : {}),
-      onSubagentBridgeEvent: opts.onSubagentBridgeEvent ?? defaultForward,
-      onSubagentEvent: async (e: PreflightSubagentEvent) => {
-        if (e.kind === "started") {
-          await opts.bus.publish({
-            kind: "plan_subagent_started",
-            subagent: e.subagent,
-            sessionId: e.sessionId,
-            attemptId,
-          });
-        } else {
-          await opts.bus.publish({
-            kind: "plan_subagent_ended",
-            subagent: e.subagent,
-            sessionId: e.sessionId,
-            ok: e.ok,
-            durationMs: e.durationMs,
-            costUsd: e.costUsd,
-            inputTokens: e.inputTokens,
-            outputTokens: e.outputTokens,
-            attemptId,
-            ...(e.error !== undefined ? { error: e.error } : {}),
-          });
-        }
-      },
-      ...(opts.signal ? { signal: opts.signal } : {}),
-      ...(opts.preflightSubagentTimeoutMs !== undefined
-        ? { subagentTimeoutMs: opts.preflightSubagentTimeoutMs }
-        : {}),
-      ...(opts.preflightRetrySubagentTimeoutMs !== undefined
-        ? { retrySubagentTimeoutMs: opts.preflightRetrySubagentTimeoutMs }
-        : {}),
-    });
-  } catch (err) {
-    if (err instanceof AuthError) {
-      await opts.bus.publish({
-        kind: "plan_system",
-        systemKind: "blocked",
-        data: { reason: err.message },
-      });
-      return zeroUsage({
-        ok: false,
-        ready: false,
-        error: `plan preflight: ${err.message}`,
-      });
-    }
-    throw err;
-  }
-
-  // Sum up usage across the subagents.
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd = 0;
-  for (const r of result.results) {
-    inputTokens += r.inputTokens;
-    outputTokens += r.outputTokens;
-    costUsd += r.costUsd;
-  }
-
-  if (result.cancelled) {
-    return {
-      ok: false,
-      ready: false,
-      cancelled: true,
-      inputTokens,
-      outputTokens,
-      costUsd,
-    };
-  }
-
-  if (result.failed) {
-    const failed = result.results.filter((r) => !r.ok).map((r) => r.subagent);
-    await opts.bus.publish({
-      kind: "plan_system",
-      systemKind: "blocked",
-      data: {
-        reason: `preflight: required findings missing or failed (${failed.join(", ")})`,
-        subagents: failed,
-      },
-    });
-    return {
-      ok: false,
-      ready: false,
-      error: `plan preflight: required findings missing or failed (${failed.join(", ")})`,
-      inputTokens,
-      outputTokens,
-      costUsd,
-    };
-  }
-
-  const preflightComplete = await isPreflightComplete(opts);
-  const missing = [
-    ...missingPreflightFindings(opts.cwd, opts.taskId),
-    ...(preflightComplete ? [] : ["blast-radius.yaml"]),
-  ];
-  if (missing.length > 0) {
-    await opts.bus.publish({
-      kind: "plan_system",
-      systemKind: "blocked",
-      data: {
-        reason: `preflight: missing findings (${missing.join(", ")})`,
-        subagents: missing,
-      },
-    });
-    return {
-      ok: false,
-      ready: false,
-      error: `plan preflight: missing findings (${missing.join(", ")})`,
-      inputTokens,
-      outputTokens,
-      costUsd,
-    };
-  }
-
-  await opts.bus.publish({
-    kind: "plan_system",
-    systemKind: "preflight_complete",
-    data: { count: result.results.length, attemptId },
-  });
-
-  return { ok: true, ready: false, inputTokens, outputTokens, costUsd };
 }
 
 async function runPlannerStage(
@@ -701,6 +458,31 @@ async function runPlannerStage(
     ...(opts.claimLedger !== undefined ? { claimLedger: opts.claimLedger } : {}),
     ...(opts.claimPublisher !== undefined ? { claimPublisher: opts.claimPublisher } : {}),
   });
+  const writePlanArtifactTool = makeWritePlanArtifactTool({
+    store: opts.store,
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+  });
+  let childUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  const spawnPlanAgentTool = makeSpawnPlanAgentTool({
+    cwd: opts.cwd,
+    taskId: opts.taskId,
+    runId: opts.runId,
+    phaseModel: opts.phaseModel,
+    bus: opts.bus,
+    eventStore: opts.eventStore,
+    createAgentSession: opts.createAgentSession,
+    ...(opts.graphify !== undefined ? { graphify: opts.graphify } : {}),
+    ...(opts.graphifyQueryBudget !== undefined ? { graphifyQueryBudget: opts.graphifyQueryBudget } : {}),
+    ...(innerAbort.signal !== undefined ? { parentSignal: innerAbort.signal } : {}),
+    onUsage: (usage) => {
+      childUsage = {
+        inputTokens: childUsage.inputTokens + usage.inputTokens,
+        outputTokens: childUsage.outputTokens + usage.outputTokens,
+        costUsd: childUsage.costUsd + usage.costUsd,
+      };
+    },
+  });
 
   let systemPrompt: string;
   let planDef: ReturnType<typeof getSubagent>;
@@ -734,10 +516,17 @@ async function runPlannerStage(
       sessionPath,
       tools: [
         ...planDef.allowedTools,
+        "spawn_plan_agent",
+        "write_plan_artifact",
         "mark_ready",
         ...graphifyTools.map((tool) => tool.name),
       ],
-      customTools: [markReadyTool, ...graphifyTools],
+      customTools: [
+        spawnPlanAgentTool,
+        writePlanArtifactTool,
+        markReadyTool,
+        ...graphifyTools,
+      ],
       onEvent: (e: PiBridgeEvent) => {
         // Forward planner-session bridge events to EventStore (no subagent
         // tag — the dashboard treats untagged events as planner output).
@@ -746,7 +535,11 @@ async function runPlannerStage(
         if (e.kind === "turn_end" || e.kind === "error") return;
         if (
           (e.kind === "tool_call" || e.kind === "tool_result") &&
-          e.tool === "mark_ready"
+          (
+            e.tool === "mark_ready" ||
+            e.tool === "spawn_plan_agent" ||
+            e.tool === "write_plan_artifact"
+          )
         ) {
           return;
         }
@@ -803,7 +596,12 @@ async function runPlannerStage(
 
   let usage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
   try {
-    usage = await session.prompt(input.prompt);
+    const parentUsage = await session.prompt(input.prompt);
+    usage = {
+      inputTokens: parentUsage.inputTokens + childUsage.inputTokens,
+      outputTokens: parentUsage.outputTokens + childUsage.outputTokens,
+      costUsd: parentUsage.costUsd + childUsage.costUsd,
+    };
   } catch (err) {
     signal?.removeEventListener("abort", onAbort);
     innerAbort.abort();

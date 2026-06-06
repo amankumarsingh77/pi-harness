@@ -50,6 +50,8 @@ export type BrainstormMock = {
   recommended: boolean;
   createdAt: string;
   derivedFrom?: string;
+  evidence?: string[];
+  contextSummary?: string;
   miniature?: BrainstormMockMiniature;
   pages: BrainstormMockPage[];
 };
@@ -186,9 +188,8 @@ export type AgentEvent =
       summary: string;
     })
   // Plan-phase events. Mirrored to <worktree>/.harness/<taskId>/plan.jsonl.
-  // The plan phase has two stages — a parallel preflight of 8 research
-  // subagents, then a single planner pi session — and these variants capture
-  // both stages plus the approval-gate signals.
+  // The plan phase is driven by one parent planner that can spawn child
+  // agents. Older preflight_* events remain supported for archived runs.
   | (AgentEventBase & {
       kind: "plan_system";
       systemKind:
@@ -217,6 +218,30 @@ export type AgentEvent =
       sessionId: string;
       attemptId?: string;
       ok: boolean;
+      durationMs: number;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      error?: string;
+    })
+  | (AgentEventBase & {
+      kind: "plan_agent_node_started";
+      nodeId: string;
+      parentId: string | null;
+      role: string;
+      title: string;
+      lane: string;
+      sessionId: string;
+      model: string;
+      tools: readonly string[];
+      artifactPath: string;
+      dependsOn: readonly string[];
+    })
+  | (AgentEventBase & {
+      kind: "plan_agent_node_ended";
+      nodeId: string;
+      ok: boolean;
+      status: "succeeded" | "failed" | "blocked" | "cancelled";
       durationMs: number;
       costUsd: number;
       inputTokens: number;

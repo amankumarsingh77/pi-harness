@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plan Page · pi-harness mock</title>
+    <style>
+      :root {
+        /* Design tokens — mirror apps/dashboard/app/globals.css exactly. */
+        --color-bg: #0d0e10;
+        --color-card: #131418;
+        --color-card-hover: #181a1f;
+        --color-sub: #18181b;
+        --color-muted: #0f0f10;
+        --color-input: #0a0b0d;
+
+        --color-fg: #f7f8f8;
+        --color-fg-body: #e6e7e9;
+        --color-fg-label: #a1a1aa;
+        --color-fg-mute: #8a8f98;
+        --color-fg-subtle: #71717a;
+        --color-fg-faint: #4a4e57;
+        --color-fg-ghost: #3f3f46;
+
+        --color-border: #27272a;
+        --color-border-soft: #1f1f23;
+        --color-border-strong: #3f3f46;
+        --color-line: rgba(255, 255, 255, 0.06);
+        --color-line-hover: rgba(255, 255, 255, 0.12);
+        --color-line-strong: rgba(255, 255, 255, 0.18);
+
+        /* Status palette — used ONLY by status icons / accent words, never as bg. */
+        --color-st-idle: #8a8f98;
+        --color-st-progress: #5e6ad2;
+        --color-st-review: #f2c94c;
+        --color-st-blocked: #eb5757;
+        --color-st-shipping: #c084fc;
+        --color-st-done: #4cb782;
+
+        --color-green-fg: #34d399;
+        --color-red-fg: #f87171;
+        --color-amber-fg: #fbbf24;
+
+        --font-body: "Mona Sans Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+        --decision-bar-h: 56px;
+        --topbar-h: 48px;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--color-bg);
+        color: var(--color-fg-body);
+        font-family: var(--font-body);
+        font-size: 13.5px;
+        line-height: 1.55;
+        letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        font-feature-settings: "ss01" on, "ss03" on, "ss05" on;
+      }
+      ::selection { background: rgba(94, 106, 210, 0.35); }
+      .mono { font-family: var(--font-mono); }
+      button { font-family: inherit; cursor: pointer; }
+      .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+      .no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+      /* ── Topbar ────────────────────────────────────────────────────── */
+      .topbar {
+        position: sticky; top: 0; z-index: 30;
+        height: var(--topbar-h);
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 20px;
+        background: color-mix(in srgb, var(--color-bg) 86%, transparent);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--color-line);
+      }
+      .crumb {
+        display: flex; align-items: center; gap: 7px;
+        font-family: var(--font-mono);
+        font-size: 11px; color: var(--color-fg-mute);
+      }
+      .crumb a { color: var(--color-fg-mute); text-decoration: none; }
+      .crumb a:hover { color: var(--color-fg-body); }
+      .crumb .sep { color: var(--color-fg-faint); }
+      .crumb .here { color: var(--color-st-review); }
+      .stream {
+        display: flex; align-items: center; gap: 6px;
+        font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-mute);
+      }
+
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      .dot {
+        width: 7px; height: 7px; border-radius: 999px; display: inline-block;
+        background: currentColor;
+      }
+      .dot.live { box-shadow: 0 0 7px currentColor; animation: pulse 1.6s ease-in-out infinite; }
+
+      /* ── Page scroll region ────────────────────────────────────────── */
+      .page {
+        height: calc(100% - var(--topbar-h));
+        overflow-y: auto;
+        scroll-behavior: smooth;
+      }
+      .container {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 26px 24px calc(var(--decision-bar-h) + 56px);
+      }
+
+      /* ── Header block ──────────────────────────────────────────────── */
+      .head { margin-bottom: 18px; }
+      .head .titlerow { display: flex; align-items: center; gap: 11px; }
+      .head h1 {
+        margin: 0; font-size: 23px; font-weight: 620; letter-spacing: -0.012em;
+        line-height: 1.16; color: var(--color-fg);
+      }
+      .head .meta {
+        margin: 7px 0 0; padding-left: 27px;
+        font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-mute);
+      }
+      .head .meta b { color: var(--color-fg-body); font-weight: 500; }
+
+      /* Status icon (ring + glyph), color-only signal */
+      .ico {
+        width: 16px; height: 16px; flex: none; border-radius: 999px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1.6px solid currentColor; position: relative;
+      }
+      .ico::after { content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+      .ico.review { color: var(--color-st-review); }
+      .ico.blocked { color: var(--color-st-blocked); }
+      .ico.progress { color: var(--color-st-progress); }
+      .ico.done { color: var(--color-st-done); }
+      .ico.progress::after { animation: pulse 1.6s ease-in-out infinite; }
+
+      /* ── Readiness strip ───────────────────────────────────────────── */
+      .readiness {
+        border: 1px solid var(--color-line);
+        border-radius: 10px;
+        background: var(--color-card);
+        overflow: hidden;
+        margin-bottom: 16px;
+      }
+      .readiness > header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--color-line);
+      }
+      .readiness > header .label {
+        font-family: var(--font-mono); font-size: 11px;
+        text-transform: uppercase; letter-spacing: 0.09em; color: var(--color-fg-mute);
+      }
+      .verdict {
+        font-family: var(--font-mono); font-size: 11px;
+        text-transform: uppercase; letter-spacing: 0.07em;
+      }
+      .verdict.fix { color: var(--color-st-blocked); }
+      .verdict.warn { color: var(--color-st-review); }
+      .verdict.ready { color: var(--color-st-done); }
+
+      .ritem {
+        display: flex; align-items: flex-start; gap: 11px;
+        padding: 11px 14px;
+        border: 0; background: transparent; width: 100%; text-align: left;
+        border-bottom: 1px solid var(--color-line);
+        transition: background 0.12s ease;
+      }
+      .ritem:last-child { border-bottom: 0; }
+      .ritem.jump:hover { background: var(--color-card-hover); }
+      .ritem .rdot { margin-top: 3px; flex: none; }
+      .ritem .rdot.blocked { color: var(--color-st-blocked); }
+      .ritem .rdot.warn { color: var(--color-st-review); }
+      .ritem .rdot.ok { color: var(--color-st-done); }
+      .ritem .rbody { flex: 1; min-width: 0; }
+      .ritem .rkind {
+        font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em; margin-right: 9px;
+      }
+      .ritem.blocked .rkind { color: var(--color-st-blocked); }
+      .ritem.warn .rkind { color: var(--color-st-review); }
+      .ritem .rtext { color: var(--color-fg-body); font-size: 13px; }
+      .ritem .rsub {
+        margin-top: 3px; font-family: var(--font-mono);
+        font-size: 11px; color: var(--color-fg-subtle);
+      }
+      .ritem .arrow {
+        flex: none; color: var(--color-fg-faint); font-size: 13px; margin-top: 1px;
+        transition: color 0.12s ease, transform 0.12s ease;
+      }
+      .ritem.jump:hover .arrow { color: var(--color-fg-body); transform: translate(1px, -1px); }
+      .ritem.ok .rtext { color: var(--color-fg-mute); font-size: 12px; }
+      .ritem.ok { padding-top: 9px; padding-bottom: 9px; }
+
+      .restart-inline {
+        margin-top: 8px; display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 10px; border-radius: 6px;
+        border: 1px solid var(--color-line-hover); background: transparent;
+        color: var(--color-fg-body); font-size: 12px;
+      }
+      .restart-inline:hover { background: var(--color-card-hover); border-color: var(--color-line-strong); }
+
+      /* ── Artifact console (tabs) ───────────────────────────────────── */
+      .console {
+        border: 1px solid var(--color-line);
+        border-radius: 10px;
+        background: var(--color-card);
+        overflow: hidden;
+      }
+      .tabbar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 6px 0 6px;
+        border-bottom: 1px solid var(--color-line);
+        gap: 8px;
+      }
+      .tabs { display: flex; align-items: center; overflow-x: auto; }
+      .tab {
+        position: relative;
+        padding: 11px 13px; border: 0; background: transparent;
+        color: var(--color-fg-mute); font-size: 12.5px; white-space: nowrap;
+        transition: color 0.12s ease;
+      }
+      .tab:hover { color: var(--color-fg-body); }
+      .tab.active { color: var(--color-fg); }
+      .tab.active::after {
+        content: ""; position: absolute; left: 13px; right: 13px; bottom: -1px;
+        height: 2px; background: var(--color-fg); border-radius: 2px;
+      }
+      .tab .badge {
+        margin-left: 6px; font-family: var(--font-mono); font-size: 10px;
+        color: var(--color-st-review);
+      }
+      .agents-btn {
+        flex: none; display: inline-flex; align-items: center; gap: 7px;
+        margin: 6px 6px 6px 0; padding: 6px 11px; border-radius: 7px;
+        border: 1px solid var(--color-line-hover); background: transparent;
+        color: var(--color-fg-body); font-size: 12px;
+        transition: background 0.12s, border-color 0.12s;
+      }
+      .agents-btn:hover { background: var(--color-card-hover); border-color: var(--color-line-strong); }
+      .agents-btn .cnt {
+        font-family: var(--font-mono); font-size: 10.5px; color: var(--color-st-blocked);
+      }
+
+      .panel { display: none; padding: 26px 28px; }
+      .panel.active { display: block; }
+
+      /* artifact-doc — mirrors globals.css .artifact-doc */
+      .artifact-doc {
+        width: min(100%, 72ch); margin-inline: auto;
+        font-size: 14.5px; line-height: 1.72; color: var(--color-fg-body);
+        overflow-wrap: break-word;
+      }
+      .artifact-doc > * + * { margin-top: 0.95rem; }
+      .artifact-doc :first-child { margin-top: 0; }
+      .artifact-doc h1 { color: var(--color-fg); font-weight: 650; font-size: 1.55rem; line-height: 1.22; margin: 0 0 1rem; }
+      .artifact-doc h2 {
+        color: var(--color-fg); font-weight: 650; font-size: 1.05rem; line-height: 1.35;
+        border-top: 1px solid var(--color-line); padding-top: 1.35rem; margin-top: 2rem;
+      }
+      .artifact-doc h3 { color: var(--color-fg); font-weight: 650; font-size: 0.96rem; margin-top: 1.55rem; }
+      .artifact-doc p, .artifact-doc li { color: var(--color-fg-body); margin-top: 0; }
+      .artifact-doc strong { color: var(--color-fg); font-weight: 650; }
+      .artifact-doc ul, .artifact-doc ol { padding-left: 1.45em; }
+      .artifact-doc ul { list-style: disc; }
+      .artifact-doc ol { list-style: decimal; }
+      .artifact-doc li { margin-top: 0.35em; }
+      .artifact-doc li::marker { color: var(--color-fg-faint); }
+      .artifact-doc code {
+        font-family: var(--font-mono); font-size: 0.88em; padding: 0.12em 0.42em;
+        border-radius: 4px; background: rgba(255,255,255,0.055); color: var(--color-fg);
+      }
+
+      /* ── Execution panel ───────────────────────────────────────────── */
+      .exec-metrics {
+        display: flex; flex-wrap: wrap; gap: 18px;
+        font-family: var(--font-mono); font-size: 11.5px; color: var(--color-fg-mute);
+        padding-bottom: 18px; border-bottom: 1px solid var(--color-line); margin-bottom: 18px;
+      }
+      .exec-metrics b { color: var(--color-fg-body); font-weight: 500; }
+      .exec-metrics .flag { color: var(--color-st-review); }
+      .phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      .phasecol .ph-head {
+        font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-mute);
+        margin-bottom: 9px; display: flex; align-items: baseline; gap: 7px;
+      }
+      .phasecol .ph-head b { color: var(--color-fg-body); font-weight: 600; font-size: 12px; }
+      .node {
+        border: 1px solid var(--color-line); border-radius: 8px;
+        background: var(--color-bg); padding: 10px 11px; margin-bottom: 8px;
+        cursor: pointer; transition: border-color 0.12s, background 0.12s;
+      }
+      .node:hover { border-color: var(--color-line-hover); background: var(--color-card-hover); }
+      .node.sel { border-color: var(--color-line-strong); }
+      .node .nid { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-subtle); }
+      .node .ntitle { font-size: 12.5px; color: var(--color-fg-body); margin-top: 2px; }
+      .node .nlane {
+        margin-top: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--color-fg-mute);
+        display: flex; align-items: center; gap: 6px;
+      }
+      .node .warn-tag { color: var(--color-st-review); }
+      .inspector {
+        margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-line);
+        font-family: var(--font-mono); font-size: 11.5px; color: var(--color-fg-mute);
+        display: none;
+      }
+      .inspector.show { display: block; }
+      .inspector b { color: var(--color-fg-body); font-weight: 500; }
+      .inspector .miss { color: var(--color-st-review); }
+
+      .yaml {
+        font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
+        color: var(--color-fg-body); white-space: pre; overflow-x: auto;
+        background: rgba(255,255,255,0.02); border: 1px solid var(--color-line);
+        border-radius: 8px; padding: 16px 18px;
+      }
+      .yaml .k { color: var(--color-st-progress); }
+      .yaml .c { color: var(--color-fg-subtle); }
+
+      /* ── Sticky decision bar ───────────────────────────────────────── */
+      .decision {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+        height: var(--decision-bar-h);
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 20px;
+        background: color-mix(in srgb, var(--color-card) 92%, transparent);
+        backdrop-filter: blur(10px);
+        border-top: 1px solid var(--color-line-hover);
+      }
+      .decision .dstatus {
+        display: flex; align-items: center; gap: 10px;
+        font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-mute);
+      }
+      .decision .dstatus b { color: var(--color-st-blocked); font-weight: 500; }
+      .decision .dactions { display: flex; align-items: center; gap: 10px; }
+      .btn {
+        padding: 8px 15px; border-radius: 8px; font-size: 13px; font-weight: 500;
+        border: 1px solid var(--color-line-hover); background: transparent; color: var(--color-fg-body);
+        transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+      }
+      .btn:hover { background: var(--color-card-hover); border-color: var(--color-line-strong); }
+      .btn.primary {
+        background: var(--color-st-progress); border-color: var(--color-st-progress); color: #fff;
+      }
+      .btn.primary:hover { background: #6b76d8; border-color: #6b76d8; }
+      .btn.danger { color: var(--color-st-blocked); border-color: color-mix(in srgb, var(--color-st-blocked) 45%, transparent); }
+      .btn.danger:hover { background: rgba(235,87,87,0.08); }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      /* ── Agents drawer ─────────────────────────────────────────────── */
+      .scrim {
+        position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.42);
+        opacity: 0; pointer-events: none; transition: opacity 0.22s ease;
+      }
+      .scrim.open { opacity: 1; pointer-events: auto; }
+      .drawer {
+        position: fixed; top: 0; right: 0; bottom: 0; z-index: 41;
+        width: 440px; max-width: 92vw;
+        background: var(--color-card); border-left: 1px solid var(--color-line-hover);
+        transform: translateX(100%); transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex; flex-direction: column;
+      }
+      .drawer.open { transform: translateX(0); }
+      .drawer > header {
+        padding: 16px 18px; border-bottom: 1px solid var(--color-line);
+        display: flex; align-items: flex-start; justify-content: space-between;
+      }
+      .drawer > header .dtitle { font-size: 14px; font-weight: 600; color: var(--color-fg); }
+      .drawer > header .dcnt {
+        margin-top: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-mute);
+      }
+      .drawer > header .dcnt .b { color: var(--color-st-blocked); }
+      .xbtn {
+        border: 0; background: transparent; color: var(--color-fg-mute);
+        font-size: 17px; line-height: 1; padding: 2px 4px;
+      }
+      .xbtn:hover { color: var(--color-fg); }
+      .roster { flex: 1; overflow-y: auto; }
+      .arow {
+        width: 100%; border: 0; background: transparent; text-align: left;
+        display: flex; align-items: center; gap: 11px; padding: 12px 18px;
+        border-bottom: 1px solid var(--color-line);
+        transition: background 0.12s;
+      }
+      .arow:hover { background: var(--color-card-hover); }
+      .arow .aglyph { flex: none; font-family: var(--font-mono); font-size: 13px; width: 14px; text-align: center; }
+      .arow .aglyph.done { color: var(--color-st-done); }
+      .arow .aglyph.blocked { color: var(--color-st-blocked); }
+      .arow .aname { flex: 1; font-size: 13px; color: var(--color-fg-body); }
+      .arow .ameta { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-subtle); }
+      .arow .ameta.blocked { color: var(--color-st-blocked); }
+      .arow .caret { color: var(--color-fg-faint); font-size: 10px; transition: transform 0.15s; }
+      .arow.exp .caret { transform: rotate(90deg); }
+
+      .adetail { display: none; border-bottom: 1px solid var(--color-line); background: var(--color-bg); }
+      .adetail.show { display: block; }
+      .dtabs { display: flex; gap: 2px; padding: 8px 14px 0; }
+      .dtab {
+        border: 0; background: transparent; color: var(--color-fg-mute);
+        font-size: 11.5px; padding: 6px 9px; border-radius: 6px 6px 0 0;
+      }
+      .dtab.active { color: var(--color-fg); background: var(--color-card); }
+      .dlog { padding: 12px 16px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.85; }
+      .dlog .t { color: var(--color-fg-subtle); }
+      .dlog .ok { color: var(--color-fg-body); }
+      .dlog .err { color: var(--color-st-blocked); }
+      .dlog .note { color: var(--color-fg-mute); padding-left: 56px; }
+
+      .planlog {
+        border-top: 1px solid var(--color-line); padding: 13px 18px;
+        display: flex; align-items: center; justify-content: space-between;
+        color: var(--color-fg-mute); font-size: 12px;
+      }
+      .planlog .caret { color: var(--color-fg-faint); }
+
+      .hint {
+        position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+        z-index: 20; font-family: var(--font-mono); font-size: 10.5px; color: var(--color-fg-faint);
+        background: var(--color-card); border: 1px solid var(--color-line);
+        padding: 5px 11px; border-radius: 999px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ── Topbar ──────────────────────────────────────────────────── -->
+    <div class="topbar">
+      <nav class="crumb">
+        <a href="#">← Board</a>
+        <span class="sep">/</span>
+        <a href="#">TASK-128</a>
+        <span class="sep">/</span>
+        <span class="here">plan</span>
+      </nav>
+      <div class="stream">
+        <span class="dot live" style="color: var(--color-st-done)"></span>
+        live
+      </div>
+    </div>
+
+    <!-- ── Scroll region ───────────────────────────────────────────── -->
+    <div class="page" id="page">
+      <div class="container">
+
+        <!-- Header -->
+        <div class="head">
+          <div class="titlerow">
+            <span class="ico review" aria-hidden="true"></span>
+            <h1>Add OAuth redirect handling</h1>
+          </div>
+          <p class="meta">
+            awaiting your review · <b>plan agent</b> · <b>$0.214</b> · <b>main</b>
+          </p>
+        </div>
+
+        <!-- Readiness strip — the single source of risk/verdict -->
+        <section class="readiness" aria-label="Readiness">
+          <header>
+            <span class="label">Readiness</span>
+            <span class="verdict fix">2 to fix</span>
+          </header>
+
+          <button class="ritem blocked jump" onclick="openDrawerFor('claim-verifier')">
+            <span class="rdot blocked"><span class="dot" style="background: currentColor"></span></span>
+            <span class="rbody">
+              <span class="rkind">blocker</span>
+              <span class="rtext">Ollama unreachable — preflight claim-verifier failed</span>
+              <span class="rsub">14:03 · attempt 2 · ECONNREFUSED 127.0.0.1:11434</span>
+              <span style="display:block">
+                <span class="restart-inline" onclick="event.stopPropagation();flash('restart plan →')">↻ Restart plan</span>
+              </span>
+            </span>
+            <span class="arrow">↗</span>
+          </button>
+
+          <button class="ritem warn jump" onclick="gotoTab('plan')">
+            <span class="rdot warn"><span class="dot" style="background: currentColor"></span></span>
+            <span class="rbody">
+              <span class="rkind">warning</span>
+              <span class="rtext">Plan still draft — frontmatter status is “draft”, not “ready”</span>
+            </span>
+            <span class="arrow">↗</span>
+          </button>
+
+          <div class="ritem ok">
+            <span class="rdot ok"><span class="dot" style="background: currentColor"></span></span>
+            <span class="rbody">
+              <span class="rtext">passing · scenarios · impact map · execution DAG · 4 preflight agents</span>
+            </span>
+          </div>
+        </section>
+
+        <!-- Artifact console -->
+        <section class="console" aria-label="Plan artifacts">
+          <div class="tabbar">
+            <div class="tabs no-scrollbar" id="tabs">
+              <button class="tab active" data-tab="plan" onclick="selectTab(this)">Plan</button>
+              <button class="tab" data-tab="phases" onclick="selectTab(this)">Phases</button>
+              <button class="tab" data-tab="execution" onclick="selectTab(this)">Execution <span class="badge">▲3</span></button>
+              <button class="tab" data-tab="scenarios" onclick="selectTab(this)">Scenarios</button>
+              <button class="tab" data-tab="impact" onclick="selectTab(this)">Impact</button>
+              <button class="tab" data-tab="raw" onclick="selectTab(this)">Raw</button>
+            </div>
+            <button class="agents-btn" onclick="openDrawer()">
+              ▣ Agents <span class="cnt">1 blocked</span>
+            </button>
+          </div>
+
+          <!-- Plan tab -->
+          <div class="panel active" data-panel="plan">
+            <article class="artifact-doc">
+              <h1>Add OAuth redirect handling</h1>
+              <p>Intercept the post-authentication redirect at the gateway, validate the
+              <code>redirect_uri</code> against a configured allowlist, and reject any target
+              that is not explicitly permitted. This closes an open-redirect surface introduced
+              when the provider began echoing arbitrary <code>state</code> back to callers.</p>
+
+              <h2>Approach</h2>
+              <p>Validation lives in the redirect middleware so every auth flow inherits it
+              without per-route changes. The allowlist is loaded once at boot and refreshed on
+              config change; lookups are exact-host plus path-prefix.</p>
+              <ol>
+                <li><strong>Allowlist config + loader</strong> — typed schema, boot-time parse, fail-closed on malformed entries.</li>
+                <li><strong>Wire validation into redirect middleware</strong> — reject with 400 + telemetry on miss.</li>
+                <li><strong>Tests + telemetry</strong> — table-driven host/path cases, counter on rejections.</li>
+              </ol>
+
+              <h2>Risks</h2>
+              <ul>
+                <li>Open redirect if the allowlist is misconfigured — mitigated by fail-closed parsing.</li>
+                <li>Legitimate redirects broken by an overly strict prefix match — covered by scenario suite.</li>
+              </ul>
+
+              <h2>Out of scope</h2>
+              <p>Token rotation and PKCE migration are tracked separately in TASK-131.</p>
+            </article>
+          </div>
+
+          <!-- Phases tab -->
+          <div class="panel" data-panel="phases">
+            <article class="artifact-doc">
+              <h1>Phase plans</h1>
+              <p>Three phase-level plans were authored. Each maps to an execution group below.</p>
+              <h3>plan-1.md · Allowlist config + loader</h3>
+              <p>Add <code>config/redirect-allowlist.ts</code> with a Zod schema; load in the gateway boot sequence; expose a typed accessor.</p>
+              <h3>plan-2.md · Redirect middleware</h3>
+              <p>Insert validation into <code>middleware/redirect.ts</code>; reject on miss; emit telemetry.</p>
+              <h3>plan-3.md · Tests + telemetry</h3>
+              <p>Table-driven tests for host/path matching; rejection counter wired to the metrics sink.</p>
+            </article>
+          </div>
+
+          <!-- Execution tab -->
+          <div class="panel" data-panel="execution">
+            <div class="exec-metrics">
+              <span><b>3</b> phases</span>
+              <span><b>7</b> tasks</span>
+              <span><b>4</b> parallel</span>
+              <span><b>1</b> exclusive</span>
+              <span class="flag">▲ <b>3</b> missing assertions</span>
+            </div>
+            <div class="phases">
+              <div class="phasecol">
+                <div class="ph-head"><b>Phase 1</b> · ordered</div>
+                <div class="node" onclick="inspect(this,'t1 · allowlist cfg','config','code','review','—','schema parses sample allowlist')">
+                  <div class="nid">t1</div><div class="ntitle">allowlist config</div>
+                  <div class="nlane">lane config · <span style="color:var(--color-st-done)">✓ assert</span></div>
+                </div>
+                <div class="node" onclick="inspect(this,'t2 · loader','config','code','review','t1','accessor returns parsed list')">
+                  <div class="nid">t2</div><div class="ntitle">config loader</div>
+                  <div class="nlane">lane config · <span style="color:var(--color-st-done)">✓ assert</span></div>
+                </div>
+              </div>
+              <div class="phasecol">
+                <div class="ph-head"><b>Phase 2</b> · parallel</div>
+                <div class="node" onclick="inspect(this,'t3 · middleware','api','code','review','t1, t2','(none)')">
+                  <div class="nid">t3</div><div class="ntitle">redirect middleware</div>
+                  <div class="nlane">lane api · <span class="warn-tag">▲ no assert</span></div>
+                </div>
+                <div class="node" onclick="inspect(this,'t4 · telemetry','obs','code','safe','t3','(none)')">
+                  <div class="nid">t4</div><div class="ntitle">rejection telemetry</div>
+                  <div class="nlane">lane obs · <span class="warn-tag">▲ no assert</span></div>
+                </div>
+                <div class="node" onclick="inspect(this,'t5 · error copy','api','code','safe','t3','(none)')">
+                  <div class="nid">t5</div><div class="ntitle">error response copy</div>
+                  <div class="nlane">lane api · <span class="warn-tag">▲ no assert</span></div>
+                </div>
+              </div>
+              <div class="phasecol">
+                <div class="ph-head"><b>Phase 3</b> · ordered</div>
+                <div class="node" onclick="inspect(this,'t6 · tests','test','test','safe','t3,t4,t5','table cases green')">
+                  <div class="nid">t6</div><div class="ntitle">middleware tests</div>
+                  <div class="nlane">lane test · <span style="color:var(--color-st-done)">✓ assert</span></div>
+                </div>
+                <div class="node" onclick="inspect(this,'t7 · docs','docs','docs','safe','t6','—')">
+                  <div class="nid">t7</div><div class="ntitle">update auth docs</div>
+                  <div class="nlane">lane docs · <span style="color:var(--color-st-done)">✓ assert</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="inspector" id="inspector"></div>
+          </div>
+
+          <!-- Scenarios tab -->
+          <div class="panel" data-panel="scenarios">
+            <div class="yaml"><span class="c"># scenarios.yaml</span>
+<span class="k">scenarios:</span>
+  <span class="k">- name:</span> rejects unlisted host
+    <span class="k">given:</span> redirect_uri = https://evil.example/cb
+    <span class="k">then:</span> 400 + telemetry "redirect_rejected"
+  <span class="k">- name:</span> allows listed host + path prefix
+    <span class="k">given:</span> redirect_uri = https://app.acme.com/auth/cb
+    <span class="k">then:</span> 302 to target
+  <span class="k">- name:</span> fail-closed on malformed allowlist
+    <span class="k">given:</span> allowlist entry missing scheme
+    <span class="k">then:</span> boot aborts with config error</div>
+          </div>
+
+          <!-- Impact tab -->
+          <div class="panel" data-panel="impact">
+            <div class="yaml"><span class="c"># blast-radius.yaml</span>
+<span class="k">touches:</span>
+  <span class="k">- path:</span> gateway/middleware/redirect.ts   <span class="c"># MODIFY</span>
+  <span class="k">- path:</span> gateway/config/redirect-allowlist.ts <span class="c"># ADD</span>
+  <span class="k">- path:</span> gateway/boot.ts                   <span class="c"># MODIFY (wire loader)</span>
+<span class="k">surfaces:</span>
+  <span class="k">- auth-redirect</span>  <span class="c"># behavioral change: rejects unlisted</span>
+<span class="k">migrations:</span> none
+<span class="k">rollback:</span> revert middleware guard, keep allowlist file (inert)</div>
+          </div>
+
+          <!-- Raw tab -->
+          <div class="panel" data-panel="raw">
+            <article class="artifact-doc">
+              <h1>Raw artifacts</h1>
+              <ul>
+                <li><code>plan.md</code> — <span style="color:var(--color-st-review)">draft</span></li>
+                <li><code>plan-1.md</code>, <code>plan-2.md</code>, <code>plan-3.md</code> — ready</li>
+                <li><code>execution-dag.yaml</code> — ready</li>
+                <li><code>scenarios.yaml</code> — ready</li>
+                <li><code>blast-radius.yaml</code> — ready</li>
+                <li><code>research/codebase-scout.md</code> · <code>research/integration-scanner.md</code> · <code>research/precedent-locator.md</code> · <code>research/claim-verifier.md</code> <span style="color:var(--color-st-blocked)">(empty)</span></li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ── Sticky decision bar ─────────────────────────────────────── -->
+    <div class="decision">
+      <div class="dstatus">
+        <span class="ico review" style="width:14px;height:14px"></span>
+        awaiting review · <b>2 items to fix</b>
+      </div>
+      <div class="dactions">
+        <button class="btn danger" onclick="flash('cancel plan run →')">Cancel run</button>
+        <button class="btn" onclick="flash('request changes →')">Request changes</button>
+        <button class="btn primary" onclick="flash('approve plan →')">Approve plan</button>
+      </div>
+    </div>
+
+    <!-- ── Agents drawer ───────────────────────────────────────────── -->
+    <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+    <aside class="drawer" id="drawer" aria-label="Agents">
+      <header>
+        <div>
+          <div class="dtitle">Agents</div>
+          <div class="dcnt">4 agents · 3 done · <span class="b">1 blocked</span></div>
+        </div>
+        <button class="xbtn" onclick="closeDrawer()">✕</button>
+      </header>
+      <div class="roster">
+        <button class="arow" onclick="toggleAgent('a1')">
+          <span class="aglyph done">✓</span>
+          <span class="aname">codebase-scout</span>
+          <span class="ameta">2.1s · $0.02</span>
+          <span class="caret">▶</span>
+        </button>
+        <button class="arow" onclick="toggleAgent('a2')">
+          <span class="aglyph done">✓</span>
+          <span class="aname">integration-scanner</span>
+          <span class="ameta">3.4s · $0.03</span>
+          <span class="caret">▶</span>
+        </button>
+        <button class="arow" onclick="toggleAgent('a3')">
+          <span class="aglyph done">✓</span>
+          <span class="aname">precedent-locator</span>
+          <span class="ameta">1.8s · $0.01</span>
+          <span class="caret">▶</span>
+        </button>
+
+        <button class="arow exp" id="row-claim-verifier" onclick="toggleAgent('a4')">
+          <span class="aglyph blocked">●</span>
+          <span class="aname">claim-verifier</span>
+          <span class="ameta blocked">timed out</span>
+          <span class="caret">▶</span>
+        </button>
+        <div class="adetail show" id="a4">
+          <div class="dtabs">
+            <button class="dtab active">Timeline</button>
+            <button class="dtab">Findings</button>
+            <button class="dtab">Raw</button>
+          </div>
+          <div class="dlog">
+            <div><span class="t">14:02</span> → read <span class="ok">auth/oauth.ts</span></div>
+            <div><span class="t">14:02</span> → grep <span class="ok">"redirect_uri"</span></div>
+            <div><span class="t">14:03</span> <span class="err">✕ connect ECONNREFUSED 127.0.0.1:11434</span></div>
+            <div class="note">Ollama endpoint unreachable — claim verification skipped, no fallback configured.</div>
+          </div>
+        </div>
+      </div>
+      <div class="planlog" role="button" onclick="flash('expand planner log →')">
+        <span>▸ Planner log</span>
+        <span class="caret">▶</span>
+      </div>
+    </aside>
+
+    <div class="hint">interactive mock · click tabs, Agents, readiness rows, decision buttons</div>
+
+    <script>
+      function selectTab(btn) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        const name = btn.getAttribute('data-tab');
+        document.querySelector('.panel[data-panel="' + name + '"]').classList.add('active');
+      }
+      function gotoTab(name) {
+        const btn = document.querySelector('.tab[data-tab="' + name + '"]');
+        if (btn) selectTab(btn);
+        document.getElementById('page').scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      function openDrawer() {
+        document.getElementById('scrim').classList.add('open');
+        document.getElementById('drawer').classList.add('open');
+      }
+      function closeDrawer() {
+        document.getElementById('scrim').classList.remove('open');
+        document.getElementById('drawer').classList.remove('open');
+      }
+      function openDrawerFor(agent) {
+        openDrawer();
+        // claim-verifier is pre-expanded in this mock
+      }
+      function toggleAgent(id) {
+        const detail = document.getElementById(id);
+        const row = detail ? detail.previousElementSibling : null;
+        if (!detail) return;
+        const showing = detail.classList.contains('show');
+        document.querySelectorAll('.adetail').forEach(d => d.classList.remove('show'));
+        document.querySelectorAll('.arow').forEach(r => r.classList.remove('exp'));
+        if (!showing) { detail.classList.add('show'); if (row) row.classList.add('exp'); }
+      }
+      function inspect(node, title, lane, kind, safety, deps, assertion) {
+        document.querySelectorAll('.node').forEach(n => n.classList.remove('sel'));
+        node.classList.add('sel');
+        const miss = assertion === '(none)';
+        const ins = document.getElementById('inspector');
+        ins.classList.add('show');
+        ins.innerHTML =
+          '▾ <b>' + title + '</b><br>' +
+          'lane ' + lane + ' · kind ' + kind + ' · safety ' + safety +
+          ' · deps ' + deps + ' · assertion: ' +
+          (miss ? '<span class="miss">(none) ▲</span>' : assertion);
+      }
+      function flash(msg) {
+        const h = document.querySelector('.hint');
+        const prev = h.textContent;
+        h.textContent = msg;
+        h.style.color = 'var(--color-st-progress)';
+        setTimeout(() => { h.textContent = prev; h.style.color = ''; }, 1300);
+      }
+    </script>
+  </body>
+</html>

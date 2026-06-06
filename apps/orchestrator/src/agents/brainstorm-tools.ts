@@ -130,6 +130,8 @@ const MockChoice = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 120 }),
   summary: Type.String({ minLength: 1, maxLength: 500 }),
   recommended: Type.Boolean(),
+  evidence: Type.Array(Type.String({ minLength: 1, maxLength: 240 }), { minItems: 1, maxItems: 12 }),
+  contextSummary: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
   miniature: Type.Optional(MockMiniature),
   pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
 });
@@ -144,6 +146,8 @@ const WriteMockRevisionParams = Type.Object({
   editRequestId: Type.String({ minLength: 1, maxLength: 120 }),
   title: Type.String({ minLength: 1, maxLength: 120 }),
   summary: Type.String({ minLength: 1, maxLength: 500 }),
+  evidence: Type.Array(Type.String({ minLength: 1, maxLength: 240 }), { minItems: 1, maxItems: 12 }),
+  contextSummary: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
   miniature: Type.Optional(MockMiniature),
   pages: Type.Array(MockPageChoice, { minItems: 1, maxItems: 6 }),
 });
@@ -468,6 +472,26 @@ function hasWebResearch(cwd: string, taskId: string): boolean {
 type SubmitMocksDetails = { ok: boolean; proposed?: string[]; violations?: unknown };
 type SubmitMockRevisionDetails = { ok: boolean; revised?: string; violations?: unknown };
 
+function hasDesignEvidence(input: { readonly evidence?: readonly string[] }): boolean {
+  return input.evidence !== undefined && input.evidence.some((item) => item.trim().length > 0);
+}
+
+function rejectMissingEvidence(mockId: string): ToolResult<SubmitMocksDetails> {
+  return {
+    content: [{ type: "text", text: "rejected: cite current UI design evidence before submitting mocks" }],
+    details: { ok: false, violations: { mockId, missing: "evidence" } },
+    terminate: true,
+  };
+}
+
+function rejectRevisionMissingEvidence(mockId: string): ToolResult<SubmitMockRevisionDetails> {
+  return {
+    content: [{ type: "text", text: "rejected: cite current UI design evidence before submitting a mock revision" }],
+    details: { ok: false, violations: { mockId, missing: "evidence" } },
+    terminate: true,
+  };
+}
+
 export function makeSubmitMocksTool(deps: {
   store: Pick<ArtifactsStore, "writeBrainstormMock" | "writeBrainstormMockRender">;
   designSystem: Pick<DesignSystemStore, "read" | "readDraftTokens">;
@@ -480,9 +504,12 @@ export function makeSubmitMocksTool(deps: {
     name: "submit_mocks",
     label: "Submit mocks",
     description:
-      "Write one or more mock choices as HTML that consumes the project design tokens (var(--…)). Mocks are rendered to screenshots. After calling this, halt your turn.",
+      "Write one or more mock choices as HTML that consumes the project design tokens (var(--…)). The dashboard renders the saved HTML directly. After calling this, halt your turn.",
     parameters: SubmitMockChoicesParams,
     async execute(_id, params) {
+      for (const mock of params.mocks) {
+        if (!hasDesignEvidence(mock)) return rejectMissingEvidence(mock.mockId);
+      }
       // Validate every page across every mock BEFORE any render or persist
       // side-effect. A single hard-coded core token rejects the whole call so
       // the agent gets a clean retry with no partially-written mock set.
@@ -515,6 +542,8 @@ export function makeSubmitMocksTool(deps: {
           summary: input.summary,
           recommended: input.recommended,
           createdAt: new Date().toISOString(),
+          evidence: input.evidence,
+          ...(input.contextSummary !== undefined ? { contextSummary: input.contextSummary } : {}),
           ...(input.miniature !== undefined ? { miniature: input.miniature } : {}),
           pages: input.pages.map((page) => ({
             pageId: page.pageId,
@@ -572,9 +601,10 @@ export function makeSubmitMockRevisionTool(deps: {
     name: "submit_mock_revision",
     label: "Submit mock revision",
     description:
-      "Write a revised mock as HTML that consumes the project design tokens (var(--…)) after the user requested edits to an existing mock. The revision is rendered to screenshots. After calling this, halt your turn.",
+      "Write a revised mock as HTML that consumes the project design tokens (var(--…)) after the user requested edits to an existing mock. The dashboard renders the saved HTML directly. After calling this, halt your turn.",
     parameters: WriteMockRevisionParams,
     async execute(_id, params) {
+      if (!hasDesignEvidence(params)) return rejectRevisionMissingEvidence(params.sourceMockId);
       // Reject hard-coded core tokens before reading the manifest or rendering.
       for (const page of params.pages) {
         const violations = findTokenViolations(page.html);
@@ -602,6 +632,8 @@ export function makeSubmitMockRevisionTool(deps: {
         recommended: false,
         derivedFrom: params.sourceMockId,
         createdAt: new Date().toISOString(),
+        evidence: params.evidence,
+        ...(params.contextSummary !== undefined ? { contextSummary: params.contextSummary } : {}),
         ...(params.miniature !== undefined ? { miniature: params.miniature } : {}),
         pages: params.pages.map((page) => ({
           pageId: page.pageId,

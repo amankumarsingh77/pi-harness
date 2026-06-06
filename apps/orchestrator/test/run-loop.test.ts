@@ -409,4 +409,78 @@ describe("runLoop", () => {
     expect(after.status).toBe("executing");
     expect(after.retryCount).toBe(1);
   });
+
+  it("dispatches code after plan approval and advances to verifying on success", async () => {
+    const t = await runs.createTask({ title: "code dispatch" });
+    await runs.updateTask(t.id, { status: "executing", workflow: "backend-feature" });
+
+    vi.mocked(runPhase).mockResolvedValue({
+      ok: true,
+      costUsd: 0.25,
+      inputTokens: 15,
+      outputTokens: 5,
+      branch: `pi/${t.id}`,
+    });
+
+    const after = await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+
+    expect(after.status).toBe("verifying");
+    expect(runPhase).toHaveBeenCalledWith(
+      "code",
+      expect.objectContaining({
+        taskId: t.id,
+        ticketTitle: "code dispatch",
+      }),
+      expect.objectContaining({
+        cwd: expect.stringContaining("worktrees"),
+      }),
+    );
+    const list = await runs.listRuns(t.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      phase: "code",
+      status: "succeeded",
+      costUsd: 0.25,
+      inputTokens: 15,
+      outputTokens: 5,
+    });
+  });
+
+  it("reuses an existing active code run during recovery instead of creating a duplicate", async () => {
+    const t = await runs.createTask({ title: "active-code-recovery" });
+    await runs.updateTask(t.id, { status: "executing", workflow: "backend-feature" });
+    const active = await runs.createRun({ taskId: t.id, phase: "code" });
+    await runs.updateRun(active.id, { status: "running" });
+
+    vi.mocked(runPhase).mockResolvedValue({
+      ok: true,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+
+    await runLoop({
+      task: await runs.getTask(t.id),
+      runs,
+      events,
+      phaseDeps: phaseDepsBase,
+      worktrees,
+      retryCap: 2,
+      cancellation: new CancellationRegistry(),
+    });
+
+    expect(vi.mocked(runPhase).mock.calls[0]![1].runId).toBe(active.id);
+    const list = await runs.listRuns(t.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.id).toBe(active.id);
+    expect(list[0]!.status).toBe("succeeded");
+  });
 });

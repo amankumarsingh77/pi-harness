@@ -24,7 +24,6 @@ export const DesignExemplarSchema = z.object({
   promotedMockId: z.string().min(1),
   tokenVersion: z.number().int().min(1),
 });
-export type DesignExemplar = z.infer<typeof DesignExemplarSchema>;
 
 export const DesignHistoryEntrySchema = z.object({
   tokenVersion: z.number().int().min(1),

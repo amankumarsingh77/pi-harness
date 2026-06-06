@@ -60,6 +60,8 @@ const BrainstormMockSchema = z.object({
   recommended: z.boolean(),
   createdAt: z.string().min(1),
   derivedFrom: z.string().min(1).optional(),
+  evidence: z.array(z.string().min(1)).optional(),
+  contextSummary: z.string().min(1).optional(),
   miniature: BrainstormMockMiniatureSchema.optional(),
   pages: z.array(BrainstormMockPageSchema).min(1).max(6),
 });
@@ -84,6 +86,8 @@ function toBrainstormMock(value: z.infer<typeof BrainstormMockSchema>): Brainsto
     recommended: value.recommended,
     createdAt: value.createdAt,
     ...(value.derivedFrom !== undefined ? { derivedFrom: value.derivedFrom } : {}),
+    ...(value.evidence !== undefined ? { evidence: value.evidence } : {}),
+    ...(value.contextSummary !== undefined ? { contextSummary: value.contextSummary } : {}),
     ...(miniature !== undefined ? { miniature } : {}),
     pages: value.pages.map((page) => ({
       pageId: page.pageId,

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type {
@@ -120,11 +120,13 @@ export async function runBrainstorm(opts: BrainstormOpts): Promise<BrainstormRes
     });
   }
 
+  const currentUiDesignContext = collectCurrentUiDesignContext(opts.cwd);
   const basePrompt =
     decision.kind === "initial"
       ? buildInitialPrompt({
           taskId: opts.taskId,
           cwd: opts.cwd,
+          ...(currentUiDesignContext !== undefined ? { currentUiDesignContext } : {}),
           ...(research.digest !== undefined ? { researchDigest: research.digest } : {}),
           ...(opts.ticketTitle !== undefined ? { title: opts.ticketTitle } : {}),
           ...(opts.ticketDescription !== undefined
@@ -487,7 +489,7 @@ function decide(events: JsonlEvent[]): Decision {
     events,
     (e) =>
       e.kind === "brainstorm_question" ||
-      e.kind === "brainstorm_system" ||
+      isAgentActivitySystemEvent(e) ||
       e.kind === "brainstorm_mock_proposed" ||
       e.kind === "brainstorm_mock_revised",
   );
@@ -544,6 +546,10 @@ function decide(events: JsonlEvent[]): Decision {
   if (lastAgentIdx === -1) return { kind: "initial", nudges };
   if (nudges.length > 0) return { kind: "nudge_only", nudges };
   return { kind: "noop" };
+}
+
+function isAgentActivitySystemEvent(event: JsonlEvent): boolean {
+  return event.kind === "brainstorm_system" && event["systemKind"] !== "session_reset";
 }
 
 // Walk the JSONL keeping the LAST event per nudgeId. A consumed:true event
@@ -740,6 +746,7 @@ function buildInitialPrompt(opts: {
   title?: string;
   description?: string;
   researchDigest?: string;
+  currentUiDesignContext?: string;
 }): string {
   const parts: string[] = [];
   parts.push(`Begin brainstorming this task.`);
@@ -755,10 +762,57 @@ function buildInitialPrompt(opts: {
     );
     parts.push(`Research digest:\n${opts.researchDigest}`);
   }
+  if (opts.currentUiDesignContext !== undefined) {
+    parts.push(opts.currentUiDesignContext);
+  }
   parts.push(
     `Use submit_questions only when unresolved choices would materially change the artifacts. If you already have enough context, write the artifacts with write_artifact and call mark_ready.`,
   );
   return parts.join("\n");
+}
+
+function collectCurrentUiDesignContext(cwd: string): string | undefined {
+  const fileSections = currentUiDesignContextFiles(cwd).flatMap((relativePath) => {
+    const snippet = readContextSnippet(cwd, relativePath);
+    return snippet === null ? [] : [`### ${relativePath}\n${snippet}`];
+  });
+  if (fileSections.length === 0) return undefined;
+  return [
+    "## Current UI Design Context",
+    "Use these sources before proposing UI mocks. When calling submit_mocks or submit_mock_revision, include an evidence array citing the files that shaped the mock.",
+    ...fileSections,
+  ].join("\n\n");
+}
+
+function currentUiDesignContextFiles(cwd: string): readonly string[] {
+  return [
+    "DESIGN.md",
+    ".harness/design/DESIGN.md",
+    ".harness/design/tokens.css",
+    "apps/dashboard/app/globals.css",
+    "apps/dashboard/app/tasks/[id]/brainstorm/brainstorm.css",
+    "apps/dashboard/components/brainstorm/shell.tsx",
+    "apps/dashboard/components/brainstorm/mock-page-preview.tsx",
+    ...mockDocCandidates(cwd),
+  ];
+}
+
+function mockDocCandidates(cwd: string): readonly string[] {
+  const dir = join(cwd, "docs", "mocks");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".html"))
+    .sort()
+    .slice(0, 3)
+    .map((name) => `docs/mocks/${name}`);
+}
+
+function readContextSnippet(cwd: string, relativePath: string): string | null {
+  const path = join(cwd, relativePath);
+  if (!existsSync(path)) return null;
+  const raw = readFileSync(path, "utf8").trim();
+  if (raw.length === 0) return null;
+  return raw.length <= 1600 ? raw : `${raw.slice(0, 1600)}\n...`;
 }
 
 function buildAnswersDeltaPrompt(answers: JsonlEvent[]): string {

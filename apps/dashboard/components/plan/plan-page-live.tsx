@@ -58,15 +58,13 @@ export function PlanPageLive({
         headerStatus={headerStatus}
         iconKind={iconKind}
         canCancelRun={task.status === "planning" && bundle.gate === "running" && planRunActive}
-        research={bundle.research}
         planEvents={bundle.events}
-        preflightSteps={bundle.preflightSteps}
         plan={bundle.plan}
         phasePlans={bundle.phasePlans ?? []}
         blastRadius={bundle.blastRadius}
         scenarios={bundle.scenarios}
         executionDag={bundle.executionDag}
-        plannerLogDefaultOpen={task.status === "planning"}
+        agentGraph={bundle.agentGraph}
         lastBlocked={bundle.lastBlocked}
       />
     </div>

@@ -16,6 +16,11 @@ export type RunStoreOpts = {
   readonly stateDir: string;
 };
 
+export type ActiveRunResult = {
+  readonly run: Run;
+  readonly created: boolean;
+};
+
 type SerializedTask = Omit<Task, "createdAt" | "updatedAt"> & {
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -127,6 +132,12 @@ export class RunStore {
     };
     await this.writeRun(run);
     return run;
+  }
+
+  async findOrCreateActiveRun(input: { taskId: string; phase: Phase }): Promise<ActiveRunResult> {
+    const existing = await this.findActiveRun(input.taskId, input.phase);
+    if (existing) return { run: existing, created: false };
+    return { run: await this.createRun(input), created: true };
   }
 
   async hasAnyRun(taskId: string): Promise<boolean> {

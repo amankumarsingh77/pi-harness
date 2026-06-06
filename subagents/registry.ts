@@ -3,15 +3,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   SUBAGENT_META,
-  PREFLIGHT_SUBAGENTS,
-  RETIRED_PROMPTS,
+  PLAN_RESEARCH_SUBAGENTS,
   type SubagentMeta,
   type SubagentRole,
   type BuiltinTool,
   type CustomTool,
 } from "./metadata.js";
 
-export { PREFLIGHT_SUBAGENTS, RETIRED_PROMPTS };
+export { PLAN_RESEARCH_SUBAGENTS };
 export type { SubagentRole, BuiltinTool, CustomTool };
 
 // Anchor relative to this module's location, but tolerate dist mode. The
@@ -39,7 +38,6 @@ export const PROMPTS_DIR = SUBAGENTS_ROOT ? resolve(SUBAGENTS_ROOT, "prompts") :
 export const PHASE_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "phase") : "";
 export const RESEARCH_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "research") : "";
 export const AUDIT_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "audit") : "";
-export const RETIRED_PROMPTS_DIR = PROMPTS_DIR ? resolve(PROMPTS_DIR, "retired") : "";
 
 export type SubagentDef = Omit<SubagentMeta, "promptDir" | "promptFile"> & {
   promptPath: string;

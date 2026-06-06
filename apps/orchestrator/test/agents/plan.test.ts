@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "@pi-harness/shared";
 import type { AgentSession, AgentSessionOptions } from "@pi-harness/pi-bridge";
+import { PLAN_RESEARCH_SUBAGENTS } from "@pi-harness/subagents";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { PlanEventBus } from "../../src/agents/plan-event-bus.js";
 import { JsonlWriter } from "../../src/adapters/jsonl-writer.js";
 import { runPlan } from "../../src/agents/plan.js";
-import { PREFLIGHT_SUBAGENTS } from "../../src/agents/plan-preflight.js";
 import type { AgentEvent } from "@pi-harness/shared";
 
 let cwd: string;
@@ -52,7 +52,7 @@ afterEach(async () => {
 });
 
 describe("runPlan", () => {
-  it("passes explicit planner builtins plus mark_ready", async () => {
+  it("passes planner builtins plus restricted plan custom tools", async () => {
     const createOpts: AgentSessionOptions[] = [];
     const eventStore = new InMemoryEventStore();
     const bus = new PlanEventBus({
@@ -95,115 +95,101 @@ describe("runPlan", () => {
       "read",
       "grep",
       "find",
-      "write",
+      "spawn_plan_agent",
+      "write_plan_artifact",
       "mark_ready",
     ]);
     expect(createOpts[0]!.customTools?.map((tool) => tool.name)).toEqual([
+      "spawn_plan_agent",
+      "write_plan_artifact",
       "mark_ready",
     ]);
   });
 
-  it("continues to the planner after soft preflight agents fall back", async () => {
-    const researchDir = join(cwd, ".harness", "T-1", "research");
-    await Promise.all(
-      PREFLIGHT_SUBAGENTS.map((subagent) =>
-        unlink(join(researchDir, `${subagent}.md`)).catch(() => {}),
-      ),
-    );
+  it("starts the planner directly instead of running automatic preflight agents", async () => {
     const promptTexts: string[] = [];
-    const createAgentSession = async (opts: AgentSessionOptions): Promise<AgentSession> => {
-      const writeFindings = (opts.customTools ?? []).find(
-        (tool) => tool.name === "write_findings",
-      ) as
-        | (NonNullable<AgentSessionOptions["customTools"]>[number] & {
-            __subagent: string;
-          })
-        | undefined;
-      if (writeFindings) {
-        const subagent = writeFindings.__subagent;
-        if (subagent === "codebase-scout") {
-          return {
-            async prompt() {
-              await writeFindings.execute(
-                "test-write",
-                { body: "# codebase-scout\n\nok\n" },
-                undefined,
-                undefined,
-                undefined as never,
-              );
-              return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
-            },
-            async abort() {},
-            async close() {},
-          } satisfies AgentSession;
-        }
-        return {
-          async prompt() {
-            return new Promise(() => {});
-          },
-          async abort() {},
-          async close() {},
-        } satisfies AgentSession;
-      }
-      return {
+    const result = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async () => ({
         async prompt(text) {
           promptTexts.push(text);
           return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
         },
         async abort() {},
         async close() {},
-      } satisfies AgentSession;
-    };
-
-    const first = await runPlan({
-      taskId: "T-1",
-      runId: "r-1",
-      cwd,
-      store,
-      bus: makeBus(),
-      eventStore: new InMemoryEventStore() as never,
-      phaseModel: {
-        provider: "anthropic",
-        model: "claude-opus-4-7",
-        thinkingLevel: "high",
-      },
-      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
-      createAgentSession,
-      ticketTitle: "Fallback preflight",
-      ticketDescription: "Soft agents hang.",
-      claimVerifierState: { attempts: 0, cap: 2 },
-      preflightSubagentTimeoutMs: 5,
-      preflightRetrySubagentTimeoutMs: 5,
-    });
-
-    expect(first.ok).toBe(true);
-    expect(first.ready).toBe(false);
-    expect(promptTexts).toHaveLength(0);
-    expect(await readFile(join(researchDir, "integration-scanner.md"), "utf8")).toContain("Fallback finding");
-    expect(await readFile(join(researchDir, "precedent-locator.md"), "utf8")).toContain("Fallback finding");
-
-    const second = await runPlan({
-      taskId: "T-1",
-      runId: "r-1",
-      cwd,
-      store,
-      bus: makeBus(),
-      eventStore: new InMemoryEventStore() as never,
-      phaseModel: {
-        provider: "anthropic",
-        model: "claude-opus-4-7",
-        thinkingLevel: "high",
-      },
-      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
-      createAgentSession,
-      ticketTitle: "Fallback preflight",
-      ticketDescription: "Soft agents hang.",
+      }),
+      ticketTitle: "Planner direct",
+      ticketDescription: "No automatic preflight.",
       claimVerifierState: { attempts: 0, cap: 2 },
     });
 
-    expect(second.ok).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.ready).toBe(false);
     expect(promptTexts).toHaveLength(1);
     expect(promptTexts[0]).toContain("Begin the plan phase");
+  });
+
+  it("rejects non-plan-research templates in spawn_plan_agent", async () => {
+    const spawnResults: unknown[] = [];
+
+    const result = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async (opts) => ({
+        async prompt() {
+          const spawn = opts.customTools?.find((tool) => tool.name === "spawn_plan_agent");
+          if (!spawn) throw new Error("spawn_plan_agent tool not registered");
+          const spawnResult = await spawn.execute(
+            "spawn",
+            {
+              role: "claim-verifier",
+              title: "Misused audit agent",
+              lane: "audit",
+              instructions: "Audit this early.",
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+          spawnResults.push(spawnResult.details);
+          return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
+        },
+        async abort() {},
+        async close() {},
+      }),
+      ticketTitle: "Spawn boundary",
+      ticketDescription: "Planner should only spawn plan research agents.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnResults).toEqual([
+      expect.objectContaining({
+        ok: false,
+        error: "role is not planner-spawnable: claim-verifier",
+      }),
+    ]);
   });
 
   it("recovers a stale planner_started event instead of no-oping", async () => {
@@ -505,7 +491,7 @@ async function seedPlanInputs(): Promise<void> {
   await store.writeArtifact(cwd, "T-1", makeArtifact("blast-radius", validBlastRadiusBody));
   const researchDir = join(cwd, ".harness", "T-1", "research");
   await mkdir(researchDir, { recursive: true });
-  for (const subagent of PREFLIGHT_SUBAGENTS) {
+  for (const subagent of PLAN_RESEARCH_SUBAGENTS) {
     await writeFile(join(researchDir, `${subagent}.md`), `# ${subagent}\n`);
   }
 }

@@ -389,9 +389,19 @@ describe("http /api/tasks/:id/plan routes", () => {
     expect(blastRadius?.fm.status).toBe("draft");
     expect(executionDag?.fm.status).toBe("draft");
 
-    const newJsonl = await readFile(join(dir, "plan.jsonl"), "utf8");
-    expect(newJsonl).toContain("session_reset");
-    expect(newJsonl).toContain("Keep the plan narrower this time.");
+    const newEvents = parseJsonl(await readFile(join(dir, "plan.jsonl"), "utf8"));
+    expect(newEvents.map((event) => event["kind"])).toEqual([
+      "plan_revision_requested",
+      "plan_system",
+    ]);
+    expect(newEvents[0]).toMatchObject({
+      kind: "plan_revision_requested",
+      comment: "Keep the plan narrower this time.",
+    });
+    expect(newEvents[1]).toMatchObject({
+      kind: "plan_system",
+      systemKind: "session_reset",
+    });
   });
 
   it("plan restart without note records no note", async () => {
@@ -407,9 +417,12 @@ describe("http /api/tasks/:id/plan routes", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const newJsonl = await readFile(join(wt, ".harness", t.id, "plan.jsonl"), "utf8");
-    expect(newJsonl).toContain("session_reset");
-    expect(newJsonl).not.toContain("\"note\"");
+    const newEvents = parseJsonl(await readFile(join(wt, ".harness", t.id, "plan.jsonl"), "utf8"));
+    expect(newEvents.map((event) => event["kind"])).toEqual(["plan_system"]);
+    expect(newEvents[0]).toMatchObject({
+      kind: "plan_system",
+      systemKind: "session_reset",
+    });
   });
 
   it("serializes concurrent plan restart requests for the same task", async () => {
@@ -474,3 +487,10 @@ describe("http /api/tasks/:id/plan routes", () => {
     }
   });
 });
+
+function parseJsonl(input: string): ReadonlyArray<Record<string, unknown>> {
+  return input
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}

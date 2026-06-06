@@ -598,11 +598,8 @@ describe("http", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("POST /api/tasks/:id/brainstorm/nudge returns 409 when gate is awaiting_user (artifacts ready)", async () => {
-    const t = await runs.createTask({ title: "nudge-gate-closed" });
-    // makeReadyWorktree creates artifacts already in `status: ready`, which
-    // the gate derivation reads as awaiting_user. The route must refuse the
-    // nudge so it doesn't sit unconsumed past the runBrainstorm short-circuit.
+  it("POST /api/tasks/:id/brainstorm/nudge reopens a ready brainstorm", async () => {
+    const t = await runs.createTask({ title: "nudge-ready" });
     const worktree = await makeReadyWorktree(t.id);
     await runs.updateTask(t.id, {
       status: "brainstorming",
@@ -612,10 +609,56 @@ describe("http", () => {
     const res = await app.inject({
       method: "POST",
       url: `/api/tasks/${t.id}/brainstorm/nudge`,
-      payload: { comment: "too late, gate is closed" },
+      payload: { comment: "adjust this before approval" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true });
+
+    const jsonl = await readFile(
+      join(worktree, ".harness", t.id, "brainstorm.jsonl"),
+      "utf8",
+    );
+    const jsonlEvents = jsonl
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(jsonlEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "brainstorm_user_nudge",
+          comment: "adjust this before approval",
+          consumed: false,
+        }),
+        expect.objectContaining({
+          kind: "brainstorm_revision_requested",
+          comment: "adjust this before approval",
+        }),
+      ]),
+    );
+
+    const store = new ArtifactsStore();
+    await expect(store.readArtifact(worktree, t.id, "design")).resolves.toMatchObject({
+      fm: { status: "draft" },
+    });
+    await expect(store.readArtifact(worktree, t.id, "spec")).resolves.toMatchObject({
+      fm: { status: "draft" },
+    });
+  });
+
+  it("POST /api/tasks/:id/brainstorm/nudge returns 409 when task is past brainstorming", async () => {
+    const t = await runs.createTask({ title: "nudge-past-brainstorm" });
+    const worktree = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "planning",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/nudge`,
+      payload: { comment: "too late, already approved" },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json()).toMatchObject({ error: "gate_closed" });
   });
 
   it("POST /api/tasks/:id/brainstorm/nudge returns 409 when task has no worktree", async () => {
@@ -1047,7 +1090,93 @@ describe("http", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.body).toContain("data-pi-harness-mock-preview");
+    expect(res.body).toContain("background:var(--color-bg,#0d0e10)");
     expect(res.body).toContain("Mock A");
+  });
+
+  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/pages/:pageId/html injects design tokens", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), [
+      {
+        pageId: "task-detail",
+        html: "<!doctype html><html><head></head><body><main style=\"color:var(--color-fg)\">Mock A</main></body></html>",
+      },
+    ]);
+    const testApp = buildServer({
+      runs,
+      events,
+      runsDir: tmpdir(),
+      cancellation,
+      artifacts: store,
+      designSystem: {
+        read: async () => ({
+          exists: true,
+          tokensCss: ":root{--color-fg:#f7f8f8;--color-bg:#0d0e10;}",
+          designMd: "",
+          manifest: { tokenVersion: 1, updatedAt: "2026-06-06T00:00:00.000Z", exemplars: [], history: [] },
+        }),
+      },
+    });
+    await testApp.ready();
+    try {
+      const res = await testApp.inject({
+        method: "GET",
+        url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/pages/task-detail/html`,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain(":root{--color-fg:#f7f8f8;--color-bg:#0d0e10;}");
+      expect(res.body).toContain("data-pi-harness-mock-preview");
+      expect(res.body).toContain("Mock A");
+    } finally {
+      await testApp.close();
+    }
+  });
+
+  it("GET /api/tasks/:id/brainstorm/mocks/:mockId/pages/:pageId/html falls back to dashboard globals tokens", async () => {
+    const t = await runs.createTask({ title: "mock task" });
+    const wt = await makeDraftWorktree(t.id);
+    await mkdir(join(wt, "apps", "dashboard", "app"), { recursive: true });
+    await writeFile(
+      join(wt, "apps", "dashboard", "app", "globals.css"),
+      "@theme { --color-fg: #f7f8f8; --color-bg: #0d0e10; }\n",
+    );
+    await runs.updateTask(t.id, { status: "brainstorming", worktreePath: wt });
+    const store = new ArtifactsStore();
+    await store.writeBrainstormMock(wt, t.id, makePagedMock(t.id), [
+      {
+        pageId: "task-detail",
+        html: "<!doctype html><html><head></head><body><main style=\"color:var(--color-fg)\">Mock A</main></body></html>",
+      },
+    ]);
+    const testApp = buildServer({
+      runs,
+      events,
+      runsDir: tmpdir(),
+      cancellation,
+      artifacts: store,
+      designSystem: {
+        read: async () => ({ exists: false, tokensCss: "", designMd: "", manifest: { tokenVersion: 0, updatedAt: "1970-01-01T00:00:00.000Z", exemplars: [], history: [] } }),
+        readDraftTokens: async () => "",
+      },
+    });
+    await testApp.ready();
+    try {
+      const res = await testApp.inject({
+        method: "GET",
+        url: `/api/tasks/${t.id}/brainstorm/mocks/mock-a/pages/task-detail/html`,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain(":root{--color-fg: #f7f8f8; --color-bg: #0d0e10;");
+      expect(res.body).toContain("Mock A");
+    } finally {
+      await testApp.close();
+    }
   });
 
   it("POST /api/tasks/:id/brainstorm/mocks/:mockId/edit appends request and enqueues", async () => {

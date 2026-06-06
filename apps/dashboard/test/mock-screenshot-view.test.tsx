@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { MockScreenshotView } from "../components/brainstorm/mock-screenshot-view";
+import { MockHtmlPreview } from "../components/brainstorm/mock-screenshot-view";
 
-describe("MockScreenshotView", () => {
-  it("shows the desktop screenshot by default and switches to mobile", () => {
-    render(
-      <MockScreenshotView title="Settings" desktopSrc="/png/desktop" mobileSrc="/png/mobile" />,
+describe("MockHtmlPreview", () => {
+  it("shows live desktop HTML by default and switches to a mobile viewport", () => {
+    const { container } = render(
+      <MockHtmlPreview title="Settings" htmlSrc="/mock/html" />,
     );
-    const img = screen.getByRole("img", { name: /Settings/ }) as HTMLImageElement;
-    expect(img.src).toContain("/png/desktop");
+    const frame = screen.getByTitle(/Settings/) as HTMLIFrameElement;
+    expect(frame.src).toContain("/mock/html");
+    expect(frame).toHaveAttribute("sandbox", "");
+    expect(frame.parentElement?.className).toContain("w-[1280px]");
+    expect(frame.parentElement?.className).not.toContain("bg-white");
+    expect(container.querySelector("[data-mock-preview-scroll]")?.className).not.toContain("bg-white");
     fireEvent.click(screen.getByRole("button", { name: /mobile/i }));
-    expect((screen.getByRole("img", { name: /Settings/ }) as HTMLImageElement).src).toContain("/png/mobile");
+    expect(frame.parentElement?.className).toContain("w-[390px]");
   });
 });
