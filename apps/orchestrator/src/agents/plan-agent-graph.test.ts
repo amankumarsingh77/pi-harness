@@ -59,6 +59,71 @@ describe("derivePlanAgentGraph", () => {
     expect(graph.totals).toEqual({ costUsd: 0.04, inputTokens: 1200, outputTokens: 400 });
   });
 
+  it("preserves dynamic nodes that return findings without artifact paths", () => {
+    const graph = derivePlanAgentGraph({
+      events: [
+        {
+          kind: "plan_agent_node_started",
+          ts: "2026-06-01T10:00:05.000Z",
+          nodeId: "agent-1",
+          parentId: "planner",
+          role: "codebase-scout",
+          title: "Scout codebase",
+          lane: "local",
+          sessionId: "s1",
+          model: "crofai/kimi-k2.6",
+          tools: ["read", "grep", "return_findings"],
+          artifactPath: null,
+          dependsOn: ["planner"],
+        },
+      ],
+      artifactNames: [],
+    });
+
+    expect(graph.nodes.find((node: PlanAgentGraphNode) => node.id === "agent-1")).toMatchObject({
+      artifactPath: null,
+      tools: ["read", "grep", "return_findings"],
+    });
+  });
+
+  it("updates running dynamic nodes from live usage events", () => {
+    const graph = derivePlanAgentGraph({
+      events: [
+        {
+          kind: "plan_agent_node_started",
+          ts: "2026-06-01T10:00:05.000Z",
+          nodeId: "agent-1",
+          parentId: "planner",
+          role: "codebase-scout",
+          title: "Scout codebase",
+          lane: "local",
+          sessionId: "s1",
+          model: "crofai/kimi-k2.6",
+          tools: ["read", "grep", "return_findings"],
+          artifactPath: null,
+          dependsOn: ["planner"],
+        },
+        {
+          kind: "plan_agent_node_usage",
+          ts: "2026-06-01T10:00:20.000Z",
+          nodeId: "agent-1",
+          inputTokens: 900,
+          outputTokens: 150,
+          costUsd: 0.018,
+        },
+      ],
+      artifactNames: [],
+    });
+
+    expect(graph.nodes.find((node: PlanAgentGraphNode) => node.id === "agent-1")).toMatchObject({
+      status: "running",
+      costUsd: 0.018,
+      inputTokens: 900,
+      outputTokens: 150,
+    });
+    expect(graph.totals).toEqual({ costUsd: 0.018, inputTokens: 900, outputTokens: 150 });
+  });
+
   it("uses plan_usage cumulative totals when available", () => {
     const graph = derivePlanAgentGraph({
       events: [

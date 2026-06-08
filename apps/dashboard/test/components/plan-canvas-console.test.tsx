@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { AgentEvent, Artifact, PlanAgentGraph, Run, Task } from "@pi-harness/shared";
 import { PlanCanvasConsole } from "@/components/plan/plan-canvas-console";
+import type { PlanJsonlEvent } from "@/lib/api";
 
 vi.mock("@/app/tasks/[id]/plan/actions", () => ({
   approvePlan: vi.fn(),
@@ -66,13 +67,67 @@ describe("PlanCanvasConsole", () => {
 
     expect(screen.getByTestId("expanded-log-details")).toHaveClass("scroll-hide");
   });
+
+  it("renders returned dynamic child findings without a node artifact path", () => {
+    renderCanvas({
+      agentGraph: {
+        ...agentGraph,
+        nodes: agentGraph.nodes.map((node) =>
+          node.id === "agent-1" ? { ...node, artifactPath: null } : node,
+        ),
+      },
+      planEvents: [
+        {
+          kind: "plan_agent_node_findings",
+          ts: "2026-06-06T00:00:05.000Z",
+          nodeId: "agent-1",
+          body: "# Findings\n\nPattern: apps/orchestrator/src/agents/plan.ts:152",
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
+    fireEvent.click(screen.getByRole("button", { name: "artifacts" }));
+
+    expect(screen.getByText("returned findings")).toBeInTheDocument();
+    expect(screen.getByText(/Pattern: apps\/orchestrator\/src\/agents\/plan\.ts:152/)).toBeInTheDocument();
+    expect(screen.queryByText("node artifact")).toBeNull();
+  });
+
+  it("labels running node usage as so far in the overview", () => {
+    renderCanvas({
+      agentGraph: {
+        ...agentGraph,
+        nodes: agentGraph.nodes.map((node) =>
+          node.id === "agent-1"
+            ? { ...node, costUsd: 0.025, inputTokens: 1250, outputTokens: 320 }
+            : node,
+        ),
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
+
+    expect(screen.getByText("cost so far")).toBeInTheDocument();
+    expect(screen.getByText("$0.0250")).toBeInTheDocument();
+    expect(screen.getByText("tokens in so far")).toBeInTheDocument();
+    expect(screen.getByText("1,250")).toBeInTheDocument();
+  });
 });
 
-function renderCanvas(opts: { readonly liveEvents?: readonly AgentEvent[] } = {}) {
+function renderCanvas(
+  opts: {
+    readonly liveEvents?: readonly AgentEvent[];
+    readonly planEvents?: readonly PlanJsonlEvent[];
+    readonly agentGraph?: PlanAgentGraph;
+    readonly taskStatus?: Task["status"];
+    readonly runStatus?: Run["status"];
+  } = {},
+) {
   return render(
     <PlanCanvasConsole
-      task={task}
-      runs={[run]}
+      task={{ ...task, status: opts.taskStatus ?? task.status }}
+      runs={[{ ...run, status: opts.runStatus ?? run.status }]}
       gate="running"
       headerStatus="in progress"
       iconKind="progress"
@@ -82,8 +137,8 @@ function renderCanvas(opts: { readonly liveEvents?: readonly AgentEvent[] } = {}
       blastRadius={null}
       scenarios={artifact("scenarios", "scenarios: []")}
       executionDag={null}
-      agentGraph={agentGraph}
-      planEvents={[]}
+      agentGraph={opts.agentGraph ?? agentGraph}
+      planEvents={opts.planEvents ?? []}
       liveEvents={opts.liveEvents ?? []}
       connected={true}
       lastBlocked={null}

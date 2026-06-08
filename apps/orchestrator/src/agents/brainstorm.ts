@@ -213,7 +213,7 @@ async function runTurn(
     // Skip transcript-owned tools where brainstorm-tools already publishes
     // richer brainstorm_* events. Artifact tools still flow through the live
     // log so path diagnostics are visible when writes or readiness checks fail.
-    if (e.kind === "turn_end" || e.kind === "error") return;
+    if (e.kind === "turn_end" || e.kind === "error" || e.kind === "usage_update") return;
     if (
       (e.kind === "tool_call" || e.kind === "tool_result") &&
       (e.tool === "submit_questions" ||

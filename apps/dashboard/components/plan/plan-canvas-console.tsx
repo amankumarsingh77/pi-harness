@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   Background,
   Controls,
@@ -322,7 +322,9 @@ function AgentInspector({
         {tab === "logs" && (
           <LogsTab rows={rows} rawEvents={nodeEvents} planEvents={planEvents} nodeId={node?.id ?? "planner"} />
         )}
-        {tab === "artifacts" && <ArtifactsTab artifacts={artifacts} node={node} />}
+        {tab === "artifacts" && (
+          <ArtifactsTab artifacts={artifacts} node={node} planEvents={planEvents} />
+        )}
       </div>
 
       <footer className="border-t border-line p-3">
@@ -333,15 +335,18 @@ function AgentInspector({
 }
 
 function OverviewTab({ node }: { readonly node: PlanAgentGraphNode }) {
+  const isRunning = node.status === "running";
+  const nowMs = useNowMs(isRunning && node.startedAt !== null);
+  const runtimeMs = isRunning ? runningDurationMs(node, nowMs) : node.durationMs;
   return (
     <div className="grid gap-2">
       <InfoRow label="status" value={node.status} />
       <InfoRow label="model" value={node.model ?? "-"} />
       <InfoRow label="session" value={node.sessionId ?? "-"} />
-      <InfoRow label="runtime" value={formatDuration(node.durationMs)} />
-      <InfoRow label="tokens in" value={node.inputTokens.toLocaleString()} />
-      <InfoRow label="tokens out" value={node.outputTokens.toLocaleString()} />
-      <InfoRow label="cost" value={`$${node.costUsd.toFixed(4)}`} />
+      <InfoRow label={isRunning ? "runtime so far" : "runtime"} value={formatDuration(runtimeMs)} />
+      <InfoRow label={isRunning ? "tokens in so far" : "tokens in"} value={node.inputTokens.toLocaleString()} />
+      <InfoRow label={isRunning ? "tokens out so far" : "tokens out"} value={node.outputTokens.toLocaleString()} />
+      <InfoRow label={isRunning ? "cost so far" : "cost"} value={`$${node.costUsd.toFixed(4)}`} />
       <InfoRow label="tools" value={node.tools.length > 0 ? node.tools.join(", ") : "-"} />
       <InfoRow label="artifact" value={node.artifactPath ?? "-"} />
       {node.error && <div className="rounded-[7px] border border-st-blocked/40 bg-st-blocked/[0.07] p-2 font-mono text-[11.5px] text-st-blocked">{node.error}</div>}
@@ -392,6 +397,7 @@ function LogsTab({
 function ArtifactsTab({
   artifacts,
   node,
+  planEvents,
 }: {
   readonly artifacts: {
     readonly plan: Artifact | null;
@@ -401,7 +407,9 @@ function ArtifactsTab({
     readonly executionDag: Artifact | null;
   };
   readonly node: PlanAgentGraphNode | null;
+  readonly planEvents: readonly PlanJsonlEvent[];
 }) {
+  const findings = latestFindingsForNode(planEvents, node?.id ?? null);
   const items = [
     artifactItem("plan.md", artifacts.plan),
     ...artifacts.phasePlans.map((artifact) => artifactItem(`plan-${artifact.fm.phase ?? "?"}.md`, artifact)),
@@ -412,6 +420,14 @@ function ArtifactsTab({
 
   return (
     <div className="grid gap-2">
+      {findings && (
+        <div className="rounded-[7px] border border-line bg-bg p-2">
+          <div className="font-mono text-[11.5px] text-fg-mute">returned findings</div>
+          <pre className="mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-fg-body">
+            {truncate(findings.body, 6000)}
+          </pre>
+        </div>
+      )}
       {node?.artifactPath && (
         <div className="rounded-[7px] border border-line bg-bg p-2 font-mono text-[11.5px] text-fg-body">
           <div className="text-fg-mute">node artifact</div>
@@ -630,7 +646,12 @@ function filterEventsForNode(events: readonly AgentEvent[], nodeId: string): rea
 }
 
 function isPlanNodeEvent(event: PlanJsonlEvent, nodeId: string): boolean {
-  if (event.kind === "plan_agent_node_started" || event.kind === "plan_agent_node_ended") {
+  if (
+    event.kind === "plan_agent_node_started" ||
+    event.kind === "plan_agent_node_findings" ||
+    event.kind === "plan_agent_node_usage" ||
+    event.kind === "plan_agent_node_ended"
+  ) {
     return event.nodeId === nodeId;
   }
   if (nodeId === "planner") return event.kind === "plan_system" || event.kind === "plan_usage";
@@ -645,11 +666,29 @@ function describePlanEvent(event: PlanJsonlEvent): string {
       return `usage ${formatCompact(event.cumulativeInputTokens)} in`;
     case "plan_agent_node_started":
       return `${event.title} started`;
+    case "plan_agent_node_findings":
+      return `${event.nodeId} returned findings`;
+    case "plan_agent_node_usage":
+      return `${event.nodeId} usage ${formatCompact(event.inputTokens)} in · $${event.costUsd.toFixed(4)}`;
     case "plan_agent_node_ended":
       return `${event.nodeId} ${event.status}`;
     default:
       return event.kind;
   }
+}
+
+function latestFindingsForNode(
+  events: readonly PlanJsonlEvent[],
+  nodeId: string | null,
+): Extract<PlanJsonlEvent, { kind: "plan_agent_node_findings" }> | null {
+  if (nodeId === null) return null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind === "plan_agent_node_findings" && event.nodeId === nodeId) {
+      return event;
+    }
+  }
+  return null;
 }
 
 function artifactItem(name: string, artifact: Artifact | null): { name: string; artifact: Artifact } | null {
@@ -716,6 +755,23 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+}
+
+function useNowMs(enabled: boolean): number {
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const interval = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(interval);
+  }, [enabled]);
+  return nowMs;
+}
+
+function runningDurationMs(node: PlanAgentGraphNode, nowMs: number): number {
+  if (node.startedAt === null) return node.durationMs;
+  const startedAt = Date.parse(node.startedAt);
+  if (!Number.isFinite(startedAt)) return node.durationMs;
+  return Math.max(node.durationMs, nowMs - startedAt);
 }
 
 function formatTime(date: Date): string {

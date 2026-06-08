@@ -104,8 +104,22 @@ export type PlanJsonlEvent =
       sessionId: string;
       model: string;
       tools: readonly string[];
-      artifactPath: string;
+      artifactPath: string | null;
       dependsOn: readonly string[];
+    }
+  | {
+      kind: "plan_agent_node_findings";
+      ts: string;
+      nodeId: string;
+      body: string;
+    }
+  | {
+      kind: "plan_agent_node_usage";
+      ts: string;
+      nodeId: string;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
     }
   | {
       kind: "plan_agent_node_ended";

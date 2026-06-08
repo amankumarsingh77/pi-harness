@@ -537,6 +537,10 @@ function renderNonToolMessage(e: AgentEvent): string {
       return `research started · ${e.subagent}`;
     case "plan_subagent_ended":
       return `research ${e.ok ? "complete" : "failed"} · ${e.subagent}`;
+    case "plan_agent_node_findings":
+      return `findings returned · ${e.nodeId}`;
+    case "plan_agent_node_usage":
+      return `node usage · ${e.nodeId} · ${formatTokens(e.inputTokens, e.outputTokens)} · ${formatUsd(e.costUsd)}`;
     case "plan_revision_requested":
       return "plan revision requested by user";
     case "plan_usage":

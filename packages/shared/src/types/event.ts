@@ -234,8 +234,20 @@ export type AgentEvent =
       sessionId: string;
       model: string;
       tools: readonly string[];
-      artifactPath: string;
+      artifactPath: string | null;
       dependsOn: readonly string[];
+    })
+  | (AgentEventBase & {
+      kind: "plan_agent_node_findings";
+      nodeId: string;
+      body: string;
+    })
+  | (AgentEventBase & {
+      kind: "plan_agent_node_usage";
+      nodeId: string;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
     })
   | (AgentEventBase & {
       kind: "plan_agent_node_ended";

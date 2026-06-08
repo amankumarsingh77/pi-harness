@@ -254,6 +254,10 @@ export async function runChatTurn(opts: RunChatTurnOpts): Promise<void> {
         break;
       }
 
+      case "usage_update": {
+        break;
+      }
+
       default:
         break;
     }

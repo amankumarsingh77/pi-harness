@@ -39,6 +39,10 @@ export type PiBridgeEvent =
   | { kind: "tool_result"; callId: string; tool: string; ok: boolean; output?: unknown }
   | { kind: "log"; level: "info" | "warn" | "error"; text: string }
   | {
+      kind: "usage_update";
+      usage: { inputTokens: number; outputTokens: number; costUsd: number };
+    }
+  | {
       kind: "turn_end";
       usage: { inputTokens: number; outputTokens: number; costUsd: number };
     }
@@ -174,6 +178,8 @@ export async function createAgentSession(
   };
   let pending: Pending | null = null;
   const pendingToolCalls = new Map<string, string[]>();
+  let completedUsage = zeroPromptUsage();
+  let lastEmittedUsage = zeroPromptUsage();
 
   const settle = (fn: (p: Pending) => void): void => {
     if (!pending || pending.settled) return;
@@ -181,6 +187,12 @@ export async function createAgentSession(
     const p = pending;
     pending = null;
     fn(p);
+  };
+
+  const emitUsageUpdate = (usage: PromptUsage): void => {
+    if (!pending || !hasUsage(usage) || sameUsage(usage, lastEmittedUsage)) return;
+    lastEmittedUsage = usage;
+    opts.onEvent({ kind: "usage_update", usage });
   };
 
   sdkSession.subscribe((event: AgentSessionEvent) => {
@@ -192,6 +204,9 @@ export async function createAgentSession(
       }
       case "message_update": {
         const ame = event.assistantMessageEvent;
+        if ("partial" in ame) {
+          emitUsageUpdate(addUsage(completedUsage, usageFromAssistantMessage(ame.partial)));
+        }
         if (ame.type === "text_delta") {
           opts.onEvent({ kind: "message_delta", text: ame.delta });
         } else if (ame.type === "thinking_delta") {
@@ -211,6 +226,12 @@ export async function createAgentSession(
           }
         }
         // thinking_delta intentionally dropped (parking-lot per phase-2.md).
+        return;
+      }
+      case "message_end": {
+        if (!isAssistantWithUsage(event.message)) return;
+        completedUsage = addUsage(completedUsage, usageFromAssistantMessage(event.message));
+        emitUsageUpdate(completedUsage);
         return;
       }
       case "tool_execution_start": {
@@ -251,6 +272,7 @@ export async function createAgentSession(
         // unwinds; runChatTurn's `settled` guard drops the later turn_end.
         const failed = lastAssistantError(event.messages);
         const usage = sumAssistantUsage(event.messages);
+        emitUsageUpdate(usage);
         if (failed) {
           opts.onEvent({ kind: "error", text: failed });
         } else {
@@ -270,6 +292,8 @@ export async function createAgentSession(
         throw new Error("agent-session: prompt already in flight");
       }
       const promise = new Promise<PromptUsage>((resolve, reject) => {
+        completedUsage = zeroPromptUsage();
+        lastEmittedUsage = zeroPromptUsage();
         pending = { resolve, reject, turnCount: 0, settled: false };
       });
       try {
@@ -446,17 +470,12 @@ function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
 }
 
 function sumAssistantUsage(messages: AgentMessage[]): PromptUsage {
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd = 0;
+  let usage = zeroPromptUsage();
   for (const m of messages) {
     if (!isAssistantWithUsage(m)) continue;
-    const usage: Usage = m.usage;
-    inputTokens += usage.input ?? 0;
-    outputTokens += usage.output ?? 0;
-    costUsd += usage.cost?.total ?? 0;
+    usage = addUsage(usage, usageFromAssistantMessage(m));
   }
-  return { inputTokens, outputTokens, costUsd };
+  return usage;
 }
 
 function isAssistantWithUsage(m: AgentMessage): m is AssistantMessage {
@@ -466,5 +485,39 @@ function isAssistantWithUsage(m: AgentMessage): m is AssistantMessage {
     "role" in m &&
     (m as { role: unknown }).role === "assistant" &&
     "usage" in m
+  );
+}
+
+function usageFromAssistantMessage(message: AssistantMessage | undefined): PromptUsage {
+  if (message === undefined) return zeroPromptUsage();
+  const usage: Usage | undefined = message.usage;
+  return {
+    inputTokens: usage?.input ?? 0,
+    outputTokens: usage?.output ?? 0,
+    costUsd: usage?.cost?.total ?? 0,
+  };
+}
+
+function addUsage(left: PromptUsage, right: PromptUsage): PromptUsage {
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    costUsd: left.costUsd + right.costUsd,
+  };
+}
+
+function zeroPromptUsage(): PromptUsage {
+  return { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+}
+
+function hasUsage(usage: PromptUsage): boolean {
+  return usage.inputTokens > 0 || usage.outputTokens > 0 || usage.costUsd > 0;
+}
+
+function sameUsage(left: PromptUsage, right: PromptUsage): boolean {
+  return (
+    left.inputTokens === right.inputTokens &&
+    left.outputTokens === right.outputTokens &&
+    left.costUsd === right.costUsd
   );
 }

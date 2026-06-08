@@ -107,6 +107,8 @@ function tagForEvent(event: AgentEvent): string {
     case "plan_subagent_started":
     case "plan_subagent_ended":
     case "plan_agent_node_started":
+    case "plan_agent_node_findings":
+    case "plan_agent_node_usage":
     case "plan_agent_node_ended":
     case "plan_revision_requested":
     case "plan_usage":
@@ -169,6 +171,10 @@ function messageForEvent(event: AgentEvent): string {
       return `${event.subagent} ${event.ok ? "completed" : "failed"}`;
     case "plan_agent_node_started":
       return `${event.title} started`;
+    case "plan_agent_node_findings":
+      return `${event.nodeId} returned findings`;
+    case "plan_agent_node_usage":
+      return `${event.nodeId} usage · ${event.inputTokens} in`;
     case "plan_agent_node_ended":
       return `${event.nodeId} ${event.status}`;
     case "plan_revision_requested":

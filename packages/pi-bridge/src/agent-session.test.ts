@@ -132,6 +132,71 @@ describe("createAgentSession", () => {
     expect(thinking[0] && "text" in thinking[0] && thinking[0].text).toBe("let me reason");
   });
 
+  it("emits usage_update from streaming assistant partial usage", async () => {
+    const adapter = createFakeAdapter();
+    const events: PiBridgeEvent[] = [];
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: (e) => events.push(e) },
+      adapter,
+    );
+
+    const p = session.prompt("hi");
+    adapter.emit({
+      type: "message_update",
+      message: { role: "assistant" } as never,
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "hello",
+        partial: assistantWithUsage(10, 2, 0.0004),
+      },
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(10, 2, 0.0004)],
+    } as AgentSessionEvent);
+    await p;
+
+    expect(events.filter((e) => e.kind === "usage_update")).toEqual([
+      { kind: "usage_update", usage: { inputTokens: 10, outputTokens: 2, costUsd: 0.0004 } },
+    ]);
+  });
+
+  it("emits cumulative usage_update across finalized assistant messages", async () => {
+    const adapter = createFakeAdapter();
+    const events: PiBridgeEvent[] = [];
+    const session = await createAgentSession(
+      { cwd: "/tmp", model: baseModel, onEvent: (e) => events.push(e) },
+      adapter,
+    );
+
+    const p = session.prompt("multi");
+    adapter.emit({
+      type: "message_end",
+      message: assistantWithUsage(4, 1, 0.001),
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "message_update",
+      message: { role: "assistant" } as never,
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "next",
+        partial: assistantWithUsage(6, 3, 0.002),
+      },
+    } as AgentSessionEvent);
+    adapter.emit({
+      type: "agent_end",
+      messages: [assistantWithUsage(4, 1, 0.001), assistantWithUsage(6, 3, 0.002)],
+    } as AgentSessionEvent);
+    await p;
+
+    expect(events.filter((e) => e.kind === "usage_update")).toEqual([
+      { kind: "usage_update", usage: { inputTokens: 4, outputTokens: 1, costUsd: 0.001 } },
+      { kind: "usage_update", usage: { inputTokens: 10, outputTokens: 4, costUsd: 0.003 } },
+    ]);
+  });
+
   it("tool round-trip: emits tool_call and tool_result with structured payloads", async () => {
     const adapter = createFakeAdapter();
     const events: PiBridgeEvent[] = [];

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "@pi-harness/shared";
@@ -188,6 +188,154 @@ describe("runPlan", () => {
       expect.objectContaining({
         ok: false,
         error: "role is not planner-spawnable: claim-verifier",
+      }),
+    ]);
+  });
+
+  it("returns dynamic child findings directly to the planner without writing a research artifact", async () => {
+    const spawnResults: unknown[] = [];
+    const planEvents: unknown[] = [];
+    const bus = new PlanEventBus({
+      eventStore: new InMemoryEventStore() as never,
+      jsonl: new JsonlWriter(join(cwd, ".harness", "T-1", "plan.jsonl")),
+      runId: "r-1",
+      taskId: "T-1",
+    });
+    const originalPublish = bus.publish.bind(bus);
+    bus.publish = async (input) => {
+      planEvents.push(input);
+      return originalPublish(input);
+    };
+
+    const result = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus,
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async (opts) => ({
+        async prompt(text) {
+          const returnFindings = opts.customTools?.find((tool) => tool.name === "return_findings");
+          if (returnFindings) {
+            await returnFindings.execute(
+              "return-findings",
+              { body: "# Findings\n\nPattern: apps/orchestrator/src/agents/plan.ts:152" },
+              undefined,
+              undefined,
+              undefined as never,
+            );
+            return { costUsd: 0.02, inputTokens: 50, outputTokens: 20 };
+          }
+          expect(text).toContain("findings bodies returned by spawn_plan_agent");
+          const spawn = opts.customTools?.find((tool) => tool.name === "spawn_plan_agent");
+          if (!spawn) throw new Error("spawn_plan_agent tool not registered");
+          const spawnResult = await spawn.execute(
+            "spawn",
+            {
+              role: "codebase-scout",
+              title: "Scout codebase",
+              lane: "research",
+              instructions: "Find the relevant files.",
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+          spawnResults.push(spawnResult.details);
+          return { costUsd: 0.01, inputTokens: 10, outputTokens: 5 };
+        },
+        async abort() {},
+        async close() {},
+      }),
+      ticketTitle: "Direct findings",
+      ticketDescription: "Planner should consume returned child findings.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnResults).toEqual([
+      expect.objectContaining({
+        ok: true,
+        findingsBody: "# Findings\n\nPattern: apps/orchestrator/src/agents/plan.ts:152",
+      }),
+    ]);
+    expect(planEvents).toContainEqual(
+      expect.objectContaining({
+        kind: "plan_agent_node_started",
+        artifactPath: null,
+        tools: expect.arrayContaining(["return_findings"]),
+      }),
+    );
+    expect(planEvents).toContainEqual(
+      expect.objectContaining({
+        kind: "plan_agent_node_findings",
+        body: "# Findings\n\nPattern: apps/orchestrator/src/agents/plan.ts:152",
+      }),
+    );
+    const researchFiles = await readdir(join(cwd, ".harness", "T-1", "research"));
+    expect(researchFiles.sort()).toEqual(
+      [...PLAN_RESEARCH_SUBAGENTS].map((subagent) => `${subagent}.md`).sort(),
+    );
+  });
+
+  it("fails dynamic child agents that exit without returning findings", async () => {
+    const spawnResults: unknown[] = [];
+
+    const result = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async (opts) => ({
+        async prompt() {
+          if (opts.customTools?.some((tool) => tool.name === "return_findings")) {
+            return { costUsd: 0.02, inputTokens: 50, outputTokens: 20 };
+          }
+          const spawn = opts.customTools?.find((tool) => tool.name === "spawn_plan_agent");
+          if (!spawn) throw new Error("spawn_plan_agent tool not registered");
+          const spawnResult = await spawn.execute(
+            "spawn",
+            {
+              role: "codebase-scout",
+              title: "Scout codebase",
+              lane: "research",
+              instructions: "Find the relevant files.",
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+          spawnResults.push(spawnResult.details);
+          return { costUsd: 0.01, inputTokens: 10, outputTokens: 5 };
+        },
+        async abort() {},
+        async close() {},
+      }),
+      ticketTitle: "Missing findings",
+      ticketDescription: "Planner should know when child findings are absent.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnResults).toEqual([
+      expect.objectContaining({
+        ok: false,
+        error: "child agent completed without returning findings",
       }),
     ]);
   });

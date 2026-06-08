@@ -150,7 +150,7 @@ function buildInitialPrompt(cwd: string, taskId: string): string {
     `1. Read design.md: ${paths.design}.`,
     `2. Read spec.md: ${paths.spec}.`,
     `3. Use spawn_plan_agent to launch the child agents you need. Start with a codebase-scout style child for local context, then spawn any focused follow-ups required by the design/spec.`,
-    `4. Read child findings from ${paths.researchDir} as each child returns. Do not write final plan artifacts until you have enough child evidence.`,
+    "4. Use the findings bodies returned by spawn_plan_agent. Do not write final plan artifacts until you have enough child evidence.",
     `5. Update blast-radius.yaml at ${paths.blastRadius} if the child findings reveal concrete impacted areas.`,
     `6. Author plan.md at ${paths.plan}, phase plans as ${paths.phasePlans}, scenarios.yaml at ${paths.scenarios}, and execution-dag.yaml at ${paths.executionDag} per the protocol in your system prompt.`,
     "7. Call mark_ready when all authored artifacts are complete and you have cross-checked your citations.",
@@ -334,7 +334,7 @@ async function runPlannerStage(
     // forwarder in this file. Skip turn_end / error (control-plane only) and
     // write_findings (we publish richer bus events for that lifecycle).
     const cvForward = (e: PiBridgeEvent): void => {
-      if (e.kind === "turn_end" || e.kind === "error") return;
+      if (e.kind === "turn_end" || e.kind === "error" || e.kind === "usage_update") return;
       const base = { runId: opts.runId, taskId: opts.taskId };
       const subagent = "claim-verifier";
       let event: AgentEvent | null = null;
@@ -532,7 +532,7 @@ async function runPlannerStage(
         // tag — the dashboard treats untagged events as planner output).
         // Skip turn_end / error (internal) and mark_ready (planner publishes
         // richer plan_* events for that one).
-        if (e.kind === "turn_end" || e.kind === "error") return;
+        if (e.kind === "turn_end" || e.kind === "error" || e.kind === "usage_update") return;
         if (
           (e.kind === "tool_call" || e.kind === "tool_result") &&
           (

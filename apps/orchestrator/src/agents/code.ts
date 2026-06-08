@@ -416,7 +416,7 @@ function nodeById(dag: ExecutionDag, nodeId: string): ExecutionDagNode {
 }
 
 function forwardCodeBridgeEvent(opts: CodeOpts, nodeId: string, event: PiBridgeEvent): void {
-  if (event.kind === "turn_end" || event.kind === "error") return;
+  if (event.kind === "turn_end" || event.kind === "error" || event.kind === "usage_update") return;
   const base = { runId: opts.runId, taskId: opts.taskId, subagent: nodeId };
   let next: AgentEvent | null = null;
   if (event.kind === "message_delta") {

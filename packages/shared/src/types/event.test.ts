@@ -73,16 +73,49 @@ describe("plan_* AgentEvent variants", () => {
       lane: "local",
       sessionId: "s-node-1",
       model: "crofai/kimi-k2.6",
-      tools: ["read", "grep", "write_findings"],
-      artifactPath: ".harness/T-001/research/node-1.md",
+      tools: ["read", "grep", "return_findings"],
+      artifactPath: null,
       dependsOn: ["planner"],
     };
     if (e.kind === "plan_agent_node_started") {
       expect(e.nodeId).toBe("node-1");
       expect(e.parentId).toBe("planner");
-      expect(e.tools).toContain("write_findings");
+      expect(e.tools).toContain("return_findings");
+      expect(e.artifactPath).toBeNull();
     } else {
       expect.fail("expected plan_agent_node_started");
+    }
+  });
+
+  it("plan_agent_node_findings carries returned dynamic child findings", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "plan_agent_node_findings",
+      nodeId: "node-1",
+      body: "# Findings\n\nPattern: apps/orchestrator/src/agents/plan.ts:152",
+    };
+    if (e.kind === "plan_agent_node_findings") {
+      expect(e.nodeId).toBe("node-1");
+      expect(e.body).toContain("Pattern:");
+    } else {
+      expect.fail("expected plan_agent_node_findings");
+    }
+  });
+
+  it("plan_agent_node_usage carries live dynamic child usage", () => {
+    const e: AgentEvent = {
+      ...base,
+      kind: "plan_agent_node_usage",
+      nodeId: "node-1",
+      inputTokens: 300,
+      outputTokens: 120,
+      costUsd: 0.07,
+    };
+    if (e.kind === "plan_agent_node_usage") {
+      expect(e.nodeId).toBe("node-1");
+      expect(e.inputTokens).toBe(300);
+    } else {
+      expect.fail("expected plan_agent_node_usage");
     }
   });
 

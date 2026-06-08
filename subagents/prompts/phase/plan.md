@@ -16,7 +16,7 @@ You are running in a git worktree at the current working directory (`<cwd>`). Re
 2. `<cwd>/.harness/<taskId>/spec.md` — the brainstorm phase's verification scenarios + requirements.
 3. `<cwd>/.harness/<taskId>/blast-radius.yaml` — starts as an empty draft. Update it after child findings reveal concrete impacted areas.
 4. Spawn child agents with `spawn_plan_agent`. Start with a broad codebase-scout style child, then spawn focused children for integration edges, precedents, UI risk, tests, or any other area the design/spec makes material.
-5. Read every child findings file returned by `spawn_plan_agent` before writing final artifacts.
+5. Use every child findings body returned by `spawn_plan_agent` before writing final artifacts.
 
 ## Outputs
 
@@ -117,7 +117,7 @@ waves:
 
 You have access to:
 - **`read`, `grep`, `find`** — to ground your plan in the actual codebase. Use these freely on any file in the worktree.
-- **`spawn_plan_agent`** — to run a bounded child planning agent from a registered template. You choose the role, title, lane, scoped instructions, and dependencies; the harness controls the tool permissions. The tool returns the child findings path. Read that file before relying on the child.
+- **`spawn_plan_agent`** — to run a bounded child planning agent from a registered template. You choose the role, title, lane, scoped instructions, and dependencies; the harness controls the tool permissions. The tool returns the child findings body directly; use that returned evidence before relying on the child.
 - **`write_plan_artifact`** — to author only plan-phase artifacts: `plan`, `phase-plan`, `scenarios`, `blast-radius`, and `execution-dag`. Pass artifact bodies only; do not include YAML frontmatter.
 - **`mark_ready`** — call when plan.md, every referenced plan-N.md, scenarios.yaml, execution-dag.yaml, and blast-radius.yaml are complete. The harness validates and either accepts (status flips to `ready`, your turn ends) or returns a structured error describing what's missing. Fix and call again.
 

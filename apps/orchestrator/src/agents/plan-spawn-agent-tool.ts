@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Type, type Static, type TSchema } from "typebox";
 import type { AgentEvent } from "@pi-harness/shared";
 import type { AgentSession, PiBridgeEvent, ToolDefinition } from "@pi-harness/pi-bridge";
@@ -10,10 +9,16 @@ import { mkEvent } from "../domain/events.js";
 import type { EventStore } from "../adapters/event-store.js";
 import type { PlanEventBus } from "./plan-event-bus.js";
 import { makeGitHistoryTool } from "./git-history-tool.js";
-import { makeWriteFindingsTool } from "./write-findings-tool.js";
 import { makeSubagentFooter } from "./subagent-footer.js";
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
+import { makeReturnFindingsTool, type ReturnedFindingsState } from "./return-findings-tool.js";
+
+type NodeUsage = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly costUsd: number;
+};
 
 type ToolResult<T> = {
   readonly content: { readonly type: "text"; readonly text: string }[];
@@ -56,7 +61,8 @@ export type SpawnPlanAgentDetails =
   | {
       readonly ok: true;
       readonly nodeId: string;
-      readonly artifactPath: string;
+      readonly artifactPath: null;
+      readonly findingsBody: string;
       readonly costUsd: number;
       readonly inputTokens: number;
       readonly outputTokens: number;
@@ -124,8 +130,8 @@ async function runSpawnedPlanAgent(args: {
   }
 
   const sessionId = `psa_${randomUUID()}`;
-  const artifactPath = join(args.cwd, ".harness", args.taskId, "research", `${args.nodeId}.md`);
   const startedAt = Date.now();
+  const findingsState: ReturnedFindingsState = { body: null };
   const graphifyTools = args.graphify
     ? makeGraphifyTools({
         graphify: args.graphify,
@@ -134,15 +140,13 @@ async function runSpawnedPlanAgent(args: {
     : [];
   const customTools = [
     ...(def.customTools?.includes("git_history") ? [makeGitHistoryTool({ cwd: args.cwd })] : []),
-    ...(def.customTools?.includes("write_findings")
-      ? [makeWriteFindingsTool({ cwd: args.cwd, taskId: args.taskId, subagent: args.nodeId })]
-      : []),
+    makeReturnFindingsTool(findingsState),
     ...graphifyTools,
   ];
   const toolNames = [
     ...def.allowedTools,
     ...(def.customTools?.includes("git_history") ? ["git_history"] : []),
-    ...(def.customTools?.includes("write_findings") ? ["write_findings"] : []),
+    "return_findings",
     ...graphifyTools.map((tool) => tool.name),
   ];
 
@@ -156,7 +160,7 @@ async function runSpawnedPlanAgent(args: {
     sessionId,
     model: `${args.phaseModel.provider}/${args.phaseModel.model}`,
     tools: toolNames,
-    artifactPath,
+    artifactPath: null,
     dependsOn: args.params.dependsOn ?? ["planner"],
   });
 
@@ -164,6 +168,11 @@ async function runSpawnedPlanAgent(args: {
   let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let ok = false;
   let error: string | undefined;
+  const publishUsage = createNodeUsageForwarder({
+    bus: args.bus,
+    nodeId: args.nodeId,
+    minIntervalMs: 1_500,
+  });
   const abort = (): void => {
     void session?.abort().catch(() => {});
   };
@@ -179,6 +188,7 @@ async function runSpawnedPlanAgent(args: {
         : {}),
       systemPrompt: `${readFileSync(def.promptPath, "utf8")}\n\n${makeSubagentFooter({
         hasGitHistory: def.customTools?.includes("git_history") === true,
+        findingsMode: "return",
       })}\n`,
       tools: toolNames,
       customTools,
@@ -188,14 +198,17 @@ async function runSpawnedPlanAgent(args: {
         taskId: args.taskId,
         nodeId: args.nodeId,
         event,
+        publishUsage,
       }),
     });
     usage = await session.prompt(childPrompt({
       taskId: args.taskId,
       nodeId: args.nodeId,
-      artifactPath,
       instructions: args.params.instructions,
     }));
+    if (findingsState.body === null) {
+      throw new Error("child agent completed without returning findings");
+    }
     ok = true;
     args.onUsage(usage);
   } catch (err) {
@@ -206,36 +219,87 @@ async function runSpawnedPlanAgent(args: {
     await session?.close().catch(() => {});
   }
 
-  await args.bus.publish({
-    kind: "plan_agent_node_ended",
-    nodeId: args.nodeId,
-    ok,
-    status: ok ? "succeeded" : "blocked",
-    durationMs: Date.now() - startedAt,
-    costUsd: usage.costUsd,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    ...(error !== undefined ? { error } : {}),
-  });
-
   if (!ok) {
+    await publishNodeEnded({
+      bus: args.bus,
+      nodeId: args.nodeId,
+      ok: false,
+      status: "blocked",
+      startedAt,
+      usage,
+      ...(error !== undefined ? { error } : {}),
+    });
     return {
       content: [{ type: "text", text: error ?? "child agent failed" }],
       details: { ok: false, nodeId: args.nodeId, error: error ?? "child agent failed" },
     };
   }
 
+  const findingsBody = findingsState.body;
+  if (findingsBody === null) {
+    return {
+      content: [{ type: "text", text: "child agent completed without returning findings" }],
+      details: {
+        ok: false,
+        nodeId: args.nodeId,
+        error: "child agent completed without returning findings",
+      },
+    };
+  }
+
+  await args.bus.publish({
+    kind: "plan_agent_node_findings",
+    nodeId: args.nodeId,
+    body: findingsBody,
+  });
+  await publishNodeEnded({
+    bus: args.bus,
+    nodeId: args.nodeId,
+    ok: true,
+    status: "succeeded",
+    startedAt,
+    usage,
+  });
+
   return {
-    content: [{ type: "text", text: `spawned ${args.nodeId}; findings: ${artifactPath}` }],
+    content: [
+      {
+        type: "text",
+        text: [`spawned ${args.nodeId}; findings returned directly:`, "", findingsBody].join("\n"),
+      },
+    ],
     details: {
       ok: true,
       nodeId: args.nodeId,
-      artifactPath,
+      artifactPath: null,
+      findingsBody,
       costUsd: usage.costUsd,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
     },
   };
+}
+
+async function publishNodeEnded(args: {
+  readonly bus: PlanEventBus;
+  readonly nodeId: string;
+  readonly ok: boolean;
+  readonly status: "succeeded" | "failed" | "blocked" | "cancelled";
+  readonly startedAt: number;
+  readonly usage: { readonly costUsd: number; readonly inputTokens: number; readonly outputTokens: number };
+  readonly error?: string;
+}): Promise<void> {
+  await args.bus.publish({
+    kind: "plan_agent_node_ended",
+    nodeId: args.nodeId,
+    ok: args.ok,
+    status: args.status,
+    durationMs: Date.now() - args.startedAt,
+    costUsd: args.usage.costUsd,
+    inputTokens: args.usage.inputTokens,
+    outputTokens: args.usage.outputTokens,
+    ...(args.error !== undefined ? { error: args.error } : {}),
+  });
 }
 
 function forwardChildEvent(args: {
@@ -244,7 +308,12 @@ function forwardChildEvent(args: {
   readonly taskId: string;
   readonly nodeId: string;
   readonly event: PiBridgeEvent;
+  readonly publishUsage: (usage: NodeUsage) => void;
 }): void {
+  if (args.event.kind === "usage_update") {
+    args.publishUsage(args.event.usage);
+    return;
+  }
   if (args.event.kind === "turn_end" || args.event.kind === "error") return;
   const base = { runId: args.runId, taskId: args.taskId };
   let event: AgentEvent | null = null;
@@ -275,16 +344,50 @@ function forwardChildEvent(args: {
   if (event) void args.eventStore.append(event).catch(() => {});
 }
 
+function createNodeUsageForwarder(args: {
+  readonly bus: PlanEventBus;
+  readonly nodeId: string;
+  readonly minIntervalMs: number;
+}): (usage: NodeUsage) => void {
+  let lastPublishedAt = 0;
+  let lastUsage: NodeUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  return (usage) => {
+    if (!hasUsage(usage) || sameUsage(usage, lastUsage)) return;
+    const now = Date.now();
+    if (lastPublishedAt > 0 && now - lastPublishedAt < args.minIntervalMs) return;
+    lastPublishedAt = now;
+    lastUsage = usage;
+    void args.bus.publish({
+      kind: "plan_agent_node_usage",
+      nodeId: args.nodeId,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd: usage.costUsd,
+    }).catch(() => {});
+  };
+}
+
+function hasUsage(usage: NodeUsage): boolean {
+  return usage.inputTokens > 0 || usage.outputTokens > 0 || usage.costUsd > 0;
+}
+
+function sameUsage(left: NodeUsage, right: NodeUsage): boolean {
+  return (
+    left.inputTokens === right.inputTokens &&
+    left.outputTokens === right.outputTokens &&
+    left.costUsd === right.costUsd
+  );
+}
+
 function childPrompt(args: {
   readonly taskId: string;
   readonly nodeId: string;
-  readonly artifactPath: string;
   readonly instructions: string;
 }): string {
   return [
     `You are a dynamically spawned plan child agent for task ${args.taskId}.`,
     `Node id: ${args.nodeId}.`,
-    `Persist findings with write_findings. The harness stores them at ${args.artifactPath}.`,
+    "Return findings directly to the parent planner with return_findings. Do not write a findings artifact.",
     "",
     "# Scoped assignment",
     "",

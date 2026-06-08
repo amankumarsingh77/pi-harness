@@ -32,6 +32,7 @@ export type CustomTool =
   | "pi_web_search"
   | "pi_web_fetch"
   | "write_findings"
+  | "return_findings"
   | "git_history"
   | "spawn_plan_agent"
   | "write_plan_artifact";

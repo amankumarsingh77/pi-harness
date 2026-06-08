@@ -25,6 +25,8 @@ type PlanEventKind =
   | "plan_subagent_started"
   | "plan_subagent_ended"
   | "plan_agent_node_started"
+  | "plan_agent_node_findings"
+  | "plan_agent_node_usage"
   | "plan_agent_node_ended"
   | "plan_revision_requested"
   | "plan_usage"
