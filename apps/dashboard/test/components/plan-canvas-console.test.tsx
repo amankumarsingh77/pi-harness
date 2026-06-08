@@ -53,6 +53,15 @@ describe("PlanCanvasConsole", () => {
     expect(within(graph).queryByText("scenarios.yaml")).toBeNull();
   });
 
+  it("keeps restart enabled for failed plan runs", () => {
+    renderCanvas({
+      taskStatus: "plan_failed",
+      runStatus: "failed",
+    });
+
+    expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled();
+  });
+
   it("hides scrollbars in expanded live log details", () => {
     renderCanvas({
       liveEvents: [

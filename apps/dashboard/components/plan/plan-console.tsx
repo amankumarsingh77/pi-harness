@@ -56,8 +56,9 @@ export function PlanConsole({
 }) {
   const planRun = [...runs].reverse().find((run) => run.phase === "plan") ?? null;
   const canRestart =
-    (task.status === "planning" || task.status === "plan_failed") &&
-    (planRun?.status === "running" || planRun?.status === "cancelled");
+    task.status === "plan_failed" ||
+    (task.status === "planning" &&
+      (planRun?.status === "running" || planRun?.status === "cancelled"));
   const preflight = useMemo(
     () => derivePreflightSummary({ research, planEvents, liveEvents, preflightSteps }),
     [research, planEvents, liveEvents, preflightSteps],

@@ -425,6 +425,35 @@ describe("http /api/tasks/:id/plan routes", () => {
     });
   });
 
+  it("plan restart accepts a failed plan run while task is plan_failed", async () => {
+    const t = await runs.createTask({ title: "restart-failed-plan" });
+    const wt = await makePlanWorktree(t.id, "draft", "draft");
+    await runs.updateTask(t.id, { status: "plan_failed", worktreePath: wt, branchName: `pi/${t.id}` });
+    const failedRun = await runs.createRun({ taskId: t.id, phase: "plan" });
+    await runs.updateRun(failedRun.id, {
+      status: "failed",
+      endedAt: new Date("2026-06-06T18:28:00.862Z"),
+      error: "planner recovery exhausted after 2 attempts",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/plan/restart`,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, archivedRunId: failedRun.id });
+    await expect(runs.getTask(t.id)).resolves.toMatchObject({ status: "planning" });
+    await expect(runs.getRun(failedRun.id)).resolves.toMatchObject({
+      status: "failed",
+      error: "planner recovery exhausted after 2 attempts",
+    });
+
+    const active = await runs.findActiveRun(t.id, "plan");
+    expect(active).not.toBeNull();
+  });
+
   it("serializes concurrent plan restart requests for the same task", async () => {
     const observedStore = new ObservedArtifactsStore();
     const testApp = buildServer({

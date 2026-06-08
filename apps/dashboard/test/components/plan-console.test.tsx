@@ -206,6 +206,7 @@ describe("PlanConsole", () => {
   it("surfaces a failed plan recovery summary before raw logs", () => {
     renderConsole({
       taskStatus: "plan_failed",
+      runStatus: "failed",
       headerStatus: "failed - restart to retry",
       iconKind: "blocked",
       lastBlocked: {
@@ -217,7 +218,7 @@ describe("PlanConsole", () => {
     const alert = screen.getByRole("alert", { name: "Plan recovery" });
     expect(alert).toHaveTextContent("Plan failed");
     expect(alert).toHaveTextContent("preflight agent failed to write findings");
-    expect(within(alert).getByRole("button", { name: "Restart" })).toBeInTheDocument();
+    expect(within(alert).getByRole("button", { name: "Restart" })).toBeEnabled();
   });
 
   it("omits the blocked banner when lastBlocked is null", () => {
@@ -340,6 +341,7 @@ function renderConsole(
     readonly lastBlocked?: { reason: string; ts: string } | null;
     readonly preflightSteps?: readonly PreflightStep[];
     readonly taskStatus?: Task["status"];
+    readonly runStatus?: Run["status"];
     readonly headerStatus?: string;
     readonly iconKind?: "intake" | "progress" | "review" | "done" | "blocked";
     readonly gate?: "running" | "awaiting_user";
@@ -353,7 +355,7 @@ function renderConsole(
       <PlanEventsProvider runId={null}>
         <PlanConsole
           task={task(opts.taskStatus)}
-          runs={[run()]}
+          runs={[run(opts.runStatus)]}
           gate={opts.gate ?? "running"}
           headerStatus={opts.headerStatus ?? "in progress"}
           iconKind={opts.iconKind ?? "progress"}
@@ -518,12 +520,12 @@ function task(status: Task["status"] = "planning"): Task {
   };
 }
 
-function run(): Run {
+function run(status: Run["status"] = "running"): Run {
   return {
     id: "00000000-0000-4000-8000-000000000010",
     taskId: "T-1",
     phase: "plan",
-    status: "running",
+    status,
     startedAt: new Date("2026-05-15T10:01:00Z"),
     endedAt: null,
     error: null,

@@ -91,8 +91,9 @@ export function PlanCanvasConsole({
   const flow = useMemo(() => layoutGraph(agentOnlyGraph(agentGraph)), [agentGraph]);
   const planRun = [...runs].reverse().find((run) => run.phase === "plan") ?? null;
   const canRestart =
-    (task.status === "planning" || task.status === "plan_failed") &&
-    (planRun?.status === "running" || planRun?.status === "cancelled");
+    task.status === "plan_failed" ||
+    (task.status === "planning" &&
+      (planRun?.status === "running" || planRun?.status === "cancelled"));
   const agentCount = agentGraph.nodes.filter((node) => node.kind === "agent").length;
   const runningCount = agentGraph.nodes.filter((node) => node.status === "running").length;
   const artifactCount = [

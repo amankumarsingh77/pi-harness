@@ -400,15 +400,16 @@ export class TaskWorkflowService {
     note?: string,
   ): Promise<{ readonly ok: true; readonly archivedRunId: string; readonly newRunId: string }> {
     return this.runExclusive(taskId, async () => {
-      const task = await this.taskInStatusWithWorktree(taskId, "planning");
+      const task = await this.taskInPlanRestartStatusWithWorktree(taskId);
       await this.cancelAndDrain(task.id);
       const restartRun =
         (await this.deps.runs.findActiveRun(task.id, "plan")) ??
-        (await this.deps.runs.findLatestRun(task.id, "plan", "cancelled"));
+        (await this.deps.runs.findLatestRun(task.id, "plan", "cancelled")) ??
+        (await this.deps.runs.findLatestRun(task.id, "plan", "failed"));
       if (!restartRun) {
-        throw new WorkflowConflictError("no_active_run", "no active or cancelled plan run to restart");
+        throw new WorkflowConflictError("no_active_run", "no active, cancelled, or failed plan run to restart");
       }
-      if (restartRun.status !== "cancelled") {
+      if (restartRun.status === "pending" || restartRun.status === "running") {
         await this.deps.runs.updateRun(restartRun.id, {
           status: "cancelled",
           endedAt: new Date(),
@@ -445,6 +446,9 @@ export class TaskWorkflowService {
         runId: newRun.id,
         inputs,
       });
+      if (task.status === "plan_failed") {
+        await this.deps.runs.updateTask(task.id, { status: "planning", retryCount: 0 });
+      }
       this.enqueue(task.id);
       return { ok: true, archivedRunId: restartRun.id, newRunId: newRun.id };
     });
@@ -876,6 +880,19 @@ export class TaskWorkflowService {
       throw new WorkflowConflictError(
         code,
         `task is in ${task.status}; action only applies during ${phaseLabel}`,
+      );
+    }
+    return this.requireWorktree(task);
+  }
+
+  private async taskInPlanRestartStatusWithWorktree(
+    taskId: string,
+  ): Promise<Task & { readonly worktreePath: string }> {
+    const task = await this.deps.runs.getTask(taskId);
+    if (task.status !== "planning" && task.status !== "plan_failed") {
+      throw new WorkflowConflictError(
+        "not_planning",
+        `task is in ${task.status}; action only applies during planning or plan_failed`,
       );
     }
     return this.requireWorktree(task);
