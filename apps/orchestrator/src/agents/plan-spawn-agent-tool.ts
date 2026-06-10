@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Type, type Static, type TSchema } from "typebox";
 import type { AgentEvent } from "@pi-harness/shared";
-import type { AgentSession, PiBridgeEvent, ToolDefinition } from "@pi-harness/pi-bridge";
+import type {
+  AgentSession,
+  AgentSessionOptions,
+  PiBridgeEvent,
+} from "@pi-harness/pi-bridge";
 import { getSubagent } from "@pi-harness/subagents";
 import type { PhaseModelConfig } from "@pi-harness/shared";
 import { mkEvent } from "../domain/events.js";
@@ -13,6 +17,10 @@ import { makeSubagentFooter } from "./subagent-footer.js";
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
 import { makeReturnFindingsTool, type ReturnedFindingsState } from "./return-findings-tool.js";
+import type {
+  AgentSessionOptionsWithoutSessionPath,
+  ManagedSessionFactory,
+} from "../runner/phase-session-manager.js";
 
 type NodeUsage = {
   readonly inputTokens: number;
@@ -39,15 +47,7 @@ type ToolLike<TParams extends TSchema, TDetails> = {
   ) => Promise<ToolResult<TDetails>>;
 };
 
-type CreateAgentSessionFn = (opts: {
-  cwd: string;
-  model: { provider: string; model: string };
-  thinkingLevel?: PhaseModelConfig["thinkingLevel"];
-  systemPrompt?: string;
-  customTools?: ToolDefinition[];
-  tools?: string[];
-  onEvent: (event: PiBridgeEvent) => void;
-}) => Promise<AgentSession>;
+type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
 const SpawnPlanAgentParams = Type.Object({
   role: Type.String({ minLength: 1 }),
@@ -81,6 +81,7 @@ export function makeSpawnPlanAgentTool(deps: {
   readonly bus: PlanEventBus;
   readonly eventStore: EventStore;
   readonly createAgentSession: CreateAgentSessionFn;
+  readonly sessionFactory?: ManagedSessionFactory;
   readonly graphify?: GraphifyService;
   readonly graphifyQueryBudget?: number;
   readonly parentSignal?: AbortSignal;
@@ -116,6 +117,7 @@ async function runSpawnedPlanAgent(args: {
   readonly bus: PlanEventBus;
   readonly eventStore: EventStore;
   readonly createAgentSession: CreateAgentSessionFn;
+  readonly sessionFactory?: ManagedSessionFactory;
   readonly graphify?: GraphifyService;
   readonly graphifyQueryBudget?: number;
   readonly parentSignal?: AbortSignal;
@@ -180,7 +182,7 @@ async function runSpawnedPlanAgent(args: {
   args.parentSignal?.addEventListener("abort", abort, { once: true });
   args.signal?.addEventListener("abort", abort, { once: true });
   try {
-    session = await args.createAgentSession({
+    const sessionOpts: AgentSessionOptionsWithoutSessionPath = {
       cwd: args.cwd,
       model: { provider: args.phaseModel.provider, model: args.phaseModel.model },
       ...(args.phaseModel.thinkingLevel !== "off"
@@ -200,7 +202,10 @@ async function runSpawnedPlanAgent(args: {
         event,
         publishUsage,
       }),
-    });
+    };
+    session = args.sessionFactory
+      ? await args.sessionFactory.open({ kind: "plan-child", nodeId: args.nodeId }, sessionOpts)
+      : await args.createAgentSession(sessionOpts);
     usage = await session.prompt(childPrompt({
       taskId: args.taskId,
       nodeId: args.nodeId,

@@ -22,6 +22,10 @@ import { mkEvent } from "../domain/events.js";
 import type { ArtifactsStore } from "./artifacts-store.js";
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
+import type {
+  AgentSessionOptionsWithoutSessionPath,
+  ManagedSessionFactory,
+} from "../runner/phase-session-manager.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -33,6 +37,7 @@ export type CodeOpts = {
   eventStore: EventStore;
   phaseModel: PhaseModelConfig;
   createAgentSession: CreateAgentSessionFn;
+  sessionFactory?: ManagedSessionFactory;
   graphify?: GraphifyService;
   graphifyQueryBudget?: number;
   ticketTitle?: string;
@@ -319,14 +324,13 @@ async function runOneNode(args: {
         })
       : [];
     await mkdir(join(opts.cwd, ".harness", opts.taskId, "code-sessions"), { recursive: true });
-    session = await opts.createAgentSession({
+    const sessionOpts: AgentSessionOptionsWithoutSessionPath = {
       cwd: opts.cwd,
       model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
       ...(opts.phaseModel.thinkingLevel !== "off"
         ? { thinkingLevel: opts.phaseModel.thinkingLevel }
         : {}),
       systemPrompt,
-      sessionPath: join(opts.cwd, ".harness", opts.taskId, "code-sessions", `${node.id}.jsonl`),
       tools: [
         ...def.allowedTools,
         ...graphifyTools.map((tool) => tool.name),
@@ -336,7 +340,13 @@ async function runOneNode(args: {
         if (event.kind === "message_delta") transcript += event.text;
         forwardCodeBridgeEvent(opts, node.id, event);
       },
-    });
+    };
+    session = opts.sessionFactory
+      ? await opts.sessionFactory.open({ kind: "code-node", nodeId: node.id }, sessionOpts)
+      : await opts.createAgentSession({
+          ...sessionOpts,
+          sessionPath: join(opts.cwd, ".harness", opts.taskId, "code-sessions", `${node.id}.jsonl`),
+        });
 
     if (opts.signal?.aborted) {
       await session.abort().catch(() => {});
