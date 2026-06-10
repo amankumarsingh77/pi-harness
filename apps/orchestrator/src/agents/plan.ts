@@ -39,6 +39,10 @@ import {
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
 import { makeSpawnPlanAgentTool } from "./plan-spawn-agent-tool.js";
+import type {
+  AgentSessionOptionsWithoutSessionPath,
+  ManagedSessionFactory,
+} from "../runner/phase-session-manager.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -59,6 +63,7 @@ export type PlanOpts = {
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
+  sessionFactory?: ManagedSessionFactory;
   graphify?: GraphifyService;
   graphifyQueryBudget?: number;
   ticketTitle: string;
@@ -374,7 +379,7 @@ async function runPlannerStage(
         })
       : [];
     try {
-      cvSession = await opts.createAgentSession({
+      const cvSessionOpts: AgentSessionOptionsWithoutSessionPath = {
         cwd: opts.cwd,
         model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
         ...(opts.phaseModel.thinkingLevel !== "off"
@@ -395,7 +400,10 @@ async function runPlannerStage(
           ...cvGraphifyTools,
         ],
         onEvent: cvForward,
-      });
+      };
+      cvSession = opts.sessionFactory
+        ? await opts.sessionFactory.open({ kind: "claim-verifier" }, cvSessionOpts)
+        : await opts.createAgentSession(cvSessionOpts);
       try {
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
@@ -472,6 +480,7 @@ async function runPlannerStage(
     bus: opts.bus,
     eventStore: opts.eventStore,
     createAgentSession: opts.createAgentSession,
+    ...(opts.sessionFactory !== undefined ? { sessionFactory: opts.sessionFactory } : {}),
     ...(opts.graphify !== undefined ? { graphify: opts.graphify } : {}),
     ...(opts.graphifyQueryBudget !== undefined ? { graphifyQueryBudget: opts.graphifyQueryBudget } : {}),
     ...(innerAbort.signal !== undefined ? { parentSignal: innerAbort.signal } : {}),
@@ -504,66 +513,69 @@ async function runPlannerStage(
         defaultBudget: opts.graphifyQueryBudget ?? 2000,
       })
     : [];
+  const sessionOpts: AgentSessionOptionsWithoutSessionPath = {
+    cwd: opts.cwd,
+    model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+    ...(opts.phaseModel.thinkingLevel !== "off"
+      ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+      : {}),
+    systemPrompt,
+    tools: [
+      ...planDef.allowedTools,
+      "spawn_plan_agent",
+      "write_plan_artifact",
+      "mark_ready",
+      ...graphifyTools.map((tool) => tool.name),
+    ],
+    customTools: [
+      spawnPlanAgentTool,
+      writePlanArtifactTool,
+      markReadyTool,
+      ...graphifyTools,
+    ],
+    onEvent: (e: PiBridgeEvent) => {
+      // Forward planner-session bridge events to EventStore (no subagent
+      // tag — the dashboard treats untagged events as planner output).
+      // Skip turn_end / error (internal) and mark_ready (planner publishes
+      // richer plan_* events for that one).
+      if (e.kind === "turn_end" || e.kind === "error" || e.kind === "usage_update") return;
+      if (
+        (e.kind === "tool_call" || e.kind === "tool_result") &&
+        (
+          e.tool === "mark_ready" ||
+          e.tool === "spawn_plan_agent" ||
+          e.tool === "write_plan_artifact"
+        )
+      ) {
+        return;
+      }
+      const base = { runId: opts.runId, taskId: opts.taskId };
+      let event: AgentEvent | null = null;
+      if (e.kind === "message_delta") {
+        event = mkEvent({ ...base, kind: "message_delta", text: e.text });
+      } else if (e.kind === "tool_call") {
+        event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input });
+      } else if (e.kind === "tool_result") {
+        event = mkEvent({
+          ...base,
+          kind: "tool_result",
+          callId: e.callId,
+          tool: e.tool,
+          ok: e.ok,
+          ...(e.output !== undefined ? { output: e.output } : {}),
+        });
+      } else if (e.kind === "log") {
+        event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text });
+      }
+      if (event) void opts.eventStore.append(event).catch(() => {});
+    },
+  };
+
   let session: AgentSession;
   try {
-    session = await opts.createAgentSession({
-      cwd: opts.cwd,
-      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
-      ...(opts.phaseModel.thinkingLevel !== "off"
-        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
-        : {}),
-      systemPrompt,
-      sessionPath,
-      tools: [
-        ...planDef.allowedTools,
-        "spawn_plan_agent",
-        "write_plan_artifact",
-        "mark_ready",
-        ...graphifyTools.map((tool) => tool.name),
-      ],
-      customTools: [
-        spawnPlanAgentTool,
-        writePlanArtifactTool,
-        markReadyTool,
-        ...graphifyTools,
-      ],
-      onEvent: (e: PiBridgeEvent) => {
-        // Forward planner-session bridge events to EventStore (no subagent
-        // tag — the dashboard treats untagged events as planner output).
-        // Skip turn_end / error (internal) and mark_ready (planner publishes
-        // richer plan_* events for that one).
-        if (e.kind === "turn_end" || e.kind === "error" || e.kind === "usage_update") return;
-        if (
-          (e.kind === "tool_call" || e.kind === "tool_result") &&
-          (
-            e.tool === "mark_ready" ||
-            e.tool === "spawn_plan_agent" ||
-            e.tool === "write_plan_artifact"
-          )
-        ) {
-          return;
-        }
-        const base = { runId: opts.runId, taskId: opts.taskId };
-        let event: AgentEvent | null = null;
-        if (e.kind === "message_delta") {
-          event = mkEvent({ ...base, kind: "message_delta", text: e.text });
-        } else if (e.kind === "tool_call") {
-          event = mkEvent({ ...base, kind: "tool_call", callId: e.callId, tool: e.tool, input: e.input });
-        } else if (e.kind === "tool_result") {
-          event = mkEvent({
-            ...base,
-            kind: "tool_result",
-            callId: e.callId,
-            tool: e.tool,
-            ok: e.ok,
-            ...(e.output !== undefined ? { output: e.output } : {}),
-          });
-        } else if (e.kind === "log") {
-          event = mkEvent({ ...base, kind: "log", level: e.level, text: e.text });
-        }
-        if (event) void opts.eventStore.append(event).catch(() => {});
-      },
-    });
+    session = opts.sessionFactory
+      ? await opts.sessionFactory.open({ kind: "main" }, sessionOpts)
+      : await opts.createAgentSession({ ...sessionOpts, sessionPath });
   } catch (err) {
     if (err instanceof AuthError) {
       await opts.bus.publish({

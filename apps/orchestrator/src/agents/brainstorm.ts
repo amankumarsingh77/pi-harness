@@ -34,6 +34,10 @@ import {
 } from "./web-research-tools.js";
 import { makeGraphifyTools } from "./graphify-tools.js";
 import type { GraphifyService } from "../services/graphify-service.js";
+import type {
+  AgentSessionOptionsWithoutSessionPath,
+  ManagedSessionFactory,
+} from "../runner/phase-session-manager.js";
 
 export type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>;
 
@@ -49,6 +53,7 @@ export type BrainstormOpts = {
   phaseModel: PhaseModelConfig;
   sessionPath: string;
   createAgentSession: CreateAgentSessionFn;
+  sessionFactory?: ManagedSessionFactory;
   graphify?: GraphifyService;
   graphifyQueryBudget?: number;
   ticketTitle?: string;
@@ -290,37 +295,43 @@ async function runTurn(
     });
   }
 
+  const sessionOpts: AgentSessionOptionsWithoutSessionPath = {
+    cwd: opts.cwd,
+    model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
+    ...(opts.phaseModel.thinkingLevel !== "off"
+      ? { thinkingLevel: opts.phaseModel.thinkingLevel }
+      : {}),
+    ...(opts.phaseModel.maxTurns !== undefined
+      ? { maxTurns: opts.phaseModel.maxTurns }
+      : {}),
+    systemPrompt,
+    customTools: [
+      readArtifactTool,
+      writeArtifactTool,
+      submitQuestionsTool,
+      submitMocksTool,
+      submitMockRevisionTool,
+      markReadyTool,
+      replyToUserTool,
+      makePiWebSearchTool(),
+      makePiWebFetchTool(),
+      ...graphifyTools,
+    ],
+    tools: [
+      ...brainstormDef.allowedTools,
+      ...graphifyTools.map((tool) => tool.name),
+    ],
+    onEvent: handleEvent,
+  };
+
   let session: AgentSession;
   try {
-    session = await opts.createAgentSession({
-      cwd: opts.cwd,
-      model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
-      ...(opts.phaseModel.thinkingLevel !== "off"
-        ? { thinkingLevel: opts.phaseModel.thinkingLevel }
-        : {}),
-      ...(opts.phaseModel.maxTurns !== undefined
-        ? { maxTurns: opts.phaseModel.maxTurns }
-        : {}),
-      systemPrompt,
-      ...(sessionPath !== undefined ? { sessionPath } : {}),
-      customTools: [
-        readArtifactTool,
-        writeArtifactTool,
-        submitQuestionsTool,
-        submitMocksTool,
-        submitMockRevisionTool,
-        markReadyTool,
-        replyToUserTool,
-        makePiWebSearchTool(),
-        makePiWebFetchTool(),
-        ...graphifyTools,
-      ],
-      tools: [
-        ...brainstormDef.allowedTools,
-        ...graphifyTools.map((tool) => tool.name),
-      ],
-      onEvent: handleEvent,
-    });
+    session = opts.sessionFactory
+      ? await opts.sessionFactory.open({ kind: "main" }, sessionOpts)
+      : await opts.createAgentSession({
+          ...sessionOpts,
+          ...(sessionPath !== undefined ? { sessionPath } : {}),
+        });
   } catch (err) {
     if (err instanceof AuthError) {
       await opts.bus.publish({
@@ -619,7 +630,7 @@ async function runWebResearchSubagent(
   const prompt = buildWebResearchPrompt(opts);
 
   try {
-    const session = await opts.createAgentSession({
+    const sessionOpts: AgentSessionOptionsWithoutSessionPath = {
       cwd: opts.cwd,
       model: { provider: opts.phaseModel.provider, model: opts.phaseModel.model },
       ...(opts.phaseModel.thinkingLevel !== "off"
@@ -643,7 +654,10 @@ async function runWebResearchSubagent(
         taskId: opts.taskId,
         subagent,
       }),
-    });
+    };
+    const session = opts.sessionFactory
+      ? await opts.sessionFactory.open({ kind: "brainstorm-research", subagent }, sessionOpts)
+      : await opts.createAgentSession(sessionOpts);
     try {
       return await session.prompt(prompt);
     } finally {

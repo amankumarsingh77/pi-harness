@@ -483,4 +483,52 @@ describe("runLoop", () => {
     expect(list[0]!.id).toBe(active.id);
     expect(list[0]!.status).toBe("succeeded");
   });
+
+  it("persists managed session paths for generic phases before dispatch", async () => {
+    const cases = [
+      { status: "executing" as const, phase: "code" as const, expected: "pi-session-code.jsonl" },
+      { status: "verifying" as const, phase: "verify" as const, expected: "pi-session-verify.jsonl" },
+      { status: "ready_to_ship" as const, phase: "pr" as const, expected: "pi-session-pr.jsonl" },
+    ];
+
+    for (const item of cases) {
+      await resetTestStore(stateDir);
+      vi.mocked(runPhase).mockReset();
+      const task = await runs.createTask({ title: `managed-${item.phase}` });
+      await runs.updateTask(task.id, { status: item.status, workflow: "backend-feature" });
+
+      vi.mocked(runPhase).mockImplementation(async (_phase, input) => {
+        const run = await runs.getRun(input.runId);
+        expect(input.sessionFactory?.pathFor({ kind: "main" })).toBe(run.piSessionPath);
+        expect(run.piSessionPath).toContain(item.expected);
+        return {
+          ok: true,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+        };
+      });
+
+      await runLoop({
+        task: await runs.getTask(task.id),
+        runs,
+        events,
+        phaseDeps: phaseDepsBase,
+        worktrees,
+        retryCap: 2,
+        cancellation: new CancellationRegistry(),
+      });
+
+      expect(runPhase).toHaveBeenCalledWith(
+        item.phase,
+        expect.objectContaining({
+          sessionFactory: expect.objectContaining({
+            pathFor: expect.any(Function),
+            open: expect.any(Function),
+          }),
+        }),
+        expect.any(Object),
+      );
+    }
+  });
 });

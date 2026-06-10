@@ -31,6 +31,7 @@ import { InvalidTransitionError, WorkflowConflictError, WorkflowHttpError } from
 import { scaffoldBrainstorm } from "../runner/scaffold-brainstorm.js";
 import { scaffoldPlan } from "../runner/scaffold-plan.js";
 import type { PhaseDeps, PhaseOutput } from "../runner/phase-prompts.js";
+import { phaseSessionPath } from "../runner/phase-session-manager.js";
 
 type SchedulerHandle = {
   readonly enqueue: (taskId: string) => void;
@@ -641,7 +642,12 @@ export class TaskWorkflowService {
       store: this.deps.artifacts,
     });
     const run = await this.openLongRunningRun(task, "brainstorm");
-    const sessionPath = join(worktree.path, ".harness", task.id, "pi-session.jsonl");
+    const sessionPath = phaseSessionPath({
+      cwd: worktree.path,
+      taskId: task.id,
+      phase: "brainstorm",
+      scope: { kind: "main" },
+    });
     const updatedRun = run.piSessionPath === sessionPath
       ? run
       : await this.deps.runs.updateRun(run.id, { piSessionPath: sessionPath });
@@ -664,7 +670,12 @@ export class TaskWorkflowService {
       store: this.deps.artifacts,
     });
     const run = await this.openLongRunningRun(task, "plan");
-    const sessionPath = join(worktree.path, ".harness", task.id, "pi-session-plan.jsonl");
+    const sessionPath = phaseSessionPath({
+      cwd: worktree.path,
+      taskId: task.id,
+      phase: "plan",
+      scope: { kind: "main" },
+    });
     const updatedRun = run.piSessionPath === sessionPath
       ? run
       : await this.deps.runs.updateRun(run.id, { piSessionPath: sessionPath });
@@ -686,13 +697,23 @@ export class TaskWorkflowService {
   ): Promise<PreparedPhase> {
     const { run, created } = await this.deps.runs.findOrCreateActiveRun({ taskId: task.id, phase });
     if (created) await this.appendPhaseStarted(run);
+    const sessionPath = phaseSessionPath({
+      cwd: worktree.path,
+      taskId: task.id,
+      phase,
+      scope: { kind: "main" },
+    });
+    const updatedRun = run.piSessionPath === sessionPath
+      ? run
+      : await this.deps.runs.updateRun(run.id, { piSessionPath: sessionPath });
     return {
       kind: "run",
       task,
       phase,
-      run,
+      run: updatedRun,
       worktreePath: worktree.path,
       phaseModel: mergePhaseModels(task.phaseModels, phase),
+      sessionPath,
     };
   }
 

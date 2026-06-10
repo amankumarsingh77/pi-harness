@@ -5,6 +5,7 @@ import { runPlan } from "../src/agents/plan.js";
 import { runVerifierSidecar } from "../src/agents/verifier-sidecar.js";
 import type { PhaseDeps } from "../src/runner/phase-prompts.js";
 import { runPhase } from "../src/runner/phase-prompts.js";
+import type { ManagedSessionFactory, ManagedSessionScope } from "../src/runner/phase-session-manager.js";
 
 vi.mock("../src/agents/plan.js", () => ({
   runPlan: vi.fn(async () => ({
@@ -31,6 +32,8 @@ describe("runPhase", () => {
   it("passes claim ledger and claim publisher into the real plan driver", async () => {
     const claimLedger = { listClaims: vi.fn() };
     const claimPublisher = { publishClaimsUpdated: vi.fn() };
+    const scopes: ManagedSessionScope[] = [];
+    const sessionFactory = fakeSessionFactory("plan", scopes);
     const deps: PhaseDeps = {
       cwd: "/tmp/pi-harness-phase-prompts",
       onEvent: () => {},
@@ -49,6 +52,7 @@ describe("runPhase", () => {
       runId: "run-1",
       phaseModel: DEFAULT_PHASE_MODELS.plan,
       sessionPath: "/tmp/session.jsonl",
+      sessionFactory,
       ticketTitle: "Plan task",
       ticketDescription: "Plan description",
     }, deps);
@@ -57,6 +61,7 @@ describe("runPhase", () => {
       expect.objectContaining({
         claimLedger,
         claimPublisher,
+        sessionFactory,
       }),
     );
   });
@@ -171,4 +176,81 @@ describe("runPhase", () => {
       error: "verifier sidecar challenged 1 claim(s)",
     });
   });
+
+  it("opens verify through the managed main session when provided", async () => {
+    const scopes: ManagedSessionScope[] = [];
+    const deps: PhaseDeps = {
+      cwd: "/tmp/pi-harness-phase-prompts",
+      onEvent: () => {},
+      createAgentSession: async (_opts: AgentSessionOptions) => {
+        throw new Error("not used");
+      },
+      store: {},
+      eventStore: { append: vi.fn(async () => {}) },
+      claimLedger: { listClaims: vi.fn() },
+      exec: async () => ({ ok: true, stdout: "" }),
+    } as PhaseDeps;
+
+    const result = await runPhase("verify", {
+      taskId: "T-1",
+      runId: "run-1",
+      phaseModel: DEFAULT_PHASE_MODELS.verify,
+      sessionFactory: fakeSessionFactory("verify", scopes),
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(scopes).toEqual([{ kind: "main" }]);
+  });
+
+  it("opens pr through the managed main session and creates the pull request", async () => {
+    const scopes: ManagedSessionScope[] = [];
+    const exec = vi.fn(async (cmd: string, args: string[]) => {
+      if (cmd === "git" && args[0] === "push") return { ok: true, stdout: "" };
+      if (cmd === "gh" && args[0] === "pr") return { ok: true, stdout: "https://github.com/x/y/pull/42\n" };
+      return { ok: false, stdout: "", stderr: "unexpected" };
+    });
+    const deps: PhaseDeps = {
+      cwd: "/tmp/pi-harness-phase-prompts",
+      onEvent: () => {},
+      createAgentSession: async (_opts: AgentSessionOptions) => {
+        throw new Error("not used");
+      },
+      store: {},
+      eventStore: { append: vi.fn(async () => {}) },
+      exec,
+    } as PhaseDeps;
+
+    const result = await runPhase("pr", {
+      taskId: "T-1",
+      runId: "run-1",
+      branch: "pi/T-1",
+      phaseModel: DEFAULT_PHASE_MODELS.pr,
+      sessionFactory: fakeSessionFactory("pr", scopes),
+    }, deps);
+
+    expect(result).toMatchObject({ ok: true, prUrl: "https://github.com/x/y/pull/42" });
+    expect(scopes).toEqual([{ kind: "main" }]);
+    expect(exec).toHaveBeenCalledWith("git", ["push", "-u", "origin", "pi/T-1"], { cwd: "/tmp/pi-harness-phase-prompts" });
+  });
 });
+
+function fakeSessionFactory(
+  phase: ManagedSessionFactory["phase"],
+  scopes: ManagedSessionScope[],
+): ManagedSessionFactory {
+  return {
+    phase,
+    mainPath: `/tmp/${phase}.jsonl`,
+    pathFor: (scope) => `/tmp/${phase}-${scope.kind}.jsonl`,
+    open: async (scope) => {
+      scopes.push(scope);
+      return {
+        async prompt() {
+          return { inputTokens: 1, outputTokens: 1, costUsd: 0.001 };
+        },
+        async abort() {},
+        async close() {},
+      };
+    },
+  };
+}

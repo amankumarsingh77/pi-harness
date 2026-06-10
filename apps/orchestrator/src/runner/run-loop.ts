@@ -5,6 +5,8 @@ import type { WorktreeManager } from "../adapters/worktree.js";
 import { runPhase, type PhaseDeps, type PhaseInput, type PhaseOutput } from "./phase-prompts.js";
 import type { CancellationRegistry } from "./cancellation.js";
 import { TaskWorkflowService } from "../services/task-workflow-service.js";
+import { createPhaseSessionFactory, type ManagedSessionScope } from "./phase-session-manager.js";
+import { mkEvent } from "../domain/events.js";
 
 export type RunLoopPreparedPhase =
   | { readonly kind: "idle"; readonly task: Task }
@@ -63,6 +65,22 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
     ...(prepared.task.branchName ? { branch: prepared.task.branchName } : {}),
     phaseModel: prepared.phaseModel,
     ...(prepared.sessionPath ? { sessionPath: prepared.sessionPath } : {}),
+    sessionFactory: createPhaseSessionFactory({
+      cwd: prepared.worktreePath,
+      taskId: prepared.task.id,
+      phase: prepared.phase,
+      createAgentSession: opts.phaseDeps.createAgentSession,
+      onSessionReset: (event) => {
+        void opts.events.append(mkEvent({
+          runId: prepared.run.id,
+          taskId: prepared.task.id,
+          kind: "log",
+          level: "warn",
+          text: `reset pi session ${managedSessionScopeLabel(event.scope)} at ${event.path}: ${event.reason}`,
+          subagent: event.phase,
+        })).catch(() => {});
+      },
+    }),
     signal: controller.signal,
   };
 
@@ -80,4 +98,11 @@ export async function runLoop(opts: RunLoopOpts): Promise<Task> {
   } finally {
     opts.cancellation.release(prepared.task.id, controller);
   }
+}
+
+function managedSessionScopeLabel(scope: ManagedSessionScope): string {
+  if (scope.kind === "code-node") return `code-node:${scope.nodeId}`;
+  if (scope.kind === "plan-child") return `plan-child:${scope.nodeId}`;
+  if (scope.kind === "brainstorm-research") return `brainstorm-research:${scope.subagent}`;
+  return scope.kind;
 }

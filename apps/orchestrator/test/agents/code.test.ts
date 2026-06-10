@@ -7,6 +7,7 @@ import type { AgentEvent, Artifact, ExecutionDagNode } from "@pi-harness/shared"
 import type { AgentSessionOptions, PromptUsage } from "@pi-harness/pi-bridge";
 import { ArtifactsStore } from "../../src/agents/artifacts-store.js";
 import { runCode } from "../../src/agents/code.js";
+import type { ManagedSessionFactory, ManagedSessionScope } from "../../src/runner/phase-session-manager.js";
 
 class InMemoryEventStore {
   readonly events: AgentEvent[] = [];
@@ -186,6 +187,37 @@ describe("runCode", () => {
     expect(result.ok).toBe(true);
     expect(createOpts?.tools?.filter((tool) => tool.startsWith("graphify_"))).toEqual([]);
     expect(createOpts?.customTools?.map((tool) => tool.name).filter((tool) => tool.startsWith("graphify_")) ?? []).toEqual([]);
+  });
+
+  it("opens code node sessions through the managed session factory", async () => {
+    await writeDag([
+      node({ id: "C-001", writes: ["src/a.ts"] }),
+    ]);
+    const scopes: ManagedSessionScope[] = [];
+    const sessionFactory: ManagedSessionFactory = {
+      phase: "code",
+      mainPath: join(cwd, ".harness", "T-1", "pi-session-code.jsonl"),
+      pathFor: (scope) => join(cwd, ".harness", "T-1", scope.kind),
+      open: async (scope, opts) => {
+        scopes.push(scope);
+        return fakeSession(async (prompt) => {
+          expect("sessionPath" in opts).toBe(false);
+          await writeAssignedFiles(extractAssignedNode(prompt));
+          return usage;
+        });
+      },
+    };
+
+    const result = await runCode({
+      ...baseOpts(),
+      createAgentSession: async () => {
+        throw new Error("raw session creation should not be used");
+      },
+      sessionFactory,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(scopes).toEqual([{ kind: "code-node", nodeId: "C-001" }]);
   });
 });
 
