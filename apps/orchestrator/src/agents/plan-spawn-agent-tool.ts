@@ -51,7 +51,12 @@ type CreateAgentSessionFn = (opts: AgentSessionOptions) => Promise<AgentSession>
 
 const SpawnPlanAgentParams = Type.Object({
   role: Type.String({ minLength: 1 }),
-  title: Type.String({ minLength: 1, maxLength: 120 }),
+  title: Type.String({
+    minLength: 1,
+    maxLength: 120,
+    description:
+      "Human-readable live display name for this child agent. Use a specific assignment name, not the role or generated id.",
+  }),
   lane: Type.String({ minLength: 1, maxLength: 60 }),
   instructions: Type.String({ minLength: 1, maxLength: 8000 }),
   dependsOn: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { default: [] })),
@@ -91,7 +96,7 @@ export function makeSpawnPlanAgentTool(deps: {
     name: "spawn_plan_agent",
     label: "Spawn plan agent",
     description:
-      "Run a bounded child planning agent from a registered role template. The child writes one findings artifact and streams logs into the plan graph.",
+      "Run a bounded child planning agent from a registered role template. The title is the agent's live display name in the plan graph.",
     parameters: SpawnPlanAgentParams,
     async execute(_toolCallId, params, signal) {
       const role = params.role.trim();

@@ -10,8 +10,7 @@ type DerivePlanAgentGraphInput = {
   readonly artifactNames: readonly string[];
 };
 
-type NodePatch = Pick<PlanAgentGraphNode, "id" | "title" | "role" | "lane"> &
-  Partial<Omit<PlanAgentGraphNode, "id" | "title" | "role" | "lane">>;
+type NodePatch = Pick<PlanAgentGraphNode, "id"> & Partial<Omit<PlanAgentGraphNode, "id">>;
 
 const PLANNER_NODE: PlanAgentGraphNode = {
   id: "planner",
@@ -102,9 +101,6 @@ function applyEvent(
     if (!nodeId) return;
     nodes.set(nodeId, mergeNode(nodes.get(nodeId), {
       id: nodeId,
-      title: nodeId,
-      role: nodeId,
-      lane: "research",
       costUsd: numberField(event, "costUsd"),
       inputTokens: numberField(event, "inputTokens"),
       outputTokens: numberField(event, "outputTokens"),
@@ -117,9 +113,6 @@ function applyEvent(
     if (!nodeId) return;
     nodes.set(nodeId, mergeNode(nodes.get(nodeId), {
       id: nodeId,
-      title: nodeId,
-      role: nodeId,
-      lane: "research",
       status: nodeStatus(event),
       endedAt: stringField(event, "ts"),
       durationMs: numberField(event, "durationMs"),
@@ -185,9 +178,9 @@ function mergeNode(existing: PlanAgentGraphNode | undefined, patch: NodePatch): 
     ...PLANNER_NODE,
     id: patch.id,
     kind: patch.kind ?? "agent",
-    title: patch.title,
-    role: patch.role,
-    lane: patch.lane,
+    title: patch.title ?? patch.id,
+    role: patch.role ?? patch.id,
+    lane: patch.lane ?? "research",
     status: patch.status ?? "queued",
   };
   return {

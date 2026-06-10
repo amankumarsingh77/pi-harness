@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -319,9 +319,17 @@ function AgentInspector({
       </header>
 
       <div className="scroll-hide min-h-0 flex-1 overflow-y-auto p-3">
-        {tab === "overview" && node && <OverviewTab node={node} />}
+        {tab === "overview" && node && (
+          <OverviewTab node={node} planEvents={planEvents} rawEvents={nodeEvents} />
+        )}
         {tab === "logs" && (
-          <LogsTab rows={rows} rawEvents={nodeEvents} planEvents={planEvents} nodeId={node?.id ?? "planner"} />
+          <LogsTab
+            rows={rows}
+            rawEvents={nodeEvents}
+            planEvents={planEvents}
+            nodeId={node?.id ?? "planner"}
+            nodeTitle={node?.title ?? "Planner"}
+          />
         )}
         {tab === "artifacts" && (
           <ArtifactsTab artifacts={artifacts} node={node} planEvents={planEvents} />
@@ -335,21 +343,76 @@ function AgentInspector({
   );
 }
 
-function OverviewTab({ node }: { readonly node: PlanAgentGraphNode }) {
+function OverviewTab({
+  node,
+  planEvents,
+  rawEvents,
+}: {
+  readonly node: PlanAgentGraphNode;
+  readonly planEvents: readonly PlanJsonlEvent[];
+  readonly rawEvents: readonly AgentEvent[];
+}) {
   const isRunning = node.status === "running";
   const nowMs = useNowMs(isRunning && node.startedAt !== null);
   const runtimeMs = isRunning ? runningDurationMs(node, nowMs) : node.durationMs;
+  const lifecycleRows = planEvents.filter((event) => isPlanNodeEvent(event, node.id)).slice(-5);
+  const activity = summarizeRawEvents(rawEvents);
+  const latestLifecycle = lifecycleRows.at(-1);
+  const timingRows = [
+    info("started", formatDateTime(node.startedAt)),
+    info("ended", formatDateTime(node.endedAt)),
+    info(isRunning ? "runtime so far" : "runtime", formatDuration(runtimeMs)),
+  ];
+
   return (
-    <div className="grid gap-2">
-      <InfoRow label="status" value={node.status} />
-      <InfoRow label="model" value={node.model ?? "-"} />
-      <InfoRow label="session" value={node.sessionId ?? "-"} />
-      <InfoRow label={isRunning ? "runtime so far" : "runtime"} value={formatDuration(runtimeMs)} />
-      <InfoRow label={isRunning ? "tokens in so far" : "tokens in"} value={node.inputTokens.toLocaleString()} />
-      <InfoRow label={isRunning ? "tokens out so far" : "tokens out"} value={node.outputTokens.toLocaleString()} />
-      <InfoRow label={isRunning ? "cost so far" : "cost"} value={`$${node.costUsd.toFixed(4)}`} />
-      <InfoRow label="tools" value={node.tools.length > 0 ? node.tools.join(", ") : "-"} />
-      <InfoRow label="artifact" value={node.artifactPath ?? "-"} />
+    <div className="grid gap-3">
+      <section className="grid grid-cols-2 gap-2">
+        <MetricTile label={isRunning ? "runtime so far" : "runtime"} value={formatDuration(runtimeMs)} />
+        <MetricTile label={isRunning ? "cost so far" : "cost"} value={`$${node.costUsd.toFixed(4)}`} />
+        <MetricTile label={isRunning ? "tokens in so far" : "tokens in"} value={node.inputTokens.toLocaleString()} />
+        <MetricTile label={isRunning ? "tokens out so far" : "tokens out"} value={node.outputTokens.toLocaleString()} />
+      </section>
+
+      <OverviewSection title="assignment">
+        <InfoRow label="status" value={node.status} />
+        <InfoRow label="role" value={node.role} />
+        <InfoRow label="lane" value={node.lane} />
+        <InfoRow label="parent" value={node.parentId ?? "-"} />
+        <InfoRow label="depends on" value={joinOrDash(node.dependsOn)} />
+      </OverviewSection>
+
+      <OverviewSection title="execution">
+        <InfoRow label="model" value={node.model ?? "-"} />
+        <InfoRow label="session" value={node.sessionId ?? "-"} />
+        {timingRows.map((row) => (
+          <InfoRow key={row.label} label={row.label} value={row.value} />
+        ))}
+        <InfoRow label="artifact" value={node.artifactPath ?? "-"} />
+      </OverviewSection>
+
+      <OverviewSection title="tools">
+        {node.tools.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {node.tools.map((tool) => (
+              <span key={tool} className="rounded-[5px] border border-line bg-bg px-2 py-1 font-mono text-[10.5px] text-fg-body">
+                {tool}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="font-mono text-[11.5px] text-fg-mute">no tools registered</p>
+        )}
+      </OverviewSection>
+
+      <OverviewSection title="activity">
+        <div className="grid grid-cols-3 gap-2">
+          <MetricTile label="messages" value={activity.messages.toLocaleString()} compact />
+          <MetricTile label="tool calls" value={activity.toolCalls.toLocaleString()} compact />
+          <MetricTile label="results" value={activity.toolResults.toLocaleString()} compact />
+        </div>
+        <InfoRow label="latest" value={latestLifecycle ? describePlanEvent(latestLifecycle, node.title) : "-"} />
+      </OverviewSection>
+
       {node.error && <div className="rounded-[7px] border border-st-blocked/40 bg-st-blocked/[0.07] p-2 font-mono text-[11.5px] text-st-blocked">{node.error}</div>}
     </div>
   );
@@ -360,11 +423,13 @@ function LogsTab({
   rawEvents,
   planEvents,
   nodeId,
+  nodeTitle,
 }: {
   readonly rows: readonly LogRow[];
   readonly rawEvents: readonly AgentEvent[];
   readonly planEvents: readonly PlanJsonlEvent[];
   readonly nodeId: string;
+  readonly nodeTitle: string;
 }) {
   const lifecycleRows = planEvents.filter((event) => isPlanNodeEvent(event, nodeId)).slice(-8);
   return (
@@ -385,7 +450,7 @@ function LogsTab({
               <div key={`${event.kind}:${event.ts}`} className="rounded-[6px] border border-line bg-bg px-2 py-1.5 font-mono text-[11px] text-fg-body">
                 <span className="text-fg-mute">{event.ts.slice(11, 19)}</span>
                 <span className="text-fg-faint"> · </span>
-                {describePlanEvent(event)}
+                {describePlanEvent(event, nodeTitle)}
               </div>
             ))}
           </div>
@@ -659,7 +724,8 @@ function isPlanNodeEvent(event: PlanJsonlEvent, nodeId: string): boolean {
   return false;
 }
 
-function describePlanEvent(event: PlanJsonlEvent): string {
+function describePlanEvent(event: PlanJsonlEvent, nodeTitle?: string): string {
+  const label = nodeTitle ?? "node";
   switch (event.kind) {
     case "plan_system":
       return event.systemKind;
@@ -668,11 +734,11 @@ function describePlanEvent(event: PlanJsonlEvent): string {
     case "plan_agent_node_started":
       return `${event.title} started`;
     case "plan_agent_node_findings":
-      return `${event.nodeId} returned findings`;
+      return `${label} returned findings`;
     case "plan_agent_node_usage":
-      return `${event.nodeId} usage ${formatCompact(event.inputTokens)} in · $${event.costUsd.toFixed(4)}`;
+      return `${label} usage ${formatCompact(event.inputTokens)} in · $${event.costUsd.toFixed(4)}`;
     case "plan_agent_node_ended":
-      return `${event.nodeId} ${event.status}`;
+      return `${label} ${event.status}`;
     default:
       return event.kind;
   }
@@ -696,12 +762,48 @@ function artifactItem(name: string, artifact: Artifact | null): { name: string; 
   return artifact ? { name, artifact } : null;
 }
 
+function OverviewSection({
+  title,
+  children,
+}: {
+  readonly title: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section className="grid gap-2">
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-mute">
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function SummaryPill({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <span className="inline-flex min-h-[29px] items-center gap-1.5 rounded-[7px] border border-line bg-white/[0.02] px-2.5 font-mono text-[11px] text-fg-mute">
       {label}
       <strong className="font-semibold text-fg-body">{value}</strong>
     </span>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  compact = false,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly compact?: boolean;
+}) {
+  return (
+    <div className={`rounded-[7px] border border-line bg-bg ${compact ? "p-2" : "px-2.5 py-2"}`}>
+      <div className={`${compact ? "text-[13px]" : "text-[15px]"} truncate font-semibold text-fg`}>
+        {value}
+      </div>
+      <div className="mt-0.5 truncate font-mono text-[10px] text-fg-mute">{label}</div>
+    </div>
   );
 }
 
@@ -714,12 +816,31 @@ function MiniStat({ label, value }: { readonly label: string; readonly value: nu
   );
 }
 
+function info(label: string, value: string): { readonly label: string; readonly value: string } {
+  return { label, value };
+}
+
 function InfoRow({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-3 rounded-[7px] border border-line bg-bg px-2.5 py-2 font-mono text-[11.5px]">
       <span className="text-fg-mute">{label}</span>
       <span className="min-w-0 break-words text-fg-body">{value}</span>
     </div>
+  );
+}
+
+function summarizeRawEvents(events: readonly AgentEvent[]): {
+  readonly messages: number;
+  readonly toolCalls: number;
+  readonly toolResults: number;
+} {
+  return events.reduce(
+    (summary, event) => ({
+      messages: summary.messages + (event.kind === "message_delta" ? 1 : 0),
+      toolCalls: summary.toolCalls + (event.kind === "tool_call" ? 1 : 0),
+      toolResults: summary.toolResults + (event.kind === "tool_result" ? 1 : 0),
+    }),
+    { messages: 0, toolCalls: 0, toolResults: 0 },
   );
 }
 
@@ -756,6 +877,17 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+}
+
+function formatDateTime(value: string | null): string {
+  if (value === null) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
+function joinOrDash(values: readonly string[]): string {
+  return values.length > 0 ? values.join(", ") : "-";
 }
 
 function useNowMs(enabled: boolean): number {

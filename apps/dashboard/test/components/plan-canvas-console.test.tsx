@@ -122,6 +122,25 @@ describe("PlanCanvasConsole", () => {
     expect(screen.getByText("tokens in so far")).toBeInTheDocument();
     expect(screen.getByText("1,250")).toBeInTheDocument();
   });
+
+  it("populates running agent overview with assignment and execution metadata", () => {
+    renderCanvas();
+
+    fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
+
+    expect(screen.getByText("assignment")).toBeInTheDocument();
+    expect(screen.getByText("role")).toBeInTheDocument();
+    expect(screen.getAllByText("codebase-scout").length).toBeGreaterThan(0);
+    expect(screen.getByText("lane")).toBeInTheDocument();
+    expect(screen.getAllByText("research").length).toBeGreaterThan(0);
+    expect(screen.getByText("depends on")).toBeInTheDocument();
+    expect(screen.getAllByText("planner").length).toBeGreaterThan(0);
+    expect(screen.getByText("execution")).toBeInTheDocument();
+    expect(screen.getByText("crofai/kimi-k2.6")).toBeInTheDocument();
+    expect(screen.getByText("session-1")).toBeInTheDocument();
+    expect(screen.getByText("tools")).toBeInTheDocument();
+    expect(screen.getByText("read")).toBeInTheDocument();
+  });
 });
 
 function renderCanvas(

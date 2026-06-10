@@ -154,7 +154,7 @@ function buildInitialPrompt(cwd: string, taskId: string): string {
     "",
     `1. Read design.md: ${paths.design}.`,
     `2. Read spec.md: ${paths.spec}.`,
-    `3. Use spawn_plan_agent to launch the child agents you need. Start with a codebase-scout style child for local context, then spawn any focused follow-ups required by the design/spec.`,
+    `3. Use spawn_plan_agent to launch the child agents you need. Start with a codebase-scout style child for local context, then spawn any focused follow-ups required by the design/spec. For every child, set title to a short, specific live display name for its assignment, such as "Session Resume Mapper"; do not use the role name or a generated id as the title.`,
     "4. Use the findings bodies returned by spawn_plan_agent. Do not write final plan artifacts until you have enough child evidence.",
     `5. Update blast-radius.yaml at ${paths.blastRadius} if the child findings reveal concrete impacted areas.`,
     `6. Author plan.md at ${paths.plan}, phase plans as ${paths.phasePlans}, scenarios.yaml at ${paths.scenarios}, and execution-dag.yaml at ${paths.executionDag} per the protocol in your system prompt.`,
