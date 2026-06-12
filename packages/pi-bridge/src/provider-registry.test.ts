@@ -1,27 +1,33 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { listProviders } from "./provider-registry.js";
-import { loadEnvHarness } from "./auth.js";
+import { __resetAuthCache } from "./auth.js";
 
 // listProviders is the single enumeration backing the catalog endpoint and the
 // model pickers. It walks pi-ai's built-in catalog plus our custom providers and
 // flags each `authenticated` using the same credential resolution session
 // creation uses. We assert the observable shape only.
 //
-// loadEnvHarness is primed once up front so subsequent listProviders() calls
-// don't re-inject keys from .env.harness over our per-test env manipulation
-// (dotenv only writes absent/empty keys, and the load is cached after first run).
+// Each test runs from a temp monorepo root so listProviders() does not read the
+// developer's real .env.harness while checking process.env-driven auth state.
 
 const TOUCHED_ENV = ["ANTHROPIC_API_KEY", "CROFAI_API_KEY"] as const;
 
 describe("listProviders", () => {
   let saved: Record<string, string | undefined>;
-
-  beforeAll(() => {
-    loadEnvHarness();
-  });
+  let dir: string;
+  let prevCwd: string;
 
   beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "provider-registry-"));
+    writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    prevCwd = process.cwd();
+    process.chdir(dir);
+    __resetAuthCache();
     saved = Object.fromEntries(TOUCHED_ENV.map((k) => [k, process.env[k]]));
+    for (const k of TOUCHED_ENV) delete process.env[k];
   });
 
   afterEach(() => {
@@ -29,6 +35,9 @@ describe("listProviders", () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+    process.chdir(prevCwd);
+    rmSync(dir, { recursive: true, force: true });
+    __resetAuthCache();
   });
 
   it("includes built-in providers, the custom crofai provider, and reflects auth from env", () => {

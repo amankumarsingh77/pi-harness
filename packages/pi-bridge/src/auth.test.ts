@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { __resetAuthCache, loadEnvHarness } from "./auth.js";
 
-const TOUCHED_KEYS = ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "CROFAI_API_KEY"];
+const TOUCHED_KEYS = ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "CROFAI_API_KEY", "DEEPSEEK_API_KEY"];
 
 let dir: string;
 let prevCwd: string;
@@ -56,12 +56,20 @@ describe("loadEnvHarness", () => {
     expect(process.env["CROFAI_API_KEY"]).toBe("file-key");
   });
 
-  it("is idempotent within a single process (cache guard)", () => {
+  it("reloads .env.harness values on subsequent calls", () => {
     writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=first\n");
     loadEnvHarness();
-    delete process.env["ANTHROPIC_API_KEY"];
     writeFileSync(join(dir, ".env.harness"), "ANTHROPIC_API_KEY=second\n");
     loadEnvHarness();
-    expect(process.env["ANTHROPIC_API_KEY"]).toBeUndefined();
+    expect(process.env["ANTHROPIC_API_KEY"]).toBe("second");
+  });
+
+  it("keeps real shell env vars ahead of .env.harness reloads", () => {
+    process.env["DEEPSEEK_API_KEY"] = "shell-key";
+    writeFileSync(join(dir, ".env.harness"), "DEEPSEEK_API_KEY=file-key\n");
+    loadEnvHarness();
+    writeFileSync(join(dir, ".env.harness"), "DEEPSEEK_API_KEY=file-key-2\n");
+    loadEnvHarness();
+    expect(process.env["DEEPSEEK_API_KEY"]).toBe("shell-key");
   });
 });
