@@ -156,6 +156,11 @@ async function runSpawnedPlanAgent(args: {
     "return_findings",
     ...graphifyTools.map((tool) => tool.name),
   ];
+  const prompt = childPrompt({
+    taskId: args.taskId,
+    nodeId: args.nodeId,
+    instructions: args.params.instructions,
+  });
 
   await args.bus.publish({
     kind: "plan_agent_node_started",
@@ -167,6 +172,7 @@ async function runSpawnedPlanAgent(args: {
     sessionId,
     model: `${args.phaseModel.provider}/${args.phaseModel.model}`,
     tools: toolNames,
+    prompt,
     artifactPath: null,
     dependsOn: args.params.dependsOn ?? ["planner"],
   });
@@ -211,11 +217,7 @@ async function runSpawnedPlanAgent(args: {
     session = args.sessionFactory
       ? await args.sessionFactory.open({ kind: "plan-child", nodeId: args.nodeId }, sessionOpts)
       : await args.createAgentSession(sessionOpts);
-    usage = await session.prompt(childPrompt({
-      taskId: args.taskId,
-      nodeId: args.nodeId,
-      instructions: args.params.instructions,
-    }));
+    usage = await session.prompt(prompt);
     if (findingsState.body === null) {
       throw new Error("child agent completed without returning findings");
     }

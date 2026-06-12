@@ -43,6 +43,7 @@ type PlanCanvasNodeData = Record<string, unknown> & {
   readonly graphNode: PlanAgentGraphNode;
 };
 type PlanCanvasFlowNode = FlowNode<PlanCanvasNodeData, "plan-node">;
+const planEdgeStroke = "rgba(94,106,210,0.82)";
 
 const nodeTypes: NodeTypes = {
   "plan-node": PlanCanvasNode,
@@ -233,7 +234,7 @@ export function PlanCanvasConsole({
 function PlanCanvasNode({ data }: NodeProps<PlanCanvasFlowNode>) {
   const node = data.graphNode;
   return (
-    <div className="min-w-[210px] max-w-[260px] rounded-[8px] border border-line bg-card px-3 py-2.5 shadow-2xl shadow-black/25">
+    <div className={`plan-agent-node ${planNodeStatusClass(node.status)} min-w-[210px] max-w-[260px] rounded-[8px] border border-line bg-card px-3 py-2.5 shadow-2xl shadow-black/25`}>
       <Handle type="target" position={Position.Top} className="!border-line !bg-fg-faint" />
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -379,6 +380,7 @@ function OverviewTab({
         <InfoRow label="lane" value={node.lane} />
         <InfoRow label="parent" value={node.parentId ?? "-"} />
         <InfoRow label="depends on" value={joinOrDash(node.dependsOn)} />
+        {node.prompt !== null && <PromptPreview prompt={node.prompt} />}
       </OverviewSection>
 
       <OverviewSection title="execution">
@@ -679,19 +681,20 @@ function layoutGraph(graph: PlanAgentGraph): { nodes: PlanCanvasFlowNode[]; edge
     source: edge.source,
     target: edge.target,
     type: "smoothstep",
-    animated: edge.kind === "spawn",
+    animated: false,
     style: {
-      stroke:
-        edge.kind === "artifact"
-          ? "rgba(76,183,130,0.75)"
-          : edge.kind === "depends_on"
-            ? "rgba(242,201,76,0.72)"
-            : "rgba(94,106,210,0.8)",
+      stroke: planEdgeStroke,
       strokeWidth: 1.6,
     },
   }));
 
   return { nodes, edges };
+}
+
+function planNodeStatusClass(status: PlanAgentGraphNode["status"]): string {
+  if (status === "running") return "plan-agent-node-running";
+  if (status === "succeeded") return "plan-agent-node-done";
+  return "";
 }
 
 function agentOnlyGraph(graph: PlanAgentGraph): PlanAgentGraph {
@@ -825,6 +828,17 @@ function InfoRow({ label, value }: { readonly label: string; readonly value: str
     <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-3 rounded-[7px] border border-line bg-bg px-2.5 py-2 font-mono text-[11.5px]">
       <span className="text-fg-mute">{label}</span>
       <span className="min-w-0 break-words text-fg-body">{value}</span>
+    </div>
+  );
+}
+
+function PromptPreview({ prompt }: { readonly prompt: string }) {
+  return (
+    <div className="rounded-[7px] border border-line bg-bg p-2.5">
+      <div className="font-mono text-[11px] text-fg-mute">prompt sent</div>
+      <pre className="scroll-hide mt-2 max-h-[240px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.55] text-fg-body">
+        {prompt}
+      </pre>
     </div>
   );
 }

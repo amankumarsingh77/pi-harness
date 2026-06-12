@@ -143,6 +143,7 @@ function liveEventsToPlanEvents(events: readonly AgentEvent[]): readonly PlanJso
           sessionId: event.sessionId,
           model: event.model,
           tools: event.tools,
+          ...(event.prompt !== undefined ? { prompt: event.prompt } : {}),
           artifactPath: event.artifactPath,
           dependsOn: event.dependsOn,
         }];

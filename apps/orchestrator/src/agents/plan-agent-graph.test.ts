@@ -22,6 +22,7 @@ describe("derivePlanAgentGraph", () => {
           sessionId: "s1",
           model: "crofai/kimi-k2.6",
           tools: ["read", "grep", "write_findings"],
+          prompt: "Find dashboard plan files.",
           artifactPath: ".harness/T-1/research/agent-1.md",
           dependsOn: ["planner"],
         },
@@ -50,6 +51,7 @@ describe("derivePlanAgentGraph", () => {
       costUsd: 0.04,
       inputTokens: 1200,
       outputTokens: 400,
+      prompt: "Find dashboard plan files.",
     });
     expect(graph.edges).toEqual([
       { id: "planner->agent-1:spawn", source: "planner", target: "agent-1", kind: "spawn" },

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import type { AgentEvent, Artifact, PlanAgentGraph, Run, Task } from "@pi-harness/shared";
+import type { ReactNode } from "react";
+import type { AgentEvent, Artifact, PlanAgentGraph, PlanAgentGraphNode, Run, Task } from "@pi-harness/shared";
 import { PlanCanvasConsole } from "@/components/plan/plan-canvas-console";
 import type { PlanJsonlEvent } from "@/lib/api";
 
@@ -22,24 +23,47 @@ vi.mock("@xyflow/react", () => ({
   ReactFlow: ({
     nodes,
     edges,
+    nodeTypes,
     children,
   }: {
-    readonly nodes: ReadonlyArray<{ readonly id: string; readonly data: { readonly graphNode: { readonly title: string } } }>;
-    readonly edges: ReadonlyArray<{ readonly id: string }>;
-    readonly children: React.ReactNode;
-  }) => (
-    <div aria-label="mock plan graph">
-      {nodes.map((node) => (
-        <div key={node.id} data-testid={`flow-node-${node.id}`}>
-          {node.data.graphNode.title}
-        </div>
-      ))}
-      {edges.map((edge) => (
-        <div key={edge.id} data-testid={`flow-edge-${edge.id}`} />
-      ))}
-      {children}
-    </div>
-  ),
+    readonly nodes: ReadonlyArray<{
+      readonly id: string;
+      readonly type?: string;
+      readonly data: { readonly graphNode: PlanAgentGraphNode };
+    }>;
+    readonly edges: ReadonlyArray<{
+      readonly id: string;
+      readonly animated?: boolean;
+      readonly style?: {
+        readonly stroke?: string;
+        readonly strokeWidth?: number;
+      };
+    }>;
+    readonly nodeTypes: Record<string, ((props: { readonly data: { readonly graphNode: PlanAgentGraphNode } }) => ReactNode) | undefined>;
+    readonly children: ReactNode;
+  }) => {
+    return (
+      <div aria-label="mock plan graph">
+        {nodes.map((node) => {
+          const NodeComponent = node.type ? nodeTypes[node.type] : undefined;
+          return (
+            <div key={node.id} data-testid={`flow-node-${node.id}`}>
+              {NodeComponent ? <NodeComponent data={node.data} /> : node.data.graphNode.title}
+            </div>
+          );
+        })}
+        {edges.map((edge) => (
+          <div
+            key={edge.id}
+            data-testid={`flow-edge-${edge.id}`}
+            data-animated={String(edge.animated ?? false)}
+            data-stroke={edge.style?.stroke ?? ""}
+          />
+        ))}
+        {children}
+      </div>
+    );
+  },
 }));
 
 describe("PlanCanvasConsole", () => {
@@ -51,6 +75,24 @@ describe("PlanCanvasConsole", () => {
     expect(within(graph).getByText("Scout codebase")).toBeInTheDocument();
     expect(within(graph).queryByText("plan.md")).toBeNull();
     expect(within(graph).queryByText("scenarios.yaml")).toBeNull();
+  });
+
+  it("keeps connections blue while status is shown on node borders", () => {
+    renderCanvas({ agentGraph: graphWithDoneAgent });
+
+    const runningEdge = screen.getByTestId("flow-edge-planner->agent-1:spawn");
+    const doneEdge = screen.getByTestId("flow-edge-planner->agent-2:spawn");
+    expect(runningEdge).toHaveAttribute("data-stroke", "rgba(94,106,210,0.82)");
+    expect(doneEdge).toHaveAttribute("data-stroke", "rgba(94,106,210,0.82)");
+    expect(runningEdge).toHaveAttribute("data-animated", "false");
+    expect(doneEdge).toHaveAttribute("data-animated", "false");
+
+    expect(screen.getByTestId("flow-node-agent-1").firstElementChild).toHaveClass(
+      "plan-agent-node-running",
+    );
+    expect(screen.getByTestId("flow-node-agent-2").firstElementChild).toHaveClass(
+      "plan-agent-node-done",
+    );
   });
 
   it("keeps restart enabled for failed plan runs", () => {
@@ -135,6 +177,8 @@ describe("PlanCanvasConsole", () => {
     expect(screen.getAllByText("research").length).toBeGreaterThan(0);
     expect(screen.getByText("depends on")).toBeInTheDocument();
     expect(screen.getAllByText("planner").length).toBeGreaterThan(0);
+    expect(screen.getByText("prompt sent")).toBeInTheDocument();
+    expect(screen.getByText(/Find the relevant files\./)).toBeInTheDocument();
     expect(screen.getByText("execution")).toBeInTheDocument();
     expect(screen.getByText("crofai/kimi-k2.6")).toBeInTheDocument();
     expect(screen.getByText("session-1")).toBeInTheDocument();
@@ -246,6 +290,7 @@ const agentGraph: PlanAgentGraph = {
       sessionId: null,
       model: null,
       tools: [],
+      prompt: null,
       artifactPath: null,
       dependsOn: [],
       startedAt: null,
@@ -267,6 +312,15 @@ const agentGraph: PlanAgentGraph = {
       sessionId: "session-1",
       model: "crofai/kimi-k2.6",
       tools: ["read"],
+      prompt: [
+        "You are a dynamically spawned plan child agent for task T-1.",
+        "Node id: agent-1.",
+        "Return findings directly to the parent planner with return_findings. Do not write a findings artifact.",
+        "",
+        "# Scoped assignment",
+        "",
+        "Find the relevant files.",
+      ].join("\n"),
       artifactPath: ".harness/T-1/research/agent-1.md",
       dependsOn: ["planner"],
       startedAt: "2026-06-06T00:00:00.000Z",
@@ -288,6 +342,7 @@ const agentGraph: PlanAgentGraph = {
       sessionId: null,
       model: null,
       tools: [],
+      prompt: null,
       artifactPath: null,
       dependsOn: [],
       startedAt: null,
@@ -309,6 +364,7 @@ const agentGraph: PlanAgentGraph = {
       sessionId: null,
       model: null,
       tools: [],
+      prompt: null,
       artifactPath: null,
       dependsOn: [],
       startedAt: null,
@@ -324,5 +380,37 @@ const agentGraph: PlanAgentGraph = {
     { id: "planner->agent-1:spawn", source: "planner", target: "agent-1", kind: "spawn" },
     { id: "planner->artifact:plan.md:artifact", source: "planner", target: "artifact:plan.md", kind: "artifact" },
     { id: "planner->artifact:scenarios.yaml:artifact", source: "planner", target: "artifact:scenarios.yaml", kind: "artifact" },
+  ],
+};
+
+const doneAgentNode: PlanAgentGraphNode = {
+  id: "agent-2",
+  kind: "agent",
+  title: "Audit workflow",
+  role: "workflow-auditor",
+  lane: "research",
+  status: "succeeded",
+  parentId: "planner",
+  sessionId: "session-2",
+  model: "crofai/kimi-k2.6",
+  tools: ["read"],
+  prompt: "Audit the workflow selector implementation.",
+  artifactPath: ".harness/T-1/research/agent-2.md",
+  dependsOn: ["planner"],
+  startedAt: "2026-06-06T00:00:00.000Z",
+  endedAt: "2026-06-06T00:01:00.000Z",
+  durationMs: 60_000,
+  costUsd: 0.01,
+  inputTokens: 500,
+  outputTokens: 125,
+  error: null,
+};
+
+const graphWithDoneAgent: PlanAgentGraph = {
+  ...agentGraph,
+  nodes: [...agentGraph.nodes, doneAgentNode],
+  edges: [
+    ...agentGraph.edges,
+    { id: "planner->agent-2:spawn", source: "planner", target: "agent-2", kind: "spawn" },
   ],
 };

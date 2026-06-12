@@ -80,6 +80,40 @@ html, body {
 }
 .tick-anim { animation: tick 2.4s ease-in-out infinite; }
 
+.plan-agent-node-running {
+  border-color: var(--color-st-progress);
+  animation: plan-agent-node-running-blink 1.05s ease-in-out infinite;
+}
+
+.plan-agent-node-done {
+  border-color: var(--color-st-done);
+  box-shadow:
+    0 0 0 1px rgba(76,183,130,0.12),
+    0 20px 45px rgba(0,0,0,0.25);
+}
+
+@keyframes plan-agent-node-running-blink {
+  0%, 100% {
+    border-color: rgba(94,106,210,0.45);
+    box-shadow:
+      0 0 0 1px rgba(94,106,210,0.08),
+      0 20px 45px rgba(0,0,0,0.25);
+  }
+  50% {
+    border-color: var(--color-st-progress);
+    box-shadow:
+      0 0 0 1px rgba(94,106,210,0.32),
+      0 0 16px rgba(94,106,210,0.34),
+      0 20px 45px rgba(0,0,0,0.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-agent-node-running {
+    animation: none;
+  }
+}
+
 /* Hide scrollbars while preserving scroll behavior (Linear-style). */
 .no-scrollbar {
   scrollbar-width: none;            /* Firefox */

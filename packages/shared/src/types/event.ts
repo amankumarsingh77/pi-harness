@@ -234,6 +234,7 @@ export type AgentEvent =
       sessionId: string;
       model: string;
       tools: readonly string[];
+      prompt?: string;
       artifactPath: string | null;
       dependsOn: readonly string[];
     })

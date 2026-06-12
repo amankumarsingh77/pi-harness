@@ -21,6 +21,7 @@ export type PlanAgentGraphNode = {
   readonly sessionId: string | null;
   readonly model: string | null;
   readonly tools: readonly string[];
+  readonly prompt: string | null;
   readonly artifactPath: string | null;
   readonly dependsOn: readonly string[];
   readonly startedAt: string | null;

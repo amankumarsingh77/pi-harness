@@ -74,6 +74,7 @@ describe("plan_* AgentEvent variants", () => {
       sessionId: "s-node-1",
       model: "crofai/kimi-k2.6",
       tools: ["read", "grep", "return_findings"],
+      prompt: "Find relevant files and return findings.",
       artifactPath: null,
       dependsOn: ["planner"],
     };
@@ -81,6 +82,7 @@ describe("plan_* AgentEvent variants", () => {
       expect(e.nodeId).toBe("node-1");
       expect(e.parentId).toBe("planner");
       expect(e.tools).toContain("return_findings");
+      expect(e.prompt).toContain("Find relevant files");
       expect(e.artifactPath).toBeNull();
     } else {
       expect.fail("expected plan_agent_node_started");

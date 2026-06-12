@@ -271,6 +271,7 @@ describe("runPlan", () => {
         kind: "plan_agent_node_started",
         artifactPath: null,
         tools: expect.arrayContaining(["return_findings"]),
+        prompt: expect.stringContaining("Find the relevant files."),
       }),
     );
     expect(planEvents).toContainEqual(
