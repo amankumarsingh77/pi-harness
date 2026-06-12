@@ -89,6 +89,10 @@ type Decision =
   | { kind: "nudge_only"; nudges: PendingNudge[] };
 
 type HaltReason = "questions" | "ready" | "exhausted";
+type RejectedToolResult = {
+  readonly tool: string;
+  readonly reason: string;
+};
 
 // Drives one brainstorm tick: open or resume a real pi agent session, decide
 // what to feed it from the JSONL log, drain the turn, and report whether the
@@ -164,6 +168,9 @@ async function runTurn(
   let haltReason: HaltReason = "exhausted";
   let lastWriteWasReady = false;
   let madeProgress = false;
+  const turnState: { rejectedToolResult: RejectedToolResult | null } = {
+    rejectedToolResult: null,
+  };
 
   const readArtifactTool = makeReadArtifactTool({
     store: opts.store,
@@ -257,27 +264,39 @@ async function runTurn(
 
   const handleEvent = (e: PiBridgeEvent): void => {
     forwardToEventStore(e);
-    if (e.kind === "tool_call" && e.tool === "submit_questions") {
-      haltReason = "questions";
+    if (e.kind !== "tool_result") return;
+
+    if (toolResultRejected(e.output)) {
+      turnState.rejectedToolResult = {
+        tool: e.tool,
+        reason: toolRejectionReason(e.tool, e.output),
+      };
       return;
     }
-    if (e.kind === "tool_call" && e.tool === "submit_mocks") {
-      haltReason = "questions";
-      return;
-    }
-    if (e.kind === "tool_result" && e.tool === "mark_ready") {
+
+    if (e.tool === "mark_ready") {
       // The tool's details encodes whether mark_ready was accepted. We watch
       // for ok:true to flip haltReason; a rejection (missing section) leaves
       // the agent free to write more and re-call mark_ready in the same turn.
-      if (toolResultOk(e.output)) {
+      if (e.ok && toolResultOk(e.output)) {
         haltReason = "ready";
         lastWriteWasReady = true;
         madeProgress = true;
+        turnState.rejectedToolResult = null;
       }
       return;
     }
-    if (e.kind === "tool_result" && e.ok && isProgressTool(e.tool, e.output)) {
+
+    if (e.ok && isTerminalPauseToolAccepted(e.tool, e.output)) {
+      haltReason = "questions";
       madeProgress = true;
+      turnState.rejectedToolResult = null;
+      return;
+    }
+
+    if (e.ok && isProgressTool(e.tool, e.output)) {
+      madeProgress = true;
+      turnState.rejectedToolResult = null;
       return;
     }
   };
@@ -446,6 +465,23 @@ async function runTurn(
     lastWriteWasReady ||
     (design?.fm.status === "ready" && spec?.fm.status === "ready");
 
+  if (!ready && turnState.rejectedToolResult !== null) {
+    const error = turnState.rejectedToolResult.reason;
+    await opts.bus.publish({
+      kind: "brainstorm_system",
+      systemKind: "blocked",
+      data: { reason: error },
+    });
+    return {
+      ok: false,
+      ready: false,
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      error,
+    };
+  }
+
   // haltReason "exhausted" means the agent ended its turn without a terminal
   // brainstorm action. That is only acceptable if the turn still made durable
   // progress, such as writing an artifact body or replying to a nudge.
@@ -476,19 +512,60 @@ async function runTurn(
 }
 
 function toolResultOk(output: unknown): boolean {
-  if (typeof output !== "object" || output === null || !("details" in output)) return false;
+  if (!isRecord(output) || !("details" in output)) return false;
   const details = output.details;
-  return typeof details === "object" && details !== null && "ok" in details && details.ok === true;
+  return isRecord(details) && "ok" in details && details.ok === true;
+}
+
+function toolResultRejected(output: unknown): boolean {
+  if (!isRecord(output) || !("details" in output)) return false;
+  const details = output.details;
+  return isRecord(details) && "ok" in details && details.ok === false;
+}
+
+function isTerminalPauseToolAccepted(tool: string, output: unknown): boolean {
+  if (tool === "submit_questions") return submitQuestionsAccepted(output);
+  if (tool === "submit_mocks" || tool === "submit_mock_revision") return toolResultOk(output);
+  return false;
 }
 
 function isProgressTool(tool: string, output: unknown): boolean {
   if (tool === "write_artifact") return toolResultOk(output);
-  return (
-    tool === "submit_questions" ||
-    tool === "submit_mocks" ||
-    tool === "submit_mock_revision" ||
-    tool === "reply_to_user"
-  );
+  if (tool === "reply_to_user") return replyToUserAccepted(output);
+  return false;
+}
+
+function submitQuestionsAccepted(output: unknown): boolean {
+  if (!isRecord(output) || !("details" in output)) return false;
+  const details = output.details;
+  if (!isRecord(details) || !("awaiting" in details)) return false;
+  return Array.isArray(details.awaiting);
+}
+
+function replyToUserAccepted(output: unknown): boolean {
+  if (!isRecord(output) || !("details" in output)) return false;
+  const details = output.details;
+  return isRecord(details) && typeof details.replyId === "string";
+}
+
+function toolRejectionReason(tool: string, output: unknown): string {
+  const text = toolResultText(output);
+  return text === null ? `brainstorm: ${tool} rejected` : `brainstorm: ${tool} rejected: ${text}`;
+}
+
+function toolResultText(output: unknown): string | null {
+  if (!isRecord(output) || !("content" in output) || !Array.isArray(output.content)) {
+    return null;
+  }
+  const textParts = output.content.flatMap((item) => {
+    if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") return [];
+    return [item.text];
+  });
+  return textParts.length === 0 ? null : textParts.join("\n");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function decide(events: JsonlEvent[]): Decision {

@@ -480,7 +480,6 @@ function rejectMissingEvidence(mockId: string): ToolResult<SubmitMocksDetails> {
   return {
     content: [{ type: "text", text: "rejected: cite current UI design evidence before submitting mocks" }],
     details: { ok: false, violations: { mockId, missing: "evidence" } },
-    terminate: true,
   };
 }
 
@@ -488,7 +487,6 @@ function rejectRevisionMissingEvidence(mockId: string): ToolResult<SubmitMockRev
   return {
     content: [{ type: "text", text: "rejected: cite current UI design evidence before submitting a mock revision" }],
     details: { ok: false, violations: { mockId, missing: "evidence" } },
-    terminate: true,
   };
 }
 
@@ -504,7 +502,7 @@ export function makeSubmitMocksTool(deps: {
     name: "submit_mocks",
     label: "Submit mocks",
     description:
-      "Write one or more mock choices as HTML that consumes the project design tokens (var(--…)). The dashboard renders the saved HTML directly. After calling this, halt your turn.",
+      "Write one or more mock choices as HTML that consumes the project design tokens (var(--…)). The dashboard renders the saved HTML directly. After an accepted submission, halt your turn. If rejected, fix the issue and call submit_mocks again.",
     parameters: SubmitMockChoicesParams,
     async execute(_id, params) {
       for (const mock of params.mocks) {
@@ -525,7 +523,6 @@ export function makeSubmitMocksTool(deps: {
                 ok: false,
                 violations: { mockId: mock.mockId, pageId: page.pageId, violations },
               },
-              terminate: true,
             };
           }
         }
@@ -601,7 +598,7 @@ export function makeSubmitMockRevisionTool(deps: {
     name: "submit_mock_revision",
     label: "Submit mock revision",
     description:
-      "Write a revised mock as HTML that consumes the project design tokens (var(--…)) after the user requested edits to an existing mock. The dashboard renders the saved HTML directly. After calling this, halt your turn.",
+      "Write a revised mock as HTML that consumes the project design tokens (var(--…)) after the user requested edits to an existing mock. The dashboard renders the saved HTML directly. After an accepted revision, halt your turn. If rejected, fix the issue and call submit_mock_revision again.",
     parameters: WriteMockRevisionParams,
     async execute(_id, params) {
       if (!hasDesignEvidence(params)) return rejectRevisionMissingEvidence(params.sourceMockId);
@@ -612,7 +609,6 @@ export function makeSubmitMockRevisionTool(deps: {
           return {
             content: [{ type: "text", text: "rejected: hard-coded core tokens; use var(--…)" }],
             details: { ok: false, violations: { pageId: page.pageId, violations } },
-            terminate: true,
           };
         }
       }

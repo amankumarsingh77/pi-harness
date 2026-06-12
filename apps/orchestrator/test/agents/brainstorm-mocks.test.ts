@@ -306,6 +306,35 @@ describe("brainstorm mock tools", () => {
     ).resolves.toContain("revised");
   });
 
+  it("submit_mock_revision rejection does not terminate so the agent can retry", async () => {
+    const store = new ArtifactsStore();
+    const { bus, eventAppends } = makeBus();
+    const { designSystem, renderer } = makeRenderDeps();
+    const tool = makeSubmitMockRevisionTool({ store, designSystem, renderer, bus, cwd, taskId: TASK });
+    await store.writeBrainstormMock(cwd, TASK, makeMock(), MOCK_HTML);
+
+    const result = await fakeExecute(tool, {
+      sourceMockId: "mock-a",
+      mockId: "mock-a",
+      editRequestId: "mer_1",
+      title: "Split pane refined",
+      summary: "Narrows the artifact pane.",
+      evidence: DESIGN_EVIDENCE,
+      pages: [
+        {
+          pageId: "task-detail",
+          title: "Task detail",
+          html: "<style>.task-detail{color:#fff;}</style><h1>Mock A revised</h1>",
+        },
+      ],
+    });
+
+    expect(result.details).toMatchObject({ ok: false });
+    expect(result.terminate).toBeUndefined();
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(eventAppends).toHaveLength(0);
+  });
+
   it("submit_mock_revision allocates the next revision id for repeated edits", async () => {
     const store = new ArtifactsStore();
     const { bus, eventAppends } = makeBus();

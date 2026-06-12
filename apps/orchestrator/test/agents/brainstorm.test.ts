@@ -264,6 +264,45 @@ async function driveMarkReady(adapter: FakeAgentSdkAdapter): Promise<void> {
   } as AgentSessionEvent);
 }
 
+async function driveRejectedSubmitMocks(adapter: FakeAgentSdkAdapter): Promise<void> {
+  await waitForPrompt(adapter);
+  const submit = findCustomTool(adapter, "submit_mocks");
+  const params = {
+    mocks: [
+      {
+        mockId: "mock-rejected",
+        title: "Rejected mock",
+        summary: "Hard-codes a core token.",
+        recommended: true,
+        evidence: ["apps/dashboard/app/globals.css:3"],
+        pages: [
+          {
+            pageId: "plan-main",
+            title: "Plan main",
+            html: "<style>.plan-main{color:#fff;}</style><main class='plan-main'>Plan</main>",
+          },
+        ],
+      },
+    ],
+  };
+  const result = await submit.execute("tc-rejected", params, undefined, undefined, undefined as never);
+  adapter.emit({
+    type: "tool_execution_start",
+    toolName: "submit_mocks",
+    args: params,
+  } as AgentSessionEvent);
+  adapter.emit({
+    type: "tool_execution_end",
+    toolName: "submit_mocks",
+    isError: false,
+    result,
+  } as AgentSessionEvent);
+  adapter.emit({
+    type: "agent_end",
+    messages: [assistantWithUsage(8, 3, 0.0005)],
+  } as AgentSessionEvent);
+}
+
 describe("runBrainstorm (real-bridge)", () => {
   it("initial tick: empty JSONL → bridge prompted; questions published; halts", async () => {
     const store = new ArtifactsStore({ runsDir: scratch });
@@ -802,6 +841,47 @@ describe("runBrainstorm (real-bridge)", () => {
     const spec = await store.readArtifact(scratch, TASK, "spec");
     expect(design?.fm.status).toBe("ready");
     expect(spec?.fm.status).toBe("ready");
+  });
+
+  it("submit_mocks rejection blocks the turn instead of counting as progress", async () => {
+    const store = new ArtifactsStore({ runsDir: scratch });
+    const { eventStore } = makeFakes();
+    const bus = makeBus(eventStore);
+    const adapter = createFakeAdapter();
+
+    const promise = runBrainstorm({
+      taskId: TASK,
+      runId: "r1",
+      cwd: scratch,
+      store,
+      bus,
+      eventStore: eventStore as never,
+      phaseModel: PHASE_MODEL,
+      sessionPath: sessionPath(),
+      createAgentSession: wireAgentSession(adapter),
+    });
+
+    await driveRejectedSubmitMocks(adapter);
+
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    expect(result.ready).toBe(false);
+    expect(result.error).toContain("submit_mocks rejected");
+
+    const jsonl = await readFile(join(scratch, ".harness", TASK, "brainstorm.jsonl"), "utf8");
+    const events = jsonl.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "brainstorm_system",
+          systemKind: "blocked",
+          data: expect.objectContaining({
+            reason: expect.stringContaining("submit_mocks rejected"),
+          }),
+        }),
+      ]),
+    );
+    expect(events.some((event) => event.kind === "brainstorm_mock_proposed")).toBe(false);
   });
 
   it("scoped artifact tools write the worktree artifacts and preserve frontmatter", async () => {

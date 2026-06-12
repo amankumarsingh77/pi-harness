@@ -953,6 +953,44 @@ describe("http", () => {
     expect((reset!["data"] as { archivedRunId?: string | null }).archivedRunId).toBeNull();
   });
 
+  it("POST /api/tasks/:id/brainstorm/restart accepts a failed brainstorm run", async () => {
+    const t = await runs.createTask({ title: "restart-failed-brainstorm" });
+    const worktree = await makeDraftWorktree(t.id);
+    await runs.updateTask(t.id, {
+      status: "brainstorm_failed",
+      workflow: "backend-feature",
+      worktreePath: worktree,
+    });
+    const failedRun = await runs.createRun({ taskId: t.id, phase: "brainstorm" });
+    await runs.updateRun(failedRun.id, {
+      status: "failed",
+      endedAt: new Date(),
+      error: "submit_mocks rejected",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${t.id}/brainstorm/restart`,
+      payload: { note: "Retry with token-compliant mocks." },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok?: boolean; archivedRunId?: string | null; newRunId?: string };
+    expect(body.ok).toBe(true);
+    expect(body.archivedRunId).toBe(failedRun.id);
+    expect(typeof body.newRunId).toBe("string");
+
+    await expect(runs.getTask(t.id)).resolves.toMatchObject({
+      status: "brainstorming",
+    });
+    const newRun = await runs.getRun(body.newRunId!);
+    expect(newRun).toMatchObject({
+      taskId: t.id,
+      phase: "brainstorm",
+      status: "pending",
+    });
+  });
+
   it("POST /api/tasks/:id/brainstorm/restart returns 409 when task is past brainstorming", async () => {
     const t = await runs.createTask({ title: "restart-late" });
     const worktree = await makeDraftWorktree(t.id);

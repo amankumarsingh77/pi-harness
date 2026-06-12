@@ -28,6 +28,7 @@ describe("submit_mocks tool", () => {
         pages: [{ pageId: "home", title: "Home", html: "<style>.a{color:#f00;}</style>" }] }],
     } as never, undefined, undefined, undefined as never);
     expect(res.details).toMatchObject({ ok: false });
+    expect(res.terminate).toBeUndefined();
     expect(d.renderer.render).not.toHaveBeenCalled();
     expect(d.bus.publish).not.toHaveBeenCalled();
   });
@@ -40,6 +41,7 @@ describe("submit_mocks tool", () => {
         pages: [{ pageId: "home", title: "Home", html: "<style>.a{color:var(--fg);}</style>" }] }],
     } as never, undefined, undefined, undefined as never);
     expect(res.details).toMatchObject({ ok: false });
+    expect(res.terminate).toBeUndefined();
     expect(d.renderer.render).not.toHaveBeenCalled();
     expect(d.store.writeBrainstormMock).not.toHaveBeenCalled();
     expect(d.bus.publish).not.toHaveBeenCalled();

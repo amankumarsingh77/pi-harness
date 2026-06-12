@@ -312,11 +312,12 @@ export class TaskWorkflowService {
     note?: string,
   ): Promise<{ readonly ok: true; readonly archivedRunId: string | null; readonly newRunId: string }> {
     return this.runExclusive(taskId, async () => {
-      const task = await this.taskInStatusWithWorktree(taskId, "brainstorming");
+      const task = await this.taskInBrainstormRestartStatusWithWorktree(taskId);
       await this.cancelAndDrain(task.id);
       const restartRun =
         (await this.deps.runs.findActiveRun(task.id, "brainstorm")) ??
-        (await this.deps.runs.findLatestRun(task.id, "brainstorm", "cancelled"));
+        (await this.deps.runs.findLatestRun(task.id, "brainstorm", "cancelled")) ??
+        (await this.deps.runs.findLatestRun(task.id, "brainstorm", "failed"));
       if (restartRun && restartRun.status !== "cancelled") {
         await this.deps.runs.updateRun(restartRun.id, {
           status: "cancelled",
@@ -359,6 +360,9 @@ export class TaskWorkflowService {
         runId: newRun.id,
         inputs,
       });
+      if (task.status === "brainstorm_failed") {
+        await this.deps.runs.updateTask(task.id, { status: "brainstorming", retryCount: 0 });
+      }
       this.enqueue(task.id);
       return { ok: true, archivedRunId: restartRun?.id ?? null, newRunId: newRun.id };
     });
@@ -901,6 +905,19 @@ export class TaskWorkflowService {
       throw new WorkflowConflictError(
         code,
         `task is in ${task.status}; action only applies during ${phaseLabel}`,
+      );
+    }
+    return this.requireWorktree(task);
+  }
+
+  private async taskInBrainstormRestartStatusWithWorktree(
+    taskId: string,
+  ): Promise<Task & { readonly worktreePath: string }> {
+    const task = await this.deps.runs.getTask(taskId);
+    if (task.status !== "brainstorming" && task.status !== "brainstorm_failed") {
+      throw new WorkflowConflictError(
+        "not_brainstorming",
+        `task is in ${task.status}; action only applies during brainstorming or brainstorm_failed`,
       );
     }
     return this.requireWorktree(task);
