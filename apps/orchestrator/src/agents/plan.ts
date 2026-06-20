@@ -94,7 +94,6 @@ export type PlanResult = {
 type JsonlEvent = Record<string, unknown> & { ts?: string; kind?: string };
 
 const PLANNER_RECOVERY_CAP = 2;
-const CLAIM_VERIFIER_TIMEOUT_MS = 5 * 60 * 1000;
 
 // Drives one plan tick. The parent planner owns decomposition and may call
 // spawn_plan_agent for bounded child research. mark_ready remains the only
@@ -366,7 +365,6 @@ async function runPlannerStage(
     let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
     let dispatchError: string | undefined;
     let cvSession: AgentSession | null = null;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
     let promptPromise: Promise<{ costUsd: number; inputTokens: number; outputTokens: number }> | undefined;
     const onCvAbort = (): void => {
       void cvSession?.abort().catch(() => {});
@@ -405,16 +403,9 @@ async function runPlannerStage(
         ? await opts.sessionFactory.open({ kind: "claim-verifier" }, cvSessionOpts)
         : await opts.createAgentSession(cvSessionOpts);
       try {
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            void cvSession?.abort().catch(() => {});
-            reject(new Error(`claim-verifier timed out after ${CLAIM_VERIFIER_TIMEOUT_MS}ms`));
-          }, CLAIM_VERIFIER_TIMEOUT_MS);
-        });
         promptPromise = cvSession.prompt(userPrompt);
-        usage = await Promise.race([promptPromise, timeoutPromise]);
+        usage = await promptPromise;
       } finally {
-        if (timeout) clearTimeout(timeout);
         void promptPromise?.catch(() => {});
         await cvSession.close().catch(() => {});
       }

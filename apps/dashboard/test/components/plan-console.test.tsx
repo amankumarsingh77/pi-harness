@@ -19,6 +19,40 @@ vi.mock("@/app/tasks/[id]/actions", () => ({
   cancelCurrentPhaseAction: vi.fn(),
 }));
 
+// ReactFlow needs real layout; in jsdom we render a lightweight stand-in that still
+// drives the custom node components and the node-click handler so the execution graph
+// is assertable.
+vi.mock("@xyflow/react", () => ({
+  Background: () => null,
+  Controls: () => null,
+  MiniMap: () => null,
+  Handle: () => null,
+  Position: { Top: "top", Bottom: "bottom", Left: "left", Right: "right" },
+  ReactFlow: ({
+    nodes,
+    nodeTypes,
+    onNodeClick,
+    children,
+  }: {
+    readonly nodes: ReadonlyArray<{ readonly id: string; readonly type?: string; readonly data: Record<string, unknown> }>;
+    readonly nodeTypes: Record<string, ((props: { readonly data: Record<string, unknown> }) => React.ReactNode) | undefined>;
+    readonly onNodeClick?: (event: unknown, node: { readonly id: string }) => void;
+    readonly children: React.ReactNode;
+  }) => (
+    <div aria-label="execution graph">
+      {nodes.map((node) => {
+        const NodeComponent = node.type ? nodeTypes[node.type] : undefined;
+        return (
+          <div key={node.id} data-testid={`dag-node-${node.id}`} onClick={() => onNodeClick?.(null, node)}>
+            {NodeComponent ? <NodeComponent data={node.data} /> : node.id}
+          </div>
+        );
+      })}
+      {children}
+    </div>
+  ),
+}));
+
 describe("PlanConsole", () => {
   it("renders the plan review command center from the plan bundle", () => {
     renderConsole({ gate: "awaiting_user" });
@@ -150,20 +184,19 @@ describe("PlanConsole", () => {
     expect(screen.getByText("execution-dag.yaml")).toBeInTheDocument();
   });
 
-  it("renders compact execution phase rows from execution-dag.yaml", () => {
+  it("layers the execution dag the way the scheduler runs it", () => {
     renderConsole();
     fireEvent.click(screen.getByRole("tab", { name: "Execution DAG" }));
 
     expect(screen.getByText("Execution map")).toBeInTheDocument();
-    expect(screen.getByText("3 tasks")).toBeInTheDocument();
-    expect(screen.getByText("Foundation")).toBeInTheDocument();
-    expect(screen.getByText("Parallel Work")).toBeInTheDocument();
-    expect(screen.getByText("can run together")).toBeInTheDocument();
-    expect(screen.getByText("C-001")).toBeInTheDocument();
-    expect(screen.getByText("C-002")).toBeInTheDocument();
+    expect(screen.getByText("2 parallel")).toBeInTheDocument();
+    expect(screen.getByText("1 exclusive")).toBeInTheDocument();
+    // Every task renders as a node in the graph.
+    expect(screen.getByText("Add DAG schema")).toBeInTheDocument();
+    expect(screen.getByText("Update dashboard tests")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Inspect C-002/ }));
-    expect(screen.getByText("Render compact phases")).toBeInTheDocument();
+    // Selecting a node opens the floating inspector with its dependency + assertion.
+    fireEvent.click(screen.getByTestId("dag-node-C-002"));
     expect(screen.getByText(/waits for C-001/)).toBeInTheDocument();
     expect(screen.getByText(/phases render/)).toBeInTheDocument();
   });

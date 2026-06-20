@@ -286,7 +286,148 @@ describe("runPlan", () => {
     );
   });
 
-  it("fails dynamic child agents that exit without returning findings", async () => {
+  it("falls back to the child's final message when return_findings is not called", async () => {
+    const spawnResults: unknown[] = [];
+    const planEvents: unknown[] = [];
+    const bus = new PlanEventBus({
+      eventStore: new InMemoryEventStore() as never,
+      jsonl: new JsonlWriter(join(cwd, ".harness", "T-1", "plan.jsonl")),
+      runId: "r-1",
+      taskId: "T-1",
+    });
+    const originalPublish = bus.publish.bind(bus);
+    bus.publish = async (input) => {
+      planEvents.push(input);
+      return originalPublish(input);
+    };
+
+    const result = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus,
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async (opts) => ({
+        async prompt() {
+          if (opts.customTools?.some((tool) => tool.name === "return_findings")) {
+            // Child emits its findings as a plain assistant message, never calling the tool.
+            opts.onEvent({ kind: "message_delta", text: "# Findings\n\n" });
+            opts.onEvent({ kind: "message_delta", text: "Plain message fallback." });
+            return { costUsd: 0.02, inputTokens: 50, outputTokens: 20 };
+          }
+          const spawn = opts.customTools?.find((tool) => tool.name === "spawn_plan_agent");
+          if (!spawn) throw new Error("spawn_plan_agent tool not registered");
+          const spawnResult = await spawn.execute(
+            "spawn",
+            {
+              role: "codebase-scout",
+              title: "Scout codebase",
+              lane: "research",
+              instructions: "Find the relevant files.",
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+          spawnResults.push(spawnResult.details);
+          return { costUsd: 0.01, inputTokens: 10, outputTokens: 5 };
+        },
+        async abort() {},
+        async close() {},
+      }),
+      ticketTitle: "Message fallback",
+      ticketDescription: "Planner should consume the child's final message as findings.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnResults).toEqual([
+      expect.objectContaining({
+        ok: true,
+        findingsBody: "# Findings\n\nPlain message fallback.",
+      }),
+    ]);
+    expect(planEvents).toContainEqual(
+      expect.objectContaining({
+        kind: "plan_agent_node_findings",
+        body: "# Findings\n\nPlain message fallback.",
+      }),
+    );
+  });
+
+  it("prefers the return_findings body over the child's assistant message", async () => {
+    const spawnResults: unknown[] = [];
+
+    const result = await runPlan({
+      taskId: "T-1",
+      runId: "r-1",
+      cwd,
+      store,
+      bus: makeBus(),
+      eventStore: new InMemoryEventStore() as never,
+      phaseModel: {
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        thinkingLevel: "high",
+      },
+      sessionPath: join(cwd, ".harness", "T-1", "pi-session-plan.jsonl"),
+      createAgentSession: async (opts) => ({
+        async prompt() {
+          const returnFindings = opts.customTools?.find((tool) => tool.name === "return_findings");
+          if (returnFindings) {
+            // Stray chatter plus an explicit return_findings call — the tool body must win.
+            opts.onEvent({ kind: "message_delta", text: "thinking out loud, ignore me" });
+            await returnFindings.execute(
+              "return-findings",
+              { body: "# Structured findings" },
+              undefined,
+              undefined,
+              undefined as never,
+            );
+            return { costUsd: 0.02, inputTokens: 50, outputTokens: 20 };
+          }
+          const spawn = opts.customTools?.find((tool) => tool.name === "spawn_plan_agent");
+          if (!spawn) throw new Error("spawn_plan_agent tool not registered");
+          const spawnResult = await spawn.execute(
+            "spawn",
+            {
+              role: "codebase-scout",
+              title: "Scout codebase",
+              lane: "research",
+              instructions: "Find the relevant files.",
+            },
+            undefined,
+            undefined,
+            undefined as never,
+          );
+          spawnResults.push(spawnResult.details);
+          return { costUsd: 0.01, inputTokens: 10, outputTokens: 5 };
+        },
+        async abort() {},
+        async close() {},
+      }),
+      ticketTitle: "Tool preferred",
+      ticketDescription: "Planner should prefer the structured findings body.",
+      claimVerifierState: { attempts: 0, cap: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnResults).toEqual([
+      expect.objectContaining({
+        ok: true,
+        findingsBody: "# Structured findings",
+      }),
+    ]);
+  });
+
+  it("fails dynamic child agents that exit with neither a tool call nor a message", async () => {
     const spawnResults: unknown[] = [];
 
     const result = await runPlan({
@@ -515,7 +656,7 @@ describe("runPlan", () => {
     }
   });
 
-  it("times out a hung claim-verifier launched from mark_ready", async () => {
+  it("allows claim-verifier launched from mark_ready to finish after five minutes", async () => {
     vi.useFakeTimers();
     await appendPlanJsonl([
       { kind: "plan_system", systemKind: "preflight_complete", data: { count: 3 } },
@@ -524,7 +665,7 @@ describe("runPlan", () => {
 
     let claimVerifierAbortCalled = false;
     let markVerifierPromptStarted: (() => void) | undefined;
-    let finishVerifierPrompt: ((usage: { costUsd: number; inputTokens: number; outputTokens: number }) => void) | undefined;
+    let finishVerifierPrompt: ((usage: { costUsd: number; inputTokens: number; outputTokens: number }) => Promise<void>) | undefined;
     const verifierPromptStarted = new Promise<void>((resolve) => {
       markVerifierPromptStarted = resolve;
     });
@@ -552,13 +693,29 @@ describe("runPlan", () => {
           return {
             async prompt() {
               markVerifierPromptStarted?.();
-              return new Promise<{ costUsd: number; inputTokens: number; outputTokens: number }>((resolve) => {
-                finishVerifierPrompt = resolve;
+              return new Promise<{ costUsd: number; inputTokens: number; outputTokens: number }>((resolve, reject) => {
+                finishVerifierPrompt = async (usage) => {
+                  const writeFindingsTool = (opts.customTools ?? []).find(
+                    (tool) => tool.name === "write_findings",
+                  );
+                  if (!writeFindingsTool) {
+                    reject(new Error("write_findings tool not registered"));
+                    return;
+                  }
+                  await writeFindingsTool.execute(
+                    "write-findings",
+                    { body: "FINDING PLAN-1 | Verified | slow verifier finished." },
+                    undefined,
+                    undefined,
+                    undefined as never,
+                  );
+                  resolve(usage);
+                };
               });
             },
             async abort() {
               claimVerifierAbortCalled = true;
-              finishVerifierPrompt?.({ costUsd: 0, inputTokens: 0, outputTokens: 0 });
+              await finishVerifierPrompt?.({ costUsd: 0, inputTokens: 0, outputTokens: 0 });
             },
             async close() {},
           } satisfies AgentSession;
@@ -578,8 +735,7 @@ describe("runPlan", () => {
               undefined as never,
             );
             markReadySettled = true;
-            expect(result.details.ok).toBe(false);
-            expect(result.details.missing).toContain("claim-verifier");
+            expect(result.details.ok).toBe(true);
             return { costUsd: 0, inputTokens: 1, outputTokens: 1 };
           },
           async abort() {},
@@ -594,20 +750,22 @@ describe("runPlan", () => {
 
     try {
       await verifierPromptStarted;
-      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+      await vi.advanceTimersByTimeAsync(6 * 60 * 1000);
+      expect(claimVerifierAbortCalled).toBe(false);
+      await finishVerifierPrompt?.({ costUsd: 2, inputTokens: 10, outputTokens: 5 });
 
       const result = await resultPromise;
       expect(markReadySettled).toBe(true);
-      expect(claimVerifierAbortCalled).toBe(true);
+      expect(claimVerifierAbortCalled).toBe(false);
       expect(result.ok).toBe(true);
-      expect(result.ready).toBe(false);
+      expect(result.ready).toBe(true);
       const planJsonl = await readPlanJsonl();
-      expect(planJsonl).toContain("claim-verifier timed out");
       expect(planJsonl).toContain("\"planner_turn_completed\"");
-      expect(planJsonl).toContain("\"ready\":false");
+      expect(planJsonl).toContain("\"ready\":true");
+      expect(planJsonl).not.toContain("claim-verifier timed out");
     } finally {
       controller.abort();
-      finishVerifierPrompt?.({ costUsd: 0, inputTokens: 0, outputTokens: 0 });
+      await finishVerifierPrompt?.({ costUsd: 0, inputTokens: 0, outputTokens: 0 });
       await resultPromise.catch(() => {});
       vi.useRealTimers();
     }

@@ -109,7 +109,13 @@ html, body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .plan-agent-node-running {
+  .plan-agent-node-running,
+  .modal-enter,
+  .modal-exit,
+  .backdrop-enter,
+  .backdrop-exit,
+  .flash-once,
+  .pulse-dot {
     animation: none;
   }
 }
@@ -163,6 +169,32 @@ html, body {
   -ms-overflow-style: none;
 }
 .scroll-hide::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* Modal enter/exit — opacity + a subtle rise/scale. Transform/opacity only so the
+   canvas page stays at 60fps; reduced-motion no-ops these below. */
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes modal-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+.modal-enter { animation: modal-in 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal-exit  { animation: modal-out 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+@keyframes backdrop-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+.backdrop-enter { animation: backdrop-in 0.16s ease-out; }
+.backdrop-exit  { animation: backdrop-out 0.16s ease-out forwards; }
+
+/* One-shot highlight for content that just arrived live (findings body, new log row,
+   newly selected inspector). Fires once; reduced-motion no-ops it. */
+@keyframes flash-once {
+  0%   { background-color: rgba(94, 106, 210, 0.16); box-shadow: inset 0 0 0 1px rgba(94, 106, 210, 0.32); }
+  100% { background-color: transparent; box-shadow: inset 0 0 0 1px transparent; }
+}
+.flash-once { animation: flash-once 0.9s ease-out; }
 
 .markdown-body > * + * { margin-top: 0.85em; }
 .markdown-body h1,
@@ -405,4 +437,36 @@ html, body {
 .artifact-doc input[type="checkbox"] {
   margin-right: 0.45em;
   vertical-align: middle;
+}
+
+/* Shiki code blocks (components/code-block.tsx). Shiki injects its own theme
+   background inline; we strip it so blocks sit on our own surface, and we own the
+   padding/typography to match the artifact document scale. */
+.artifact-code-body .shiki,
+.artifact-code-body.shiki {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  background: transparent !important;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+.artifact-code-body .shiki code {
+  display: block;
+  min-width: max-content;
+  background: transparent;
+  font-size: inherit;
+}
+
+/* A fenced code block inside rendered markdown shouldn't get the inline-code chip
+   styling or the default .artifact-doc pre frame — CodeBlock owns its own frame. */
+.artifact-doc .artifact-code {
+  margin-block: 1.1rem;
+}
+.artifact-doc .artifact-code code {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
 }

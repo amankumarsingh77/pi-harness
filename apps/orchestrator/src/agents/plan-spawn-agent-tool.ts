@@ -181,6 +181,10 @@ async function runSpawnedPlanAgent(args: {
   let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let ok = false;
   let error: string | undefined;
+  // Accumulate the child's streamed assistant text so we can fall back to it as the
+  // findings body when the child finishes without calling return_findings.
+  const assistantText: string[] = [];
+  let findingsBody: string | null = null;
   const publishUsage = createNodeUsageForwarder({
     bus: args.bus,
     nodeId: args.nodeId,
@@ -205,20 +209,24 @@ async function runSpawnedPlanAgent(args: {
       })}\n`,
       tools: toolNames,
       customTools,
-      onEvent: (event) => forwardChildEvent({
-        eventStore: args.eventStore,
-        runId: args.runId,
-        taskId: args.taskId,
-        nodeId: args.nodeId,
-        event,
-        publishUsage,
-      }),
+      onEvent: (event) => {
+        if (event.kind === "message_delta") assistantText.push(event.text);
+        forwardChildEvent({
+          eventStore: args.eventStore,
+          runId: args.runId,
+          taskId: args.taskId,
+          nodeId: args.nodeId,
+          event,
+          publishUsage,
+        });
+      },
     };
     session = args.sessionFactory
       ? await args.sessionFactory.open({ kind: "plan-child", nodeId: args.nodeId }, sessionOpts)
       : await args.createAgentSession(sessionOpts);
     usage = await session.prompt(prompt);
-    if (findingsState.body === null) {
+    findingsBody = resolveFindingsBody(findingsState.body, assistantText.join(""));
+    if (findingsBody === null) {
       throw new Error("child agent completed without returning findings");
     }
     ok = true;
@@ -247,7 +255,7 @@ async function runSpawnedPlanAgent(args: {
     };
   }
 
-  const findingsBody = findingsState.body;
+  // ok === true guarantees findingsBody was resolved above; this narrows the type.
   if (findingsBody === null) {
     return {
       content: [{ type: "text", text: "child agent completed without returning findings" }],
@@ -391,6 +399,14 @@ function sameUsage(left: NodeUsage, right: NodeUsage): boolean {
   );
 }
 
+// Prefer the structured return_findings body; fall back to the child's final assistant
+// message. Returns null only when BOTH are empty.
+function resolveFindingsBody(returned: string | null, message: string): string | null {
+  if (returned !== null && returned.trim().length > 0) return returned;
+  const trimmed = message.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function childPrompt(args: {
   readonly taskId: string;
   readonly nodeId: string;
@@ -399,7 +415,7 @@ function childPrompt(args: {
   return [
     `You are a dynamically spawned plan child agent for task ${args.taskId}.`,
     `Node id: ${args.nodeId}.`,
-    "Return findings directly to the parent planner with return_findings. Do not write a findings artifact.",
+    "Return findings to the parent planner by calling return_findings (preferred). If you instead end with your findings as your final message, that will be used. Do not write a findings artifact.",
     "",
     "# Scoped assignment",
     "",

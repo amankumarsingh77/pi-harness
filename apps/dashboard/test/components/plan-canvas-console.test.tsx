@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { AgentEvent, Artifact, PlanAgentGraph, PlanAgentGraphNode, Run, Task } from "@pi-harness/shared";
 import { PlanCanvasConsole } from "@/components/plan/plan-canvas-console";
@@ -13,6 +13,14 @@ vi.mock("@/app/tasks/[id]/plan/actions", () => ({
 
 vi.mock("@/app/tasks/[id]/actions", () => ({
   cancelCurrentPhaseAction: vi.fn(),
+}));
+
+// Shiki is async + heavy; mock it so CodeBlock highlighting resolves synchronously to a
+// deterministic, escaped string in tests.
+vi.mock("@/lib/shiki", () => ({
+  normalizeLang: (lang: string) => lang,
+  highlightToHtml: (code: string) =>
+    Promise.resolve(`<pre class="shiki"><code>${code.replace(/</g, "&lt;")}</code></pre>`),
 }));
 
 vi.mock("@xyflow/react", () => ({
@@ -104,6 +112,80 @@ describe("PlanCanvasConsole", () => {
     expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled();
   });
 
+  it("keeps agent details out of the default page until an agent is opened", () => {
+    renderCanvas();
+
+    expect(screen.queryByRole("dialog", { name: /agent dossier/i })).toBeNull();
+    expect(screen.queryByText("agent info")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
+
+    expect(screen.getByRole("dialog", { name: /agent dossier/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Scout codebase" })).toBeInTheDocument();
+  });
+
+  it("opens generated planning artifacts from a header action", () => {
+    renderCanvas();
+
+    fireEvent.click(screen.getByRole("button", { name: /Artifacts 2/ }));
+
+    const dialog = screen.getByRole("dialog", { name: /planning artifacts/i });
+    expect(within(dialog).getByRole("heading", { name: "Planning artifacts" })).toBeInTheDocument();
+    const artifactFiles = within(dialog).getByRole("navigation", { name: /artifact files/i });
+    expect(within(artifactFiles).getByRole("tab", { name: /plan.md/ })).toHaveAttribute("aria-selected", "true");
+    expect(within(artifactFiles).getByRole("tab", { name: /execution-dag.yaml/ })).toBeInTheDocument();
+    // Document header for the selected file: filename + copy utility + rendered heading.
+    expect(within(dialog).getByRole("button", { name: /copy document/i })).toBeInTheDocument();
+    expect(within(dialog).getByText("Plan")).toBeInTheDocument();
+  });
+
+  it("renders artifact code fences through a labelled, copyable code block", async () => {
+    renderCanvas({
+      plan: artifact(
+        "plan",
+        "## Phase DAG\n\n```dot\ndigraph { A -> B; }\n```\n",
+      ),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Artifacts 2/ }));
+
+    const dialog = screen.getByRole("dialog", { name: /planning artifacts/i });
+    // Fence language label is shown, and the block exposes a copy affordance.
+    expect(within(dialog).getByText("dot")).toBeInTheDocument();
+    expect(await within(dialog).findByRole("button", { name: /copy code/i })).toBeInTheDocument();
+  });
+
+  it("renders yaml artifacts through the highlighted code block, not a raw pre", () => {
+    renderCanvas();
+
+    fireEvent.click(screen.getByRole("button", { name: /Artifacts 2/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /scenarios.yaml/ }));
+
+    const dialog = screen.getByRole("dialog", { name: /planning artifacts/i });
+    expect(within(dialog).getByText("yaml")).toBeInTheDocument();
+  });
+
+  it("toggles a markdown artifact between rendered and raw source", () => {
+    renderCanvas();
+
+    fireEvent.click(screen.getByRole("button", { name: /Artifacts 2/ }));
+
+    const dialog = screen.getByRole("dialog", { name: /planning artifacts/i });
+    const rawToggle = within(dialog).getByRole("button", { name: "Raw" });
+    fireEvent.click(rawToggle);
+
+    expect(within(dialog).getByRole("button", { name: "Rendered" })).toBeInTheDocument();
+  });
+
+  it("shows missing artifact states inside the artifact workspace", () => {
+    renderCanvas();
+
+    fireEvent.click(screen.getByRole("button", { name: /Artifacts 2/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /execution-dag.yaml/ }));
+
+    expect(screen.getByText("execution-dag.yaml has not been generated yet")).toBeInTheDocument();
+  });
+
   it("hides scrollbars in expanded live log details", () => {
     renderCanvas({
       liveEvents: [
@@ -113,7 +195,7 @@ describe("PlanCanvasConsole", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
-    fireEvent.click(screen.getByRole("button", { name: "logs" }));
+    fireEvent.click(screen.getByRole("tab", { name: "logs" }));
     fireEvent.click(screen.getByRole("button", { name: /read package.json/ }));
 
     expect(screen.getByTestId("expanded-log-details")).toHaveClass("scroll-hide");
@@ -138,7 +220,7 @@ describe("PlanCanvasConsole", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
-    fireEvent.click(screen.getByRole("button", { name: "artifacts" }));
+    fireEvent.click(screen.getByRole("tab", { name: "findings" }));
 
     expect(screen.getByText("returned findings")).toBeInTheDocument();
     expect(screen.getByText(/Pattern: apps\/orchestrator\/src\/agents\/plan\.ts:152/)).toBeInTheDocument();
@@ -177,13 +259,64 @@ describe("PlanCanvasConsole", () => {
     expect(screen.getAllByText("research").length).toBeGreaterThan(0);
     expect(screen.getByText("depends on")).toBeInTheDocument();
     expect(screen.getAllByText("planner").length).toBeGreaterThan(0);
-    expect(screen.getByText("prompt sent")).toBeInTheDocument();
-    expect(screen.getByText(/Find the relevant files\./)).toBeInTheDocument();
     expect(screen.getByText("execution")).toBeInTheDocument();
     expect(screen.getByText("crofai/kimi-k2.6")).toBeInTheDocument();
     expect(screen.getByText("session-1")).toBeInTheDocument();
-    expect(screen.getByText("tools")).toBeInTheDocument();
+    expect(screen.getAllByText("tools").length).toBeGreaterThan(0);
     expect(screen.getByText("read")).toBeInTheDocument();
+    expect(screen.queryByText(/Find the relevant files\./)).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "prompt" }));
+
+    expect(screen.getByText("prompt sent")).toBeInTheDocument();
+    expect(screen.getByText(/Find the relevant files\./)).toBeInTheDocument();
+  });
+
+  it("gates the revision Send button behind a minimum-length comment", () => {
+    renderCanvas({ gate: "awaiting_user" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Request changes/ }));
+
+    const send = screen.getByRole("button", { name: /Send revision/ });
+    expect(send).toBeDisabled();
+    expect(screen.getByText(/more chars? to send/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("What should change?"), {
+      target: { value: "tighten the error handling here" },
+    });
+
+    expect(send).toBeEnabled();
+    expect(screen.queryByText(/more chars? to send/)).toBeNull();
+    expect(screen.getByText("⌘↵ to send")).toBeInTheDocument();
+  });
+
+  it("shows a pending label on Approve while the action is in flight", async () => {
+    const { approvePlan } = await import("@/app/tasks/[id]/plan/actions");
+    let resolveApprove: () => void = () => {};
+    vi.mocked(approvePlan).mockImplementation(
+      () => new Promise<void>((resolve) => { resolveApprove = resolve; }),
+    );
+
+    renderCanvas({ gate: "awaiting_user" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByRole("button", { name: /Approving/ })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveApprove();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
+  it("marks live agent metrics with a pulsing affordance while running", () => {
+    renderCanvas();
+
+    fireEvent.click(screen.getByRole("button", { name: /Scout codebase/ }));
+
+    const costTile = screen.getByText("cost so far").closest("div");
+    expect(costTile?.querySelector(".pulse-dot")).not.toBeNull();
   });
 });
 
@@ -194,17 +327,19 @@ function renderCanvas(
     readonly agentGraph?: PlanAgentGraph;
     readonly taskStatus?: Task["status"];
     readonly runStatus?: Run["status"];
+    readonly gate?: "running" | "awaiting_user";
+    readonly plan?: Artifact | null;
   } = {},
 ) {
   return render(
     <PlanCanvasConsole
       task={{ ...task, status: opts.taskStatus ?? task.status }}
       runs={[{ ...run, status: opts.runStatus ?? run.status }]}
-      gate="running"
+      gate={opts.gate ?? "running"}
       headerStatus="in progress"
       iconKind="progress"
       canCancelRun={false}
-      plan={artifact("plan", "## Plan")}
+      plan={opts.plan !== undefined ? opts.plan : artifact("plan", "## Plan")}
       phasePlans={[]}
       blastRadius={null}
       scenarios={artifact("scenarios", "scenarios: []")}
